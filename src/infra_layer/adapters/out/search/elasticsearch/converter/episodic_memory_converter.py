@@ -84,9 +84,6 @@ class EpisodicMemoryConverter(BaseEsConverter[EpisodicMemoryDoc]):
                 linked_entities=getattr(source_doc, 'linked_entities', None),
                 # MongoDB-specific fields
                 subject=getattr(source_doc, 'subject', None),
-                memcell_event_id_list=getattr(
-                    source_doc, 'memcell_event_id_list', None
-                ),
                 # Parent info
                 parent_type=getattr(source_doc, 'parent_type', None),
                 parent_id=getattr(source_doc, 'parent_id', None),

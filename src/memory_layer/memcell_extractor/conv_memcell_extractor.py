@@ -175,6 +175,67 @@ class ConvMemCellExtractor(MemCellExtractor):
 
         return list(participant_ids)
 
+    def _create_memcell_directly(
+        self,
+        messages: List[Dict[str, Any]],
+        request: ConversationMemCellExtractRequest,
+        trigger_type: str,  # 'token_limit', 'message_limit', 'flush'
+    ) -> Tuple[Optional[MemCell], StatusResult]:
+        """
+        Create MemCell directly without boundary detection.
+
+        Used for force_split and flush modes where we skip LLM boundary detection.
+
+        Args:
+            messages: List of messages to include in the MemCell
+            request: The extraction request
+            trigger_type: Type of trigger ('token_limit', 'message_limit', 'flush')
+
+        Returns:
+            Tuple of (MemCell, StatusResult) or (None, StatusResult) if no messages
+        """
+        if not messages:
+            logger.warning(
+                f"[ConvMemCellExtractor] _create_memcell_directly called with no messages"
+            )
+            return (None, StatusResult(should_wait=True))
+
+        # Parse timestamp from last message
+        ts_value = messages[-1].get("timestamp")
+        timestamp = dt_from_iso_format(ts_value)
+        participants = self._extract_participant_ids(messages)
+
+        memcell = MemCell(
+            user_id_list=request.user_id_list,
+            original_data=messages,
+            timestamp=timestamp,
+            summary="",  # Empty summary, will be filled by episode extractor
+            group_id=request.group_id,
+            participants=participants,
+            type=self.raw_data_type,
+        )
+
+        # Record metrics
+        result_type = 'flush' if trigger_type == 'flush' else 'force_split'
+        record_boundary_detection(
+            space_id=get_space_id_for_metrics(),
+            raw_data_type=self.raw_data_type.value,
+            result=result_type,
+            trigger_type=trigger_type,
+        )
+        record_memcell_extracted(
+            space_id=get_space_id_for_metrics(),
+            raw_data_type=self.raw_data_type.value,
+            trigger_type=trigger_type,
+        )
+
+        logger.info(
+            f"[ConvMemCellExtractor] ✅ {result_type.replace('_', ' ').title()} MemCell created: "
+            f"messages={len(messages)}, trigger={trigger_type}"
+        )
+
+        return (memcell, StatusResult(should_wait=False))
+
     def _format_conversation_dicts(
         self, messages: list[dict[str, str]], include_timestamps: bool = False
     ) -> str:
@@ -276,6 +337,16 @@ class ConvMemCellExtractor(MemCellExtractor):
         except (ValueError, KeyError, AttributeError) as e:
             return f"Time gap calculation error: {str(e)}"
 
+    def _filter_for_boundary_detection(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Filter messages before sending to boundary detection prompt.
+
+        Override in subclasses to customize filtering (e.g., remove tool messages).
+        Default: return messages as-is.
+        """
+        return messages
+
     async def _detect_boundary(
         self,
         conversation_history: list[dict[str, str]],
@@ -289,11 +360,16 @@ class ConvMemCellExtractor(MemCellExtractor):
                 confidence=1.0,
                 topic_summary="",
             )
+
+        # Filter messages for boundary detection prompt (subclass hook)
+        history_filtered = self._filter_for_boundary_detection(conversation_history)
+        new_filtered = self._filter_for_boundary_detection(new_messages)
+
         history_text = self._format_conversation_dicts(
-            conversation_history, include_timestamps=True
+            history_filtered, include_timestamps=True
         )
         new_text = self._format_conversation_dicts(
-            new_messages, include_timestamps=True
+            new_filtered, include_timestamps=True
         )
         time_gap_info = self._calculate_time_gap(conversation_history, new_messages)
 
@@ -325,7 +401,9 @@ class ConvMemCellExtractor(MemCellExtractor):
                         topic_summary=data.get("topic_summary", ""),
                     )
                     # Record success metrics
-                    detection_result = 'should_end' if result.should_end else 'should_wait'
+                    detection_result = (
+                        'should_end' if result.should_end else 'should_wait'
+                    )
                     record_boundary_detection(
                         space_id=get_space_id_for_metrics(),
                         raw_data_type=self.raw_data_type.value,
@@ -345,18 +423,10 @@ class ConvMemCellExtractor(MemCellExtractor):
                 )
                 continue
 
-        # All retries exhausted, return default result
-        logger.error(
-            f"[ConversationEpisodeBuilder] All 5 retries exhausted for boundary detection, returning default (should_end=False)"
-        )
-  
-        return BoundaryDetectionResult(
-            should_end=False,
-            should_wait=True,
-            reasoning="All retries exhausted - failed to parse LLM response",
-            confidence=0.0,
-            topic_summary="",
-        )
+        # All retries exhausted, raise error to interrupt the flow
+        error_msg = "[ConversationEpisodeBuilder] All 5 retries exhausted for boundary detection"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
     async def extract_memcell(
         self, request: ConversationMemCellExtractRequest
@@ -424,60 +494,34 @@ class ConvMemCellExtractor(MemCellExtractor):
             or total_messages >= self.hard_message_limit
         )
 
-        if needs_force_split and len(history_message_dict_list) >= 2:
-            # Force split: create MemCell from history, new message starts next accumulation
-            trigger_type = 'token_limit' if total_tokens >= self.hard_token_limit else 'message_limit'
-            
+        # === Force split: create MemCell from history, new message starts next accumulation ===
+        # Condition relaxed from >= 2 to >= 1: even a single long message in history can be split
+        if needs_force_split and len(history_message_dict_list) >= 1:
+            trigger_type = (
+                'token_limit'
+                if total_tokens >= self.hard_token_limit
+                else 'message_limit'
+            )
             logger.debug(
                 f"[ConvMemCellExtractor] Force split triggered: "
                 f"tokens={total_tokens}/{self.hard_token_limit}, "
                 f"messages={total_messages}/{self.hard_message_limit}"
             )
-
-            # Parse timestamp from last history message
-            ts_value = history_message_dict_list[-1].get("timestamp")
-            timestamp = dt_from_iso_format(ts_value)
-            participants = self._extract_participant_ids(history_message_dict_list)
-
-            memcell = MemCell(
-                user_id_list=request.user_id_list,
-                original_data=history_message_dict_list,
-                timestamp=timestamp,
-                summary="",  # Empty summary for force split, will be filled by episode extractor
-                group_id=request.group_id,
-                participants=participants,
-                type=self.raw_data_type,
+            return self._create_memcell_directly(
+                history_message_dict_list, request, trigger_type
             )
-
-            # Record force split metrics
-            record_boundary_detection(
-                space_id=get_space_id_for_metrics(),
-                raw_data_type=self.raw_data_type.value,
-                result='force_split',
-                trigger_type=trigger_type,
-            )
-            record_memcell_extracted(
-                space_id=get_space_id_for_metrics(),
-                raw_data_type=self.raw_data_type.value,
-                trigger_type=trigger_type,
-            )
-
-            logger.debug(
-                f"✅ Force split MemCell created: event_id={memcell.event_id}, "
-                f"messages={len(history_message_dict_list)}, tokens={accumulated_tokens}"
-            )
-
-            return (memcell, StatusResult(should_wait=False))
 
         elif needs_force_split:
-            # Needs split but not enough messages (single long message case)
-            # Don't split, just log warning and continue normal flow
+            # Needs split but history is empty (first message is super long)
+            # Can't split yet, wait for this message to become history
             logger.debug(
-                f"[ConvMemCellExtractor] Exceeds limits but only {len(history_message_dict_list)} history messages, "
-                f"not splitting single message. tokens={total_tokens}, messages={total_messages}"
+                f"[ConvMemCellExtractor] Exceeds limits but no history messages, "
+                f"waiting for next message. tokens={total_tokens}, messages={total_messages}"
             )
 
-        # === Normal LLM-based boundary detection ===
+        # === LLM-based boundary detection ===
+        # Note: flush=True no longer skips boundary detection.
+        # Instead, we run LLM first, then decide based on result + flush:
         if request.smart_mask_flag:
             boundary_detection_result = await self._detect_boundary(
                 conversation_history=history_message_dict_list[:-1],
@@ -536,9 +580,26 @@ class ConvMemCellExtractor(MemCellExtractor):
             )
 
             return (memcell, status_control_result)
-        elif should_wait:
-            logger.debug(f"⏳ Waiting for more messages: {reason}")
-        return (None, status_control_result)
+        else:
+            # LLM says no boundary (should_end=False)
+            if request.flush:
+                # But flush=True requires cutting after new message
+                # So pack history + new together into one MemCell
+                all_messages = history_message_dict_list + new_message_dict_list
+                if all_messages:
+                    logger.info(
+                        f"[ConvMemCellExtractor] Flush mode (should_end=False): "
+                        f"packing history + new into one MemCell ({len(all_messages)} messages)"
+                    )
+                    return self._create_memcell_directly(all_messages, request, 'flush')
+                else:
+                    logger.warning(
+                        f"[ConvMemCellExtractor] Flush mode but no messages to process"
+                    )
+                    return (None, StatusResult(should_wait=True))
+            elif should_wait:
+                logger.debug(f"⏳ Waiting for more messages: {reason}")
+            return (None, status_control_result)
 
     def _data_process(self, raw_data: RawData) -> Dict[str, Any]:
         """Process raw data, including message type filtering and preprocessing"""

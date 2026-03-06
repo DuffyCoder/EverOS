@@ -23,8 +23,8 @@ class VllmRerankConfig:
     api_key: str = "EMPTY"
     base_url: str = "http://localhost:12000/v1/rerank"
     model: str = "Qwen/Qwen3-Reranker-4B"  # skip-sensitive-check
-    timeout: int = 30
-    max_retries: int = 3
+    timeout: int = 3
+    max_retries: int = 2
     batch_size: int = 10
     max_concurrent_requests: int = 5
 
@@ -123,7 +123,7 @@ class VllmRerankService(RerankServiceInterface):
                                 )
                 except asyncio.TimeoutError:
                     logger.warning(
-                        f"vLLM rerank timeout (attempt {attempt + 1}/{self.config.max_retries})"
+                        f"vLLM rerank timeout (attempt {attempt + 1}/{self.config.max_retries}), timeout={self.config.timeout}s"
                     )
                     if attempt < self.config.max_retries - 1:
                         await asyncio.sleep(2**attempt)
@@ -331,11 +331,8 @@ class VllmRerankService(RerankServiceInterface):
 
         except Exception as e:
             logger.error(f"Error in rerank_memories: {e}")
-            # If reranking fails, return original results (sorted by original score)
-            sorted_hits = sorted(hits, key=lambda x: x.get('score', 0), reverse=True)
-            if top_k is not None and top_k > 0:
-                sorted_hits = sorted_hits[:top_k]
-            return sorted_hits
+            # Re-raise exception to allow HybridRerankService fallback
+            raise
 
     def get_model_name(self) -> str:
         """Get the current model name"""

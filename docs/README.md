@@ -6,7 +6,6 @@ Welcome to the EverMemOS documentation! This page serves as a comprehensive inde
 
 ## Getting Started
 
-- **[Competition Starter Kit](STARTER_KIT.md)** - Quick start guide with code examples for all competition tracks
 - **[Overview & Vision](OVERVIEW.md)** - Learn about EverMemOS's vision, unique advantages, and core concepts
 - **[Quick Setup Guide](installation/SETUP.md)** - Complete installation and configuration instructions
 - **[Basic Usage Examples](usage/USAGE_EXAMPLES.md)** - Get started with common usage patterns
@@ -60,6 +59,8 @@ Welcome to the EverMemOS documentation! This page serves as a comprehensive inde
 ## Contributing
 
 - **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to EverMemOS
+- **[Bug Report Template](ISSUE_TEMPLATE_BUG.md)** - Report bugs
+- **[Feature Request Template](ISSUE_TEMPLATE_FEATURE.md)** - Suggest new features
 
 ## Additional Resources
 

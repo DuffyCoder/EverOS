@@ -26,10 +26,13 @@ def load_conversation_data(file_path: str) -> tuple:
     group_id = conversation_meta.get('group_id', 'unknown_group')
     group_name = conversation_meta.get('name', 'unknown')
 
-    # Add group_id and group_name to each message
+    # Add group_id and group_name to each message (preserve if already set)
     for msg in messages:
-        msg['group_id'] = group_id
-        msg['group_name'] = group_name
+        if not msg.get('group_id'):
+            msg['group_id'] = group_id
+        if not msg.get('group_name'):
+            msg['group_name'] = group_name
+        msg['sync'] = False
 
     print(f"Loaded {len(messages)} messages from {file_path}")
     print(f"group_id: {group_id}")
@@ -91,7 +94,7 @@ async def upsert_conversation_meta(
         "tags": conversation_meta.get("tags", []),
     }
 
-    url = f"{base_url}/api/v1/memories/conversation-meta"
+    url = f"{base_url}/api/v0/memories/conversation-meta"
     resp = await client.post(
         url, json=payload, headers={"Content-Type": "application/json"}
     )
@@ -145,7 +148,7 @@ async def test_memorize_api():
         await clear_all_memories()
 
     base_url = "http://localhost:1995"
-    memorize_url = f"{base_url}/api/v1/memories"
+    memorize_url = f"{base_url}/api/v0/memories?sync_mode=false"
 
     print("=" * 100)
     print("🧪 Testing V1 API HTTP Interface - Memory Storage")
@@ -171,7 +174,6 @@ async def test_memorize_api():
             data_file = "data/assistant_chat_en.json"
         else:
             data_file = "data/group_chat_en.json"
-        # data_file = "data/group_chat_en.json"
     try:
         test_messages, group_id, group_name, conversation_meta = load_conversation_data(
             data_file
@@ -225,14 +227,12 @@ async def test_memorize_api():
                     if status_info == "accumulated":
                         total_accumulated += 1
                         print(f"   ⏳ Queued")
-                    elif status_info == "processing":
+                    elif status_info == "extracted":
                         total_processing += 1
-                        request_id = result.get("result", {}).get("request_id", "")
-                        print(f"   🔄 Processing (request_id: {request_id[:8]}...)")
+                        print(f"   ✅ Extracted {saved_count} memories")
                     else:
-                        # Compatible with old versions or other statuses
-                        total_accumulated += 1
-                        print(f"   ⏳ Queued")
+                        print(f"   ✗ Unexpected status_info: {status_info}")
+                        print(f"      Response: {response.text}")
                 elif response.status_code == 202:
                     result = response.json()
                     total_processing += 1

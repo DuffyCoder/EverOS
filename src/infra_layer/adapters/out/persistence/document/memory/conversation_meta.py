@@ -28,6 +28,154 @@ class UserDetailModel(BaseModel):
     )
 
 
+class LlmProviderConfigModel(BaseModel):
+    """LLM provider configuration model
+
+    Defines the provider and model for a specific LLM task
+    """
+
+    provider: str = Field(
+        ..., description="LLM provider name, e.g.: openai, openrouter."
+    )
+    model: str = Field(
+        ...,
+        description="Model name, e.g.: qwen/qwen3-235b-a22b-2507(openrouter), gpt-4.1-mini(openai), etc.",
+    )
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional provider-specific configuration"
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict representation"""
+        result = {"provider": self.provider, "model": self.model}
+        if self.extra:
+            result["extra"] = self.extra
+        return result
+
+    @classmethod
+    def from_any(cls, data: Any) -> Optional["LlmProviderConfigModel"]:
+        """
+        Create from dict or DTO object
+
+        Args:
+            data: dict, DTO object, or None
+
+        Returns:
+            LlmProviderConfigModel or None
+        """
+        if data is None:
+            return None
+
+        if isinstance(data, cls):
+            return data
+
+        if isinstance(data, dict):
+            return cls(
+                provider=data.get("provider", ""),
+                model=data.get("model", ""),
+                extra=data.get("extra"),
+            )
+
+        # Handle DTO object
+        if hasattr(data, "provider") and hasattr(data, "model"):
+            return cls(
+                provider=data.provider,
+                model=data.model,
+                extra=getattr(data, "extra", None),
+            )
+
+        return None
+
+
+class LlmCustomSettingModel(BaseModel):
+    """LLM custom settings model for algorithm control
+
+    Allows configuring different LLM providers/models for different tasks.
+    Only applicable to global config (group_id=null).
+
+    Example:
+        {
+            "boundary": {"provider": "openai", "model": "gpt-4.1-mini"},
+            "extraction": {"provider": "openrouter", "model": "qwen/qwen3-235b-a22b-2507"}
+        }
+    """
+
+    boundary: Optional[LlmProviderConfigModel] = Field(
+        default=None,
+        description="LLM config for boundary detection (fast, cheap model recommended)",
+    )
+    extraction: Optional[LlmProviderConfigModel] = Field(
+        default=None,
+        description="LLM config for memory extraction (high quality model recommended)",
+    )
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional task-specific LLM configurations"
+    )
+
+    def to_dict(self) -> Optional[Dict[str, Any]]:
+        """
+        Convert to dict representation for response
+
+        Returns:
+            Dict representation or None if empty
+        """
+        result: Dict[str, Any] = {}
+
+        if self.boundary:
+            result["boundary"] = self.boundary.to_dict()
+
+        if self.extraction:
+            result["extraction"] = self.extraction.to_dict()
+
+        if self.extra:
+            result["extra"] = self.extra
+
+        return result if result else None
+
+    @classmethod
+    def from_any(cls, data: Any) -> Optional["LlmCustomSettingModel"]:
+        """
+        Create from dict or DTO object
+
+        Args:
+            data: dict, DTO object, or None
+
+        Returns:
+            LlmCustomSettingModel or None
+        """
+        if data is None:
+            return None
+
+        if isinstance(data, cls):
+            return data
+
+        # Handle dict input
+        if isinstance(data, dict):
+            boundary = LlmProviderConfigModel.from_any(data.get("boundary"))
+            extraction = LlmProviderConfigModel.from_any(data.get("extraction"))
+            extra = data.get("extra")
+
+            if boundary is None and extraction is None and extra is None:
+                return None
+
+            return cls(boundary=boundary, extraction=extraction, extra=extra)
+
+        # Handle DTO object
+        if hasattr(data, "boundary") or hasattr(data, "extraction"):
+            boundary = LlmProviderConfigModel.from_any(getattr(data, "boundary", None))
+            extraction = LlmProviderConfigModel.from_any(
+                getattr(data, "extraction", None)
+            )
+            extra = getattr(data, "extra", None)
+
+            if boundary is None and extraction is None and extra is None:
+                return None
+
+            return cls(boundary=boundary, extraction=extraction, extra=extra)
+
+        return None
+
+
 class ConversationMeta(DocumentBase, AuditBase):
     """
     Conversation metadata document model
@@ -36,18 +184,24 @@ class ConversationMeta(DocumentBase, AuditBase):
     Used for context management and memory retrieval in multi-turn conversations.
     """
 
-    # Scene information
-    scene: str = Field(
-        ...,
-        description="Scene identifier, used to distinguish different application scenarios",
+    # Scene information (Global config only)
+    scene: Optional[str] = Field(
+        default=None,
+        description="Scene identifier, used to distinguish different application scenarios. Only for global config.",
     )
     scene_desc: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Scene description information, typically containing fields like description",
+        description="Scene description information. Only for global config.",
+    )
+    llm_custom_setting: Optional[LlmCustomSettingModel] = Field(
+        default=None,
+        description="LLM custom settings for algorithm control. Only for global config.",
     )
 
-    # Conversation basic information
-    name: str = Field(..., description="Conversation name")
+    # Conversation basic information (Group config only)
+    name: Optional[str] = Field(
+        default=None, description="Conversation/group name. Only for group config."
+    )
     description: Optional[str] = Field(
         default=None, description="Conversation description"
     )

@@ -68,7 +68,8 @@
 | `subject` | Title |
 | `summary` | Short summary |
 | `episode` | Full narrative |
-| `memcell_event_id_list` | Source MemCell IDs |
+| `parent_type` | Parent memory type (memcell) |
+| `parent_id` | Parent memory ID |
 
 **Business Purpose**:
 - Human-readable understanding for assistants

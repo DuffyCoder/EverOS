@@ -2,8 +2,8 @@
 EverMemOS HTTP Memory API adapter (evaluation side).
 
 This adapter talks to EverMemOS server endpoints:
-- POST   /api/v1/memories         (ingest single message)
-- GET    /api/v1/memories/search  (retrieve memories)
+- POST   /api/v0/memories         (ingest single message)
+- GET    /api/v0/memories/search  (retrieve memories)
 
 Note:
 - This file was missing in the current workspace; registry.py still references it as
@@ -82,9 +82,9 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
     @staticmethod
     def _normalize_memories_url(base_url: str) -> str:
         url = (base_url or "").rstrip("/")
-        if url.endswith("/api/v1/memories"):
+        if url.endswith("/api/v0/memories"):
             return url
-        return url + "/api/v1/memories"
+        return url + "/api/v0/memories"
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -158,7 +158,8 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
                     "group_name": conv_id,
                     "message_id": str(message_id),
                     "create_time": to_iso_format(msg.timestamp),
-                    "sender": msg.speaker_id or self._speaker_to_user_id(conv_id, msg.speaker_name),
+                    "sender": msg.speaker_id
+                    or self._speaker_to_user_id(conv_id, msg.speaker_name),
                     "sender_name": msg.speaker_name,
                     "content": msg.content,
                     "refer_list": msg.metadata.get("refer_list") or [],
@@ -168,7 +169,10 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
 
     def _get_answer_prompt(self) -> str:
         """Use EverMemOS CoT answer prompt (same as evermemos adapter)."""
-        from evaluation.src.adapters.evermemos.prompts.answer_prompts import ANSWER_PROMPT
+        from evaluation.src.adapters.evermemos.prompts.answer_prompts import (
+            ANSWER_PROMPT,
+        )
+
         return ANSWER_PROMPT
 
     # --- required abstract methods (OnlineAPIAdapter hooks) ---
@@ -229,7 +233,7 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
 
         if scope == "group":
             params["group_id"] = conversation_id
-            params["user_id"] = ""  # Empty string to filter duplicate memories
+            params["user_id"] = ""
         else:
             params["user_id"] = user_id
 
@@ -323,7 +327,15 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
         **kwargs: Any,
     ) -> SearchResult:
         # Not used (we force single perspective), but keep minimal implementation to satisfy ABC.
-        del all_results, results_a, results_b, speaker_a, speaker_b, speaker_b_user_id, kwargs
+        del (
+            all_results,
+            results_a,
+            results_b,
+            speaker_a,
+            speaker_b,
+            speaker_b_user_id,
+            kwargs,
+        )
         return self._build_single_search_result(
             query=query,
             conversation_id=conversation_id,
@@ -331,5 +343,3 @@ class EverMemOSAPIAdapter(OnlineAPIAdapter):
             user_id=speaker_a_user_id,
             top_k=top_k,
         )
-
-

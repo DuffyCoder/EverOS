@@ -95,9 +95,9 @@ class SimpleMemoryManager:
         self.group_id = group_id
         self.group_name = "Simple Demo Group"
         self.scene = scene
-        self.memorize_url = f"{base_url}/api/v1/memories"
-        self.retrieve_url = f"{base_url}/api/v1/memories/search"
-        self.conversation_meta_url = f"{base_url}/api/v1/memories/conversation-meta"
+        self.memorize_url = f"{base_url}/api/v0/memories"
+        self.retrieve_url = f"{base_url}/api/v0/memories/search"
+        self.conversation_meta_url = f"{base_url}/api/v0/memories/conversation-meta"
         self._message_counter = 0
         self._conversation_meta_saved = (
             False  # Flag to indicate if conversation-meta is saved
@@ -162,9 +162,7 @@ class SimpleMemoryManager:
 
         except httpx.ConnectError:
             print(f"  ❌ Cannot connect to API server ({self.base_url})")
-            print(
-                f"     Please start first: uv run python src/run.py"
-            )
+            print(f"     Please start first: uv run python src/run.py")
             return False
         except Exception as e:
             print(f"  ❌ Storage failed: {e}")
@@ -274,7 +272,7 @@ class SimpleMemoryManager:
                     raw_memories = result.get("result", {}).get("memories", [])
                     metadata = result.get("result", {}).get("metadata", {})
                     latency = metadata.get("total_latency_ms", 0)
-                    
+
                     # Flatten grouped memories to flat list
                     memories = []
                     for group_dict in raw_memories:

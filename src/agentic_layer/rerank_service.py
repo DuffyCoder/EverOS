@@ -51,17 +51,19 @@ class HybridRerankConfig:
     model: str = "Qwen/Qwen3-Reranker-4B"
 
     # Common settings
-    timeout: int = 30
-    max_retries: int = 3
+    timeout: int = 3
+    max_retries: int = 2
     batch_size: int = 10
     max_concurrent_requests: int = 5
 
     # Fallback behavior
     enable_fallback: bool = True
     max_primary_failures: int = 3
+    failure_reset_interval: int = 300  # Reset failure count after 5 minutes
 
     # Runtime state (failure tracking)
     _primary_failure_count: int = field(default=0, init=False, repr=False)
+    _last_failure_time: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self):
         """Load hybrid service configuration from environment"""
@@ -109,6 +111,9 @@ class HybridRerankConfig:
         )
         self.max_primary_failures = int(
             os.getenv("RERANK_MAX_PRIMARY_FAILURES", str(self.max_primary_failures))
+        )
+        self.failure_reset_interval = int(
+            os.getenv("RERANK_FAILURE_RESET_INTERVAL", str(self.failure_reset_interval))
         )
 
 
@@ -331,6 +336,55 @@ class HybridRerankService(RerankServiceInterface):
         Raises:
             RerankError: If both services fail
         """
+        # Check if failure count should be reset (timeout expired)
+        current_time = time.time()
+        if (
+            self.config._last_failure_time > 0
+            and current_time - self.config._last_failure_time > self.config.failure_reset_interval
+        ):
+            logger.info(
+                f"🔄 Resetting failure count ({self.config._primary_failure_count}) after "
+                f"{int(current_time - self.config._last_failure_time)}s of no failures"
+            )
+            self.config._primary_failure_count = 0
+            self.config._last_failure_time = 0.0
+        
+        # Check if primary service should be skipped due to excessive failures
+        if (
+            self.config.enable_fallback
+            and fallback_func is not None
+            and self.config._primary_failure_count >= self.config.max_primary_failures
+        ):
+            logger.info(
+                f"⚠️ Primary service has {self.config._primary_failure_count} failures "
+                f"(>= {self.config.max_primary_failures}), skipping and using {self.config.fallback_provider} directly"
+            )
+            
+            try:
+                # Record fallback event
+                record_rerank_fallback(
+                    primary_provider=self.config.primary_provider,
+                    fallback_provider=self.config.fallback_provider,
+                    reason='max_failures_exceeded',
+                )
+                
+                result = await fallback_func()
+                return result
+                
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback service also failed: {fallback_error}")
+                
+                # Record fallback error
+                fallback_error_type = self._classify_error(fallback_error)
+                record_rerank_error(
+                    provider=self.config.fallback_provider,
+                    error_type=fallback_error_type,
+                )
+                
+                raise RerankError(
+                    f"Fallback service failed: {fallback_error}"
+                )
+        
         # Try primary service first
         try:
             result = await primary_func()
@@ -339,8 +393,9 @@ class HybridRerankService(RerankServiceInterface):
             return result
 
         except Exception as primary_error:
-            # Increment failure count
+            # Increment failure count and update timestamp
             self.config._primary_failure_count += 1
+            self.config._last_failure_time = time.time()
 
             logger.warning(
                 f"Primary service ({self.config.primary_provider}) {operation_name} failed "

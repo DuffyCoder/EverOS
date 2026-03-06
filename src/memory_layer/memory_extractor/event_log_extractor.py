@@ -155,7 +155,6 @@ class EventLogExtractor:
         input_text: str,
         timestamp: Any,
         user_id: str = "",
-        ori_event_id_list: Optional[List[str]] = None,
         group_id: Optional[str] = None,
     ) -> Optional[EventLog]:
         """
@@ -165,7 +164,6 @@ class EventLogExtractor:
             episode_text: Text content of episode memory
             timestamp: Timestamp of episode (can be in multiple formats)
             user_id: User ID for the event log
-            ori_event_id_list: Original event ID list
             group_id: Group ID
 
         Returns:
@@ -229,7 +227,6 @@ class EventLogExtractor:
             memory_type=MemoryType.EVENT_LOG,
             user_id=user_id,
             timestamp=dt,
-            ori_event_id_list=ori_event_id_list or [],
             group_id=group_id,
             time=event_log_data["time"],
             atomic_fact=event_log_data["atomic_fact"],
@@ -246,7 +243,6 @@ class EventLogExtractor:
         memcell: MemCell,
         timestamp: Any,
         user_id: str = "",
-        ori_event_id_list: Optional[List[str]] = None,
         group_id: Optional[str] = None,
     ) -> Optional[EventLog]:
         """
@@ -271,7 +267,6 @@ class EventLogExtractor:
                     input_text,
                     timestamp,
                     user_id=user_id,
-                    ori_event_id_list=ori_event_id_list,
                     group_id=group_id,
                 )
             except Exception as e:

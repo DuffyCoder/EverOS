@@ -1,17 +1,17 @@
 """Memory resource DTOs.
 
 This module contains DTOs related to memory CRUD operations:
-- Memorize (POST /api/v1/memories)
-- Fetch (GET /api/v1/memories)
-- Search (GET /api/v1/memories/search)
-- Delete (DELETE /api/v1/memories)
+- Memorize (POST /api/v0/memories)
+- Fetch (GET /api/v0/memories)
+- Search (GET /api/v0/memories/search)
+- Delete (DELETE /api/v0/memories)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import json
 import re
 
@@ -19,15 +19,17 @@ from bson import ObjectId
 from pydantic import BaseModel, Field, model_validator, SkipValidation, SerializeAsAny
 
 from api_specs.dtos.base import BaseApiResponse
-from api_specs.memory_types import BaseMemory, RawDataType
+from api_specs.memory_types import RetrieveMemoryModel, RawDataType
 from api_specs.memory_models import (
     MemoryType,
     Metadata,
+    QueryMetadata,
     MemoryModel,
     RetrieveMethod,
     MessageSenderRole,
 )
 from core.oxm.constants import MAGIC_ALL, MAX_FETCH_LIMIT, MAX_RETRIEVE_LIMIT
+from biz_layer.retrieve_constants import MAX_GROUP_IDS_COUNT
 
 
 iso_pattern = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}'
@@ -266,7 +268,7 @@ class RawData:
 
 
 # =============================================================================
-# Memorize DTOs (POST /api/v1/memories)
+# Memorize DTOs (POST /api/v0/memories)
 # =============================================================================
 
 
@@ -284,6 +286,8 @@ class MemorizeRequest(BaseModel):
     # Optional extraction control parameters
     enable_foresight_extraction: bool = True  # Whether to extract foresight
     enable_event_log_extraction: bool = True  # Whether to extract event logs
+    # Force boundary trigger - when True, immediately triggers memory extraction
+    flush: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -292,7 +296,7 @@ class MemorizeMessageRequest(BaseModel):
     """
     Store single message request body (HTTP API layer)
 
-    Used for POST /api/v1/memories endpoint
+    Used for POST /api/v0/memories endpoint
     """
 
     group_id: Optional[str] = Field(
@@ -324,21 +328,43 @@ class MemorizeMessageRequest(BaseModel):
     )
     role: Optional[str] = Field(
         default=None,
-        description="""Message sender role, used to identify the source of the message.
+        description="""Message sender role (OpenAI chat completion format).
 Enum values from MessageSenderRole:
 - user: Message from a human user
-- assistant: Message from an AI assistant""",
-        examples=["user", "assistant"],
+- assistant: Message from an AI assistant (may include tool_calls)
+- tool: Tool execution result (requires tool_call_id)""",
+        examples=["user", "assistant", "tool"],
     )
     content: str = Field(
         ...,
         description="Message content",
         examples=["Let's discuss the technical solution for the new feature today"],
     )
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Tool calls made by the assistant (OpenAI format). "
+        "Only applicable when role='assistant'. Each item: {id, type, function: {name, arguments}}",
+        examples=[[{"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{\"query\": \"python\"}"}}]],
+    )
+    tool_call_id: Optional[str] = Field(
+        default=None,
+        description="ID of the tool call this message is responding to. Required when role='tool'.",
+        examples=["call_1"],
+    )
     refer_list: Optional[List[str]] = Field(
         default=None,
         description="List of referenced message IDs",
         examples=[["msg_000"]],
+    )
+    flush: bool = Field(
+        default=False,
+        description="Force boundary trigger. When True, immediately triggers memory extraction instead of waiting for natural boundary detection.",
+        examples=[False, True],
+    )
+    raw_data_type: Optional[str] = Field(
+        default=None,
+        description="Data type: 'Conversation' (default) or 'AgentConversation' for agent interactions with tool use.",
+        examples=["Conversation", "AgentConversation"],
     )
 
     @model_validator(mode="after")
@@ -386,7 +412,7 @@ Enum values from MessageSenderRole:
 class MemorizeResult(BaseModel):
     """Memory storage result data
 
-    Result data for POST /api/v1/memories endpoint.
+    Result data for POST /api/v0/memories endpoint.
     """
 
     saved_memories: List[Any] = Field(
@@ -429,7 +455,7 @@ class MemorizeResult(BaseModel):
 class MemorizeResponse(BaseApiResponse[MemorizeResult]):
     """Memory storage response
 
-    Response for POST /api/v1/memories endpoint.
+    Response for POST /api/v0/memories endpoint.
     """
 
     result: MemorizeResult = Field(
@@ -469,37 +495,39 @@ class MemorizeResponse(BaseApiResponse[MemorizeResult]):
 
 
 # =============================================================================
-# Fetch DTOs (GET /api/v1/memories)
+# Fetch DTOs (GET /api/v0/memories)
 # =============================================================================
 
 
 class FetchMemRequest(BaseModel):
     """Memory fetch request
 
-    Used for GET /api/v1/memories endpoint.
+    Used for GET /api/v0/memories endpoint.
 
     Note:
-    - user_id and group_id support special value MAGIC_ALL ("__all__") to skip filtering
-    - Empty string or None for user_id/group_id filters for null/empty values
-    - user_id and group_id cannot both be MAGIC_ALL
-    - limit is capped at MAX_FETCH_LIMIT (500)
+    - user_id supports special value MAGIC_ALL ("__all__") to skip filtering
+    - group_ids is a list of group IDs for batch query, None means no group filtering
+    - At least one of user_id or group_ids must be specified
+    - group_ids max length is 50
     """
 
     user_id: Optional[str] = Field(
         default=None, description="User ID", examples=["user_123"]
     )
-    group_id: Optional[str] = Field(
-        default=None, description="Group ID", examples=["group_456"]
+    group_ids: Optional[List[str]] = Field(
+        default=None,
+        description="List of Group IDs for batch query. Single group also needs array format. Max 50.",
+        examples=[["group_1"], ["group_1", "group_2", "group_3"]],
     )
-    limit: Optional[int] = Field(
-        default=40,
-        description="Maximum number of memories to return",
+    page: int = Field(
+        default=1, description="Page number, starts from 1", ge=1, examples=[1]
+    )
+    page_size: int = Field(
+        default=20,
+        description="Number of records per page, default 20, max 100",
         ge=1,
-        le=500,
+        le=100,
         examples=[20],
-    )
-    offset: Optional[int] = Field(
-        default=0, description="Pagination offset", ge=0, examples=[0]
     )
     memory_type: Optional[MemoryType] = Field(
         default=MemoryType.EPISODIC_MEMORY,
@@ -509,11 +537,6 @@ class FetchMemRequest(BaseModel):
 - foresight: prospective memory
 - event_log: event log (atomic facts)""",
         examples=["episodic_memory"],
-    )
-    version_range: Optional[Tuple[Optional[str], Optional[str]]] = Field(
-        default=None,
-        description="Version range filter, format (start, end), closed interval",
-        examples=[("v1.0", "v2.0")],
     )
     start_time: Optional[str] = Field(
         default=None,
@@ -531,12 +554,28 @@ class FetchMemRequest(BaseModel):
     @model_validator(mode="after")
     def validate_request(self) -> "FetchMemRequest":
         """Validate request parameters"""
-        if self.user_id == MAGIC_ALL and self.group_id == MAGIC_ALL:
-            raise ValueError("user_id and group_id cannot both be MAGIC_ALL")
+        # Reject if both user_id and group_ids are not specified
+        if (
+            self.user_id is None or self.user_id == MAGIC_ALL
+        ) and self.group_ids is None:
+            raise ValueError(
+                "At least one of user_id or group_ids must be specified. "
+                "Cannot query without any filter."
+            )
 
-        # Cap limit at MAX_FETCH_LIMIT
-        if self.limit and self.limit > MAX_FETCH_LIMIT:
-            object.__setattr__(self, "limit", MAX_FETCH_LIMIT)
+        # Reject if user_id is not specified and group_ids is an empty list
+        if (
+            (self.user_id is None or self.user_id == MAGIC_ALL)
+            and isinstance(self.group_ids, list)
+            and len(self.group_ids) == 0
+        ):
+            raise ValueError(
+                "group_ids cannot be an empty list when user_id is not specified."
+            )
+
+        # Reject if group_ids exceeds maximum limit of 50
+        if self.group_ids is not None and len(self.group_ids) > 50:
+            raise ValueError("group_ids exceeds maximum limit of 50")
 
         return self
 
@@ -549,8 +588,14 @@ class FetchMemResponse(BaseModel):
     """Memory fetch response (result data)"""
 
     memories: SkipValidation[List[MemoryModel]] = Field(default_factory=list)
-    total_count: int = 0
-    has_more: bool = False
+    total_count: int = Field(
+        default=0,
+        description="Total number of records matching query conditions (for pagination calculation)",
+    )
+    count: int = Field(
+        default=0,
+        description="Number of records in current page (length of memories array)",
+    )
     metadata: SkipValidation[Optional[Metadata]] = None
 
     model_config = {"arbitrary_types_allowed": True}
@@ -559,7 +604,7 @@ class FetchMemResponse(BaseModel):
 class FetchMemoriesResponse(BaseApiResponse[FetchMemResponse]):
     """Memory fetch API response
 
-    Response for GET /api/v1/memories endpoint.
+    Response for GET /api/v0/memories endpoint.
     """
 
     result: FetchMemResponse = Field(description="Memory fetch result")
@@ -580,7 +625,7 @@ class FetchMemoriesResponse(BaseApiResponse[FetchMemResponse]):
                         }
                     ],
                     "total_count": 100,
-                    "has_more": False,
+                    "count": 1,
                     "metadata": {
                         "source": "fetch_mem_service",
                         "user_id": "user_123",
@@ -593,14 +638,14 @@ class FetchMemoriesResponse(BaseApiResponse[FetchMemResponse]):
 
 
 # =============================================================================
-# Search/Retrieve DTOs (GET /api/v1/memories/search)
+# Search/Retrieve DTOs (GET /api/v0/memories/search)
 # =============================================================================
 
 
 class RetrieveMemRequest(BaseModel):
     """Memory retrieve/search request
 
-    Used for GET /api/v1/memories/search endpoint.
+    Used for GET /api/v0/memories/search endpoint.
     Supports passing parameters via query params or body.
     """
 
@@ -609,38 +654,40 @@ class RetrieveMemRequest(BaseModel):
         description="User ID (at least one of user_id or group_id must be provided)",
         examples=["user_123"],
     )
-    group_id: Optional[str] = Field(
+    group_ids: Optional[List[str]] = Field(
         default=None,
-        description="Group ID (at least one of user_id or group_id must be provided)",
-        examples=["group_456"],
+        description="Array of Group IDs to search (max 10 items). "
+        "None means search all groups for the user.",
+        examples=[["group_456", "group_789"]],
     )
     memory_types: List[MemoryType] = Field(
         default_factory=list,
         description="""List of memory types to retrieve, enum values from MemoryType:
+- profile: user profile (Milvus vector search only)
 - episodic_memory: episodic memory
-- foresight: prospective memory
-- event_log: event log (atomic facts)
-Note: profile type is not supported in search interface""",
+- foresight: prospective memory (not yet supported for search)
+- event_log: event log (not yet supported for search)
+Note: Only profile and episodic_memory are supported. Defaults to both if not specified.""",
         examples=[["episodic_memory"]],
     )
     top_k: int = Field(
-        default=40,
-        description="Maximum number of results to return",
-        ge=1,
+        default=-1,
+        description="Maximum number of results to return. -1 means return all results that meet the threshold (up to 100). Valid values: -1 or 1-100.",
+        ge=-1,
         le=100,
-        examples=[10],
+        examples=[10, -1],
     )
     include_metadata: bool = Field(
         default=True, description="Whether to include metadata", examples=[True]
     )
     start_time: Optional[str] = Field(
         default=None,
-        description="Time range start (ISO 8601 format)",
+        description="Time range start (ISO 8601 format). Only applies to episodic_memory, ignored for profile",
         examples=["2024-01-01T00:00:00"],
     )
     end_time: Optional[str] = Field(
         default=None,
-        description="Time range end (ISO 8601 format)",
+        description="Time range end (ISO 8601 format). Only applies to episodic_memory, ignored for profile",
         examples=["2024-12-31T23:59:59"],
     )
     query: Optional[str] = Field(
@@ -673,10 +720,53 @@ Note: profile type is not supported in search interface""",
     @model_validator(mode="after")
     def validate_request(self) -> "RetrieveMemRequest":
         """Validate request parameters"""
-        if self.user_id == MAGIC_ALL and self.group_id == MAGIC_ALL:
-            raise ValueError("user_id and group_id cannot both be MAGIC_ALL")
+        # Validate: at least one of user_id or group_ids must be specified
+        if (
+            self.user_id is None or self.user_id == MAGIC_ALL
+        ) and self.group_ids is None:
+            raise ValueError(
+                "At least one of user_id or group_ids must be specified. "
+                "Cannot query without any filter."
+            )
 
-        if self.top_k and self.top_k > MAX_RETRIEVE_LIMIT:
+        # Validate: user_id is not specified and group_ids is an empty list
+        if (
+            (self.user_id is None or self.user_id == MAGIC_ALL)
+            and isinstance(self.group_ids, list)
+            and len(self.group_ids) == 0
+        ):
+            raise ValueError(
+                "group_ids cannot be an empty list when user_id is not specified."
+            )
+
+        # Validate: group_ids array length cannot exceed MAX_GROUP_IDS_COUNT
+        if self.group_ids is not None and len(self.group_ids) > MAX_GROUP_IDS_COUNT:
+            raise ValueError(
+                f"group_ids array length cannot exceed {MAX_GROUP_IDS_COUNT}"
+            )
+
+        # Validate: Search only supports certain memory types
+        if self.memory_types:
+            allowed_types = {
+                MemoryType.EPISODIC_MEMORY,
+                MemoryType.PROFILE,
+                MemoryType.AGENT_CASE,
+                MemoryType.AGENT_SKILL,
+            }
+            invalid_types = [mt for mt in self.memory_types if mt not in allowed_types]
+            if invalid_types:
+                raise ValueError(
+                    f"Search interface does not support memory_types: "
+                    f"{[mt.value for mt in invalid_types]}"
+                )
+
+        # top_k must be -1 (return all) or positive (1-100), 0 is invalid
+        if self.top_k == 0:
+            raise ValueError(
+                "top_k must be -1 (return all results) or a positive integer (1-100)"
+            )
+
+        if self.top_k > 0 and self.top_k > MAX_RETRIEVE_LIMIT:
             object.__setattr__(self, "top_k", MAX_RETRIEVE_LIMIT)
 
         return self
@@ -703,20 +793,52 @@ class PendingMessage(BaseModel):
     updated_at: Optional[str] = None  # Record update time (ISO 8601 format)
 
 
-class RetrieveMemResponse(BaseModel):
-    """Memory retrieve/search response (result data)"""
+class ProfileSearchItem(BaseModel):
+    """Profile search result item.
 
-    memories: SerializeAsAny[SkipValidation[List[Dict[str, List[BaseMemory]]]]] = Field(
-        default_factory=list
+    Represents a single profile item from Milvus vector search.
+    Fields are parsed from embed_text.
+    """
+
+    item_type: str = Field(
+        description="Item type: explicit_info or implicit_trait",
+        examples=["explicit_info", "implicit_trait"],
     )
-    scores: SkipValidation[List[Dict[str, List[float]]]] = Field(default_factory=list)
-    importance_scores: List[float] = Field(default_factory=list)
-    original_data: SkipValidation[List[Dict[str, List[Dict[str, Any]]]]] = Field(
-        default_factory=list
+    # For explicit_info
+    category: Optional[str] = Field(
+        default=None,
+        description="Category name (for explicit_info type)",
+        examples=["Dietary Preferences", "Professional Skills"],
     )
+    # For implicit_trait
+    trait_name: Optional[str] = Field(
+        default=None,
+        description="Trait name (for implicit_trait type)",
+        examples=["Health Conscious", "Efficiency Focused"],
+    )
+    description: str = Field(
+        default="",
+        description="Description content",
+        examples=["Prefers light flavors, favoring vegetables and seafood."],
+    )
+    score: float = Field(
+        default=0.0,
+        description="Similarity score from Milvus search",
+        examples=[0.89, 0.75],
+    )
+
+
+class RetrieveMemResponse(BaseModel):
+    """Memory retrieve/search response (result data) - flat structure"""
+
+    # Profile search results (from Milvus, no rerank)
+    profiles: List[ProfileSearchItem] = Field(
+        default_factory=list,
+        description="Profile search results (explicit_info and implicit_traits)",
+    )
+    memories: SkipValidation[List[RetrieveMemoryModel]] = Field(default_factory=list)
     total_count: int = 0
-    has_more: bool = False
-    query_metadata: SkipValidation[Optional[Metadata]] = None
+    query_metadata: SkipValidation[Optional[QueryMetadata]] = None
     metadata: SkipValidation[Optional[Metadata]] = None
     pending_messages: SkipValidation[List[PendingMessage]] = Field(default_factory=list)
 
@@ -726,7 +848,7 @@ class RetrieveMemResponse(BaseModel):
 class SearchMemoriesResponse(BaseApiResponse[RetrieveMemResponse]):
     """Memory search API response
 
-    Response for GET /api/v1/memories/search endpoint.
+    Response for GET /api/v0/memories/search endpoint.
     """
 
     result: RetrieveMemResponse = Field(description="Memory search result")
@@ -735,35 +857,44 @@ class SearchMemoriesResponse(BaseApiResponse[RetrieveMemResponse]):
         "json_schema_extra": {
             "example": {
                 "status": "ok",
-                "message": "Memory search successful, retrieved 1 groups",
+                "message": "Memory search successful",
                 "result": {
+                    "profiles": [
+                        {
+                            "item_type": "explicit_info",
+                            "category": "Dietary Preferences",
+                            "description": "Prefers light flavors, favoring vegetables and seafood",
+                            "score": 0.89,
+                        },
+                        {
+                            "item_type": "implicit_trait",
+                            "trait_name": "Health Conscious",
+                            "description": "Prioritizes dietary health, preferring low oil and low salt",
+                            "score": 0.75,
+                        },
+                    ],
                     "memories": [
                         {
-                            "episodic_memory": [
-                                {
-                                    "memory_type": "episodic_memory",
-                                    "user_id": "user_123",
-                                    "timestamp": "2024-01-15T10:30:00",
-                                    "summary": "Discussed coffee choices",
-                                    "group_id": "group_456",
-                                }
-                            ]
+                            "memory_type": "episodic_memory",
+                            "user_id": "user_123",
+                            "timestamp": "2024-01-15T10:30:00",
+                            "summary": "User mentioned controlling their diet recently, eating only two meals a day, with dinner mainly being salad",
+                            "group_id": "group_456",
                         }
                     ],
-                    "scores": [{"episodic_memory": [0.95]}],
-                    "importance_scores": [0.85],
+                    "scores": [0.82],
                     "original_data": [],
-                    "total_count": 45,
+                    "total_count": 3,
                     "has_more": False,
                     "query_metadata": {
-                        "source": "episodic_memory_es_repository",
+                        "source": "hybrid_search",
                         "user_id": "user_123",
                         "memory_type": "retrieve",
                     },
                     "metadata": {
-                        "source": "episodic_memory_es_repository",
-                        "user_id": "user_123",
-                        "memory_type": "retrieve",
+                        "profile_count": 2,
+                        "episodic_count": 1,
+                        "latency_ms": 156,
                     },
                     "pending_messages": [],
                 },
@@ -773,7 +904,7 @@ class SearchMemoriesResponse(BaseApiResponse[RetrieveMemResponse]):
 
 
 # =============================================================================
-# Delete DTOs (DELETE /api/v1/memories)
+# Delete DTOs (DELETE /api/v0/memories)
 # =============================================================================
 
 
@@ -781,19 +912,31 @@ class DeleteMemoriesRequest(BaseModel):
     """
     Delete memories request body
 
-    Used for DELETE /api/v1/memories endpoint
+    Used for DELETE /api/v0/memories endpoint
 
     Notes:
-    - event_id, user_id, group_id are combined filter conditions
+    - memory_id, user_id, group_id are combined filter conditions
     - If all three are provided, all conditions must be met
     - If not provided, use MAGIC_ALL ("__all__") to skip filtering
     - Cannot all be MAGIC_ALL (at least one filter required)
+    - id and event_id are aliases for memory_id (backward compatibility)
     """
 
-    event_id: Optional[str] = Field(
+    memory_id: Optional[str] = Field(
         default=MAGIC_ALL,
-        description="Memory event_id (filter condition)",
+        description="Memory id (filter condition)",
         examples=["507f1f77bcf86cd799439011", MAGIC_ALL],
+    )
+    # Backward compatibility: support id and event_id as alias for memory_id
+    id: Optional[str] = Field(
+        default=None,
+        description="Alias for memory_id (backward compatibility)",
+        examples=["507f1f77bcf86cd799439011"],
+    )
+    event_id: Optional[str] = Field(
+        default=None,
+        description="Alias for memory_id (backward compatibility)",
+        examples=["507f1f77bcf86cd799439011"],
     )
     user_id: Optional[str] = Field(
         default=MAGIC_ALL,
@@ -809,14 +952,19 @@ class DeleteMemoriesRequest(BaseModel):
     @model_validator(mode="after")
     def validate_filters(self):
         """Validate that at least one filter is provided"""
+        # Resolve memory_id from aliases (priority: memory_id > id > event_id)
+        effective_memory_id = self.memory_id
+        if effective_memory_id == MAGIC_ALL:
+            effective_memory_id = self.id or self.event_id or MAGIC_ALL
+
         # Check if all are MAGIC_ALL
         if (
-            self.event_id == MAGIC_ALL
+            effective_memory_id == MAGIC_ALL
             and self.user_id == MAGIC_ALL
             and self.group_id == MAGIC_ALL
         ):
             raise ValueError(
-                "At least one of event_id, user_id, or group_id must be provided (not MAGIC_ALL)"
+                "At least one of memory_id, user_id, or group_id must be provided (not MAGIC_ALL)"
             )
         return self
 
@@ -824,9 +972,9 @@ class DeleteMemoriesRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "Delete by event_id only",
+                    "summary": "Delete by memory_id only",
                     "value": {
-                        "event_id": "507f1f77bcf86cd799439011",
+                        "memory_id": "507f1f77bcf86cd799439011",
                         "user_id": MAGIC_ALL,
                         "group_id": MAGIC_ALL,
                     },
@@ -834,7 +982,7 @@ class DeleteMemoriesRequest(BaseModel):
                 {
                     "summary": "Delete by user_id only",
                     "value": {
-                        "event_id": MAGIC_ALL,
+                        "memory_id": MAGIC_ALL,
                         "user_id": "user_123",
                         "group_id": MAGIC_ALL,
                     },
@@ -842,7 +990,7 @@ class DeleteMemoriesRequest(BaseModel):
                 {
                     "summary": "Delete by user_id and group_id",
                     "value": {
-                        "event_id": MAGIC_ALL,
+                        "memory_id": MAGIC_ALL,
                         "user_id": "user_123",
                         "group_id": "group_456",
                     },
@@ -887,7 +1035,7 @@ class DeleteMemoriesResult(BaseModel):
 class DeleteMemoriesResponse(BaseApiResponse[DeleteMemoriesResult]):
     """Delete memories API response
 
-    Response for DELETE /api/v1/memories endpoint.
+    Response for DELETE /api/v0/memories endpoint.
     """
 
     result: DeleteMemoriesResult = Field(description="Delete operation result")

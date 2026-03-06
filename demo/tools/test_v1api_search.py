@@ -1,8 +1,8 @@
 """V1 API Retrieval Test Script
 
 Test V1 API retrieval functions:
-- GET /api/v1/memories - Fetch memories (supports profile type)
-- GET /api/v1/memories/search - Search memories (keyword/vector/hybrid)
+- GET /api/v0/memories - Fetch memories (supports profile type)
+- GET /api/v0/memories/search - Search memories (keyword/vector/hybrid)
 
 Usage:
     # Ensure API server is running
@@ -46,8 +46,8 @@ class V1APITester:
     async def test_fetch_memories(
         self, user_id: str, memory_type: str = "profile", limit: int = 5
     ) -> Dict[str, Any]:
-        """Test GET /api/v1/memories"""
-        url = f"{self.base_url}/api/v1/memories"
+        """Test GET /api/v0/memories"""
+        url = f"{self.base_url}/api/v0/memories"
         params = {"user_id": user_id, "memory_type": memory_type, "limit": limit}
 
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -63,13 +63,13 @@ class V1APITester:
         memory_types: list = None,
         group_id: str = None,
     ) -> Dict[str, Any]:
-        """Test GET /api/v1/memories/search (RESTful query params)
+        """Test GET /api/v0/memories/search (RESTful query params)
 
         Supports all data sources: episodic_memory, foresight, event_log
         user_id: User ID, required for personal memories
         group_id: Group ID, required for group memories
         """
-        url = f"{self.base_url}/api/v1/memories/search"
+        url = f"{self.base_url}/api/v0/memories/search"
         params = {"query": query, "retrieve_method": retrieve_method, "top_k": top_k}
         # user_id and group_id are mutually exclusive
         if user_id:

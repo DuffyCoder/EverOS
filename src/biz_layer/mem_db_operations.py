@@ -9,6 +9,7 @@ This module contains the following features:
 4. Status table operation functions: Manage the lifecycle of conversation status
 """
 
+import json
 import time
 from api_specs.dtos import MemorizeRequest
 from api_specs.memory_types import MemCell, RawDataType
@@ -65,9 +66,28 @@ from infra_layer.adapters.out.persistence.document.memory.foresight_record impor
 from infra_layer.adapters.out.persistence.document.memory.event_log_record import (
     EventLogRecord,
 )
-from api_specs.memory_types import RawDataType
+from infra_layer.adapters.out.persistence.document.memory.agent_case import (
+    AgentCaseRecord,
+)
+from api_specs.memory_types import RawDataType, AgentCase
 
 logger = get_logger(__name__)
+
+
+def _extract_user_id_from_memcell(memcell: MemCell) -> Optional[str]:
+    """Extract user_id from an agent conversation MemCell.
+
+    Finds the first message with role='user' and returns its speaker_id.
+    Agent conversation messages are required to have a role field,
+    so this is the single authoritative source for user_id.
+    """
+    for msg in memcell.original_data or []:
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            speaker_id = msg.get("speaker_id")
+            if speaker_id:
+                return speaker_id
+    return None
+
 
 # ==================== Time Processing Functions ====================
 
@@ -293,7 +313,8 @@ def _convert_episode_memory_to_doc(
         type=str(episode_memory.type.value) if episode_memory.type else "",
         keywords=getattr(episode_memory, 'keywords', None),
         linked_entities=getattr(episode_memory, 'linked_entities', None),
-        memcell_event_id_list=getattr(episode_memory, 'memcell_event_id_list', None),
+        parent_type=getattr(episode_memory, 'parent_type', None),
+        parent_id=getattr(episode_memory, 'parent_id', None),
         vector_model=episode_memory.vector_model,
         vector=episode_memory.vector,
         extend={
@@ -390,6 +411,62 @@ def _convert_event_log_to_docs(
         docs.append(doc)
 
     return docs
+
+
+def _convert_agent_case_to_doc(
+    agent_case: AgentCase,
+    memcell: MemCell,
+    current_time: Optional[datetime] = None,
+) -> AgentCaseRecord:
+    """
+    Convert AgentCase business object to AgentCaseRecord database document.
+
+    Args:
+        agent_case: Business layer AgentCase object
+        memcell: The parent MemCell
+        current_time: Current time, used as fallback
+
+    Returns:
+        AgentCaseRecord: Agent experience in database document format
+    """
+    if current_time is None:
+        current_time = get_now_with_timezone()
+
+    # Parse timestamp
+    timestamp_dt = current_time
+    if memcell.timestamp:
+        try:
+            if isinstance(memcell.timestamp, datetime):
+                timestamp_dt = memcell.timestamp
+            elif isinstance(memcell.timestamp, str):
+                timestamp_dt = from_iso_format(memcell.timestamp)
+        except Exception:
+            timestamp_dt = current_time
+
+    # Extract embedding from memcell extend
+    vector = None
+    vector_model = None
+    if memcell.extend and "agent_case_embedding" in memcell.extend:
+        emb_data = memcell.extend["agent_case_embedding"]
+        vector = emb_data.get("embedding")
+        vector_model = emb_data.get("vector_model")
+
+    # Extract user_id from first role='user' message's speaker_id
+    user_id = _extract_user_id_from_memcell(memcell)
+
+    return AgentCaseRecord(
+        user_id=user_id,
+        group_id=memcell.group_id,
+        group_name=memcell.group_name,
+        timestamp=timestamp_dt,
+        task_intent=agent_case.task_intent,
+        approach=agent_case.approach,
+        quality_score=agent_case.quality_score,
+        parent_type="memcell",
+        parent_id=str(memcell.event_id) if memcell.event_id else None,
+        vector=vector,
+        vector_model=vector_model,
+    )
 
 
 def _convert_group_profile_data_to_profile_format(
@@ -773,7 +850,7 @@ def _convert_memcell_to_document(
         # Issue: Nested validation of BaseModel objects causes infinite recursion, even with simplest structures
         # TODO: Need to find a better solution to properly convert original_data
         doc_original_data = []
-        if memcell.type == RawDataType.CONVERSATION:
+        if memcell.type in (RawDataType.CONVERSATION, RawDataType.AGENTCONVERSATION):
             for raw_data_dict in memcell.original_data:
                 # Actual data structure is: {'speaker_id': 'user_1', 'speaker_name': 'Alice', 'content': 'message content', 'timestamp': '...'}
                 # Here content is the direct message string, not a nested dict
@@ -790,34 +867,50 @@ def _convert_memcell_to_document(
                     else:
                         return str(value)
 
+                extend = {
+                    "speaker_id": to_string(raw_data_dict.get('speaker_id', '')),
+                    "speaker_name": to_string(
+                        raw_data_dict.get('speaker_name', '')
+                    ),
+                    "timestamp": to_string(
+                        _convert_timestamp_to_time(
+                            raw_data_dict.get('timestamp', '')
+                        )
+                    ),
+                    "message_id": to_string(raw_data_dict.get('data_id', '')),
+                    "receiverId": to_string(raw_data_dict.get('receiverId', '')),
+                    "roomId": to_string(raw_data_dict.get('roomId', '')),
+                    "userIdList": to_string(raw_data_dict.get('userIdList', [])),
+                    "createBy": to_string(raw_data_dict.get('createBy', '')),
+                    "updateTime": to_string(raw_data_dict.get('updateTime', '')),
+                    "msgType": to_string(raw_data_dict.get('msgType', '')),
+                    "referList": to_string(raw_data_dict.get('referList', [])),
+                    "orgId": to_string(raw_data_dict.get('orgId', '')),
+                }
+
+                # Agent conversation: append OpenAI chat completion fields
+                if memcell.type == RawDataType.AGENTCONVERSATION:
+                    extend["role"] = raw_data_dict.get('role', '')
+                    if raw_data_dict.get('tool_calls'):
+                        extend["tool_calls"] = json.dumps(
+                            raw_data_dict['tool_calls'], ensure_ascii=False
+                        )
+                    if raw_data_dict.get('tool_call_id'):
+                        extend["tool_call_id"] = raw_data_dict['tool_call_id']
+
                 message = {
-                    "content": raw_data_dict.get('content')
-                    or '',  # Handle None content explicitly
-                    "extend": {
-                        "speaker_id": to_string(raw_data_dict.get('speaker_id', '')),
-                        "speaker_name": to_string(
-                            raw_data_dict.get('speaker_name', '')
-                        ),
-                        "timestamp": to_string(
-                            _convert_timestamp_to_time(
-                                raw_data_dict.get('timestamp', '')
-                            )
-                        ),
-                        "message_id": to_string(raw_data_dict.get('data_id', '')),
-                        "receiverId": to_string(raw_data_dict.get('receiverId', '')),
-                        "roomId": to_string(raw_data_dict.get('roomId', '')),
-                        "userIdList": to_string(raw_data_dict.get('userIdList', [])),
-                        "createBy": to_string(raw_data_dict.get('createBy', '')),
-                        "updateTime": to_string(raw_data_dict.get('updateTime', '')),
-                        "msgType": to_string(raw_data_dict.get('msgType', '')),
-                        "referList": to_string(raw_data_dict.get('referList', [])),
-                        "orgId": to_string(raw_data_dict.get('orgId', '')),
-                    },
+                    "content": raw_data_dict.get('content') or '',
+                    "extend": extend,
                 }
 
                 # Create document model RawData
+                doc_data_type = (
+                    DataTypeEnum.AGENTCONVERSATION
+                    if memcell.type == RawDataType.AGENTCONVERSATION
+                    else DataTypeEnum.CONVERSATION
+                )
                 doc_raw_data = DocRawData(
-                    data_type=DataTypeEnum.CONVERSATION,  # Default to conversation type
+                    data_type=doc_data_type,
                     messages=[message],  # Message list
                     # meta=raw_data_dict.get('metadata', {})  # Metadata
                 )
@@ -851,6 +944,8 @@ def _convert_memcell_to_document(
                 # Convert RawDataType to DataTypeEnum
                 if memcell.type == RawDataType.CONVERSATION:
                     doc_type = DataTypeEnum.CONVERSATION
+                elif memcell.type == RawDataType.AGENTCONVERSATION:
+                    doc_type = DataTypeEnum.AGENTCONVERSATION
             except Exception as e:
                 logger.warning(f"Data type conversion failed: {e}")
 
@@ -893,6 +988,14 @@ def _convert_memcell_to_document(
         if hasattr(memcell, 'embedding') and memcell.embedding:
             extend_dict['embedding'] = memcell.embedding
 
+        # Prepare agent_case (convert to dict)
+        agent_case_dict = None
+        if hasattr(memcell, 'agent_case') and memcell.agent_case:
+            if hasattr(memcell.agent_case, 'to_dict'):
+                agent_case_dict = memcell.agent_case.to_dict()
+            elif isinstance(memcell.agent_case, dict):
+                agent_case_dict = memcell.agent_case
+
         # Create document model - pass timezone-aware datetime object directly instead of string
         # This avoids infinite recursion triggered by base class datetime validator
         doc_memcell = DocMemCell(
@@ -909,6 +1012,7 @@ def _convert_memcell_to_document(
             episode=memcell.episode,
             foresight_memories=foresight_memories_list,  # ✅ Add foresight
             event_log=event_log_dict,  # ✅ Add event log
+            agent_case=agent_case_dict,  # ✅ Add agent experience
             extend=(
                 extend_dict if extend_dict else None
             ),  # ✅ Add extend (contains embedding)

@@ -25,7 +25,9 @@ from memory_layer.memory_extractor.profile_memory.conversation import (
     is_important_to_user,
     merge_group_importance_evidence,
 )
-from memory_layer.memory_extractor.profile_memory.empty_evidence_completion import complete_missing_evidences
+from memory_layer.memory_extractor.profile_memory.empty_evidence_completion import (
+    complete_missing_evidences,
+)
 from memory_layer.memory_extractor.profile_memory.data_normalize import (
     accumulate_old_memory_entry,
     convert_projects_to_dataclass,
@@ -38,8 +40,12 @@ from memory_layer.memory_extractor.profile_memory.evidence_utils import (
     filter_opinion_tendency_by_type,
     remove_entries_without_evidence,
 )
-from memory_layer.memory_extractor.profile_memory.project_helpers import filter_project_items_by_type
-from memory_layer.memory_extractor.profile_memory.merger import convert_important_info_to_evidence
+from memory_layer.memory_extractor.profile_memory.project_helpers import (
+    filter_project_items_by_type,
+)
+from memory_layer.memory_extractor.profile_memory.merger import (
+    convert_important_info_to_evidence,
+)
 from memory_layer.memory_extractor.profile_memory.types import (
     GroupImportanceEvidence,
     ImportanceEvidence,
@@ -151,7 +157,7 @@ class ProfileMemoryExtractor(MemoryExtractor):
                         participants_profile_list_no_evidences.append(
                             profile_obj_no_evidences
                         )
-                elif mem.memory_type == MemoryType.BASE_MEMORY:
+                elif mem.memory_type == "base_memory":  # MemoryType.BASE_MEMORY:
                     base_memory_obj: Dict[str, Any] = {"user_id": mem.user_id}
 
                     if getattr(mem, "position", None):
@@ -701,7 +707,7 @@ class ProfileMemoryExtractor(MemoryExtractor):
                 f"({user_info['message_count']} messages)"
             )
 
-            # Build Part3 prompt (retrieved via PromptManager)
+            # Build Part3 prompt
             prompt = get_prompt_by("CONVERSATION_PROFILE_PART3_EXTRACTION_PROMPT")
             prompt += f"\n\n**Existing User Profile:**\n"
             prompt += f"User ID: {user_id}\n"

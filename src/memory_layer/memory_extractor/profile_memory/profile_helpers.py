@@ -218,7 +218,6 @@ def profile_payload_to_memory(
         memory_type=MemoryType.PROFILE,
         user_id=extracted_user_id,
         timestamp="",
-        ori_event_id_list=[],
         group_id=group_id,
         user_name=extracted_user_name,
         hard_skills=hard_skills or None,
@@ -324,7 +323,6 @@ def merge_profiles(
             memory_type=MemoryType.PROFILE,
             user_id=user_id,
             timestamp="",
-            ori_event_id_list=[],
             group_id=group_id,
             user_name=participant_profile.get("user_name"),
             hard_skills=normalize_skills_with_evidence(

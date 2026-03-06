@@ -1,5 +1,7 @@
 # Prompts for LLM-based conversation processing
 CONV_BOUNDARY_DETECTION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are an episodic memory boundary detection expert. You need to determine if the newly added dialogue should end the current episode and start a new one.
 
 Current conversation history:
@@ -63,6 +65,8 @@ Note:
 - If conversation history is empty, this is the first message, return false
 - Focus on episodic memory principles: what would people naturally remember as distinct experiences?
 - Each episode should contain substantive content that stands alone as a meaningful memory unit
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """
 
 CONV_SUMMARY_PROMPT = """

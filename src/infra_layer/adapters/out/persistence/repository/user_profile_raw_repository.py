@@ -3,10 +3,13 @@ UserProfile native CRUD repository
 
 User profile data access layer based on Beanie ODM.
 Provides ProfileStorage compatible interface (duck typing).
+
+Supports automatic Milvus indexing on profile create/update.
 """
 
+import asyncio
 from typing import Optional, Dict, Any, List
-from beanie.operators import Or, Eq
+from beanie.operators import Or, Eq, In
 from core.observation.logger import get_logger
 from core.di.decorators import repository
 from core.oxm.mongo.base_repository import BaseRepository
@@ -15,6 +18,10 @@ from core.oxm.constants import MAGIC_ALL
 from infra_layer.adapters.out.persistence.document.memory.user_profile import (
     UserProfile,
 )
+from memory_layer.memory_extractor.profile_memory_life.types import (
+    ProfileMemoryLife,
+)
+from memory_layer.profile_indexer import index_user_profile
 
 logger = get_logger(__name__)
 
@@ -124,22 +131,25 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
     async def find_by_filters(
         self,
         user_id: Optional[str] = MAGIC_ALL,
-        group_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
         limit: Optional[int] = None,
+        skip: Optional[int] = None,
     ) -> List[UserProfile]:
         """
-        Retrieve list of user profiles by filters (user_id and/or group_id)
+        Retrieve list of user profiles by filters (user_id and/or group_ids)
 
         Args:
             user_id: User ID
                 - Not provided or MAGIC_ALL ("__all__"): Don't filter by user_id
                 - None or "": Filter for null/empty values (records with user_id as None or "")
                 - Other values: Exact match
-            group_id: Group ID
-                - Not provided or MAGIC_ALL ("__all__"): Don't filter by group_id
-                - None or "": Filter for null/empty values (records with group_id as None or "")
-                - Other values: Exact match
+            group_ids: List of Group IDs
+                - None: Skip group filtering
+                - []: Empty array, skip filtering
+                - ["g1"]: Single element array, exact match
+                - ["g1", "g2"]: Multiple elements, use In operator
             limit: Limit number of returned results
+            skip: Number of results to skip (pagination offset)
 
         Returns:
             List of UserProfile
@@ -158,15 +168,15 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
                 else:
                     conditions.append(UserProfile.user_id == user_id)
 
-            # Handle group_id filter
-            if group_id != MAGIC_ALL:
-                if group_id == "" or group_id is None:
-                    # Explicitly filter for null or empty string
-                    conditions.append(
-                        Or(Eq(UserProfile.group_id, None), Eq(UserProfile.group_id, ""))
-                    )
+            # Handle group_ids filter (array, no MAGIC_ALL)
+            if group_ids is not None and len(group_ids) > 0:
+                if len(group_ids) == 1:
+                    # Single element: exact match
+                    conditions.append(UserProfile.group_id == group_ids[0])
                 else:
-                    conditions.append(UserProfile.group_id == group_id)
+                    # Multiple elements: use In operator
+                    conditions.append(In(UserProfile.group_id, group_ids))
+            # group_ids is None or empty: skip group filtering
 
             # Build query
             if conditions:
@@ -179,15 +189,26 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
             # Sort by version descending
             query = query.sort([("version", -1)])
 
+            # Apply skip (offset)
+            if skip:
+                query = query.skip(skip)
+
             # Apply limit
             if limit:
                 query = query.limit(limit)
 
+            logger.debug(
+                "🔍 UserProfile.find_by_filters query: %s, sort=[('version', -1)], skip=%s, limit=%s",
+                query.get_filter_query(),
+                skip,
+                limit,
+            )
+
             results = await query.to_list()
             logger.debug(
-                "✅ Retrieved user profiles successfully: user_id=%s, group_id=%s, found %d records",
+                "✅ Retrieved user profiles successfully: user_id=%s, group_ids=%s, found %d records",
                 user_id,
-                group_id,
+                group_ids,
                 len(results),
             )
             return results
@@ -195,13 +216,78 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
             logger.error("❌ Failed to retrieve user profiles: %s", e)
             return []
 
+    async def count_by_filters(
+        self, user_id: Optional[str] = MAGIC_ALL, group_ids: Optional[List[str]] = None
+    ) -> int:
+        """
+        Count user profiles by filters (without pagination)
+
+        Args:
+            user_id: User ID filter (same semantics as find_by_filters)
+            group_ids: Group IDs filter (same semantics as find_by_filters)
+
+        Returns:
+            Total count of matching records
+        """
+        try:
+            # Build query conditions (same as find_by_filters)
+            conditions = []
+
+            # Handle user_id filter
+            if user_id != MAGIC_ALL:
+                if user_id == "" or user_id is None:
+                    conditions.append(
+                        Or(Eq(UserProfile.user_id, None), Eq(UserProfile.user_id, ""))
+                    )
+                else:
+                    conditions.append(UserProfile.user_id == user_id)
+
+            # Handle group_ids filter
+            if group_ids is not None and len(group_ids) > 0:
+                if len(group_ids) == 1:
+                    conditions.append(UserProfile.group_id == group_ids[0])
+                else:
+                    conditions.append(In(UserProfile.group_id, group_ids))
+
+            # Build query
+            if conditions:
+                query = self.model.find(*conditions)
+            else:
+                query = self.model.find()
+
+            count = await query.count()
+            logger.debug(
+                "✅ Counted user profiles: user_id=%s, group_ids=%s, count=%d",
+                user_id,
+                group_ids,
+                count,
+            )
+            return count
+        except Exception as e:
+            logger.error("❌ Failed to count user profiles: %s", e)
+            return 0
+
     async def upsert(
         self,
         user_id: str,
         group_id: str,
         profile_data: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
+        trigger_index: bool = True,
     ) -> Optional[UserProfile]:
+        """
+        Create or update user profile with optional Milvus indexing
+
+        Args:
+            user_id: User ID
+            group_id: Group ID
+            profile_data: Profile data dict (containing explicit_info, implicit_traits, etc.)
+            metadata: Additional metadata (confidence, cluster_id, memcell_count, etc.)
+            trigger_index: Whether to trigger Milvus indexing after save (default True)
+
+        Returns:
+            Saved UserProfile object or None on error
+        """
         try:
             metadata = metadata or {}
             existing = await self.get_by_user_and_group(user_id, group_id)
@@ -224,7 +310,7 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
                 logger.debug(
                     f"Updated user profile: user_id={user_id}, group_id={group_id}, version={existing.version}"
                 )
-                return existing
+                saved_profile = existing
             else:
                 user_profile = UserProfile(
                     user_id=user_id,
@@ -243,12 +329,60 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
                 logger.info(
                     f"Created user profile: user_id={user_id}, group_id={group_id}"
                 )
-                return user_profile
+                saved_profile = user_profile
+
+            # Trigger Milvus indexing asynchronously (non-blocking)
+            if trigger_index:
+                asyncio.create_task(
+                    self._trigger_milvus_indexing(user_id, group_id, profile_data)
+                )
+
+            return saved_profile
+
         except Exception as e:
             logger.error(
                 f"Failed to save user profile: user_id={user_id}, group_id={group_id}, error={e}"
             )
             return None
+
+    async def _trigger_milvus_indexing(
+        self,
+        user_id: str,
+        group_id: str,
+        profile_data: Dict[str, Any],
+    ) -> None:
+        """
+        Trigger Milvus indexing for profile (delete-then-insert strategy)
+
+        This runs asynchronously to avoid blocking the main save operation.
+
+        Args:
+            user_id: User ID
+            group_id: Group ID
+            profile_data: Profile data dict
+        """
+        try:
+            # Convert profile_data dict to ProfileMemoryLife object
+            profile = ProfileMemoryLife.from_dict(
+                profile_data,
+                user_id=user_id,
+                group_id=group_id,
+            )
+
+            # Trigger indexing (delete existing + insert new)
+            stats = await index_user_profile(user_id, group_id, profile)
+
+            logger.info(
+                f"✅ Profile Milvus indexing completed: user_id={user_id}, group_id={group_id}, "
+                f"deleted={stats.get('deleted_count', 0)}, indexed={stats.get('total_count', 0)}"
+            )
+
+        except Exception as e:
+            # Log error but don't fail the main operation
+            logger.error(
+                f"❌ Failed to trigger Milvus indexing: user_id={user_id}, group_id={group_id}, error={e}",
+                exc_info=True,
+            )
 
     async def delete_by_group(self, group_id: str) -> int:
         try:

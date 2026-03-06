@@ -7,6 +7,7 @@ Unified storage for event logs (atomic facts) extracted from episodic memory (in
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from core.oxm.mongo.document_base import DocumentBase
+from core.oxm.mongo.document_base_with_soft_delete import DocumentBaseWithSoftDelete
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from core.oxm.mongo.audit_base import AuditBase
@@ -14,7 +15,7 @@ from beanie import PydanticObjectId
 from api_specs.memory_types import ParentType
 
 
-class EventLogRecord(DocumentBase, AuditBase):
+class EventLogRecord(DocumentBaseWithSoftDelete, AuditBase):
     """
     Generic event log document model
 
@@ -91,6 +92,12 @@ class EventLogRecord(DocumentBase, AuditBase):
         name = "event_log_records"
 
         indexes = [
+            # Soft delete support - soft delete status index
+            IndexModel(
+                [("deleted_at", ASCENDING)],
+                name="idx_deleted_at",
+                sparse=True,  # Only index documents that are deleted
+            ),
             # Single field indexes
             IndexModel([("user_id", ASCENDING)], name="idx_user_id"),
             IndexModel([("group_id", ASCENDING)], name="idx_group_id", sparse=True),

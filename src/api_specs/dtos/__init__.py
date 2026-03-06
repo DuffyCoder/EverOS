@@ -25,6 +25,7 @@ from api_specs.dtos.memory import (
     # Search/Retrieve
     RetrieveMemRequest,
     PendingMessage,
+    ProfileSearchItem,
     RetrieveMemResponse,
     SearchMemoriesResponse,
     # Delete
@@ -70,6 +71,7 @@ __all__ = [
     # Memory - Search/Retrieve
     "RetrieveMemRequest",
     "PendingMessage",
+    "ProfileSearchItem",
     "RetrieveMemResponse",
     "SearchMemoriesResponse",
     # Memory - Delete

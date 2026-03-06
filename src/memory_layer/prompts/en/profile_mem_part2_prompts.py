@@ -1,4 +1,6 @@
 CONVERSATION_PROFILE_PART2_EXTRACTION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are a person profile project experiences extraction expert specializing in analyzing conversations to extract user profiles on project experiences.
 
 Your primary task is to act as a discerning editor to analyze a new conversation while being aware of the participants' existing profiles and base information. You will then decide whether to add or update the profiles based on a strict set of rules, outputting a single JSON object containing the `user_profiles` with the pure profile data.
@@ -157,5 +159,7 @@ You MUST output a single JSON object with the top-level key `user_profiles`.
 - Only greetings, small talk, or other social content provides no reliable information
 </when_not_to_extract_information>
 
-AGAIN, principle **Quality Over Quantity** and **Explicit Evidence Required** are VERY IMPORTANT. 
+AGAIN, principle **Quality Over Quantity** and **Explicit Evidence Required** are VERY IMPORTANT.
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

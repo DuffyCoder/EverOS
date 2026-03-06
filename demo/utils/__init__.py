@@ -1,6 +1,6 @@
 """Utility Module
 
-Provides common utility functions and a simple memory manager.
+Provides common utility functions, a simple memory manager, and agent demo helpers.
 """
 
 from demo.utils.memory_utils import (
@@ -11,6 +11,7 @@ from demo.utils.memory_utils import (
     serialize_datetime,
 )
 from demo.utils.simple_memory_manager import SimpleMemoryManager
+from demo.utils.agent_demo_helpers import AgentDemoRunner
 
 __all__ = [
     "get_prompt_language",
@@ -19,4 +20,5 @@ __all__ = [
     "query_memcells_by_group_and_time",
     "serialize_datetime",
     "SimpleMemoryManager",
+    "AgentDemoRunner",
 ]

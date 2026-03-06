@@ -1,6 +1,6 @@
 """
 Memory Controller API Test Script
-Verify input and output structures of all endpoints under /api/v1/memories
+Verify input and output structures of all endpoints under /api/v0/memories
 
 Usage:
     # Run all tests
@@ -77,10 +77,10 @@ class MemoryControllerTester:
             space_id: Space ID (default: test_memory_api_space)
             hash_key: Hash key (default: test_memory_api_hash_key)
             timeout: Request timeout in seconds, default 180 seconds (3 minutes)
-            sync_mode: Whether to enable sync mode (default: True, disable background mode to ensure sequential test effectiveness)
+            sync_mode: Whether to enable sync mode (default: True, server default is also True so param is only sent when False)
         """
         self.base_url = base_url
-        self.api_prefix = "/api/v1/memories"
+        self.api_prefix = "/api/v0/memories"
         self.user_id = user_id
         self.group_id = group_id
         self.organization_id = organization_id or self.DEFAULT_ORGANIZATION_ID
@@ -160,10 +160,11 @@ class MemoryControllerTester:
         Get query parameters for sync mode
 
         Returns:
-            dict: Dictionary containing sync_mode parameter (if sync mode is enabled)
+            dict: Dictionary containing sync_mode parameter only when sync_mode is False
+                  (sync_mode=true is the server default, no need to send explicitly)
         """
-        if self.sync_mode:
-            return {"sync_mode": "true"}
+        if not self.sync_mode:
+            return {"sync_mode": "false"}
         return {}
 
     def call_post_api(self, endpoint: str, data: dict):
@@ -374,12 +375,15 @@ class MemoryControllerTester:
             return None, None
 
     def test_memorize_single_message(self):
-        """Test 1: POST /api/v1/memories - Store conversation memory (send multiple messages to trigger boundary detection)"""
-        self.print_section("Test 1: POST /api/v1/memories - Store Conversation Memory")
+        """Test 1: POST /api/v0/memories - Store conversation memory (send multiple messages to trigger boundary detection)"""
+        self.print_section("Test 1: POST /api/v0/memories - Store Conversation Memory")
 
         # Prepare a simple conversation to simulate user and assistant interaction
         # Sending multiple messages can trigger boundary detection and extract memories
         base_time = datetime.now(ZoneInfo("UTC"))
+
+        # Generate unique message ID prefix for this test run to avoid duplicate detection
+        msg_prefix = uuid.uuid4().hex[:8]
 
         # Build conversation sequence, triggering boundary detection through:
         # 1. First scenario: Discussion about coffee preferences (4 messages)
@@ -389,7 +393,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_001",
+                "message_id": f"msg_{msg_prefix}_001",
                 "create_time": base_time.isoformat(),
                 "sender": self.user_id,
                 "sender_name": "Test User",
@@ -399,7 +403,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_002",
+                "message_id": f"msg_{msg_prefix}_002",
                 "create_time": (base_time + timedelta(seconds=30)).isoformat(),
                 "sender": "assistant_001",
                 "sender_name": "AI Assistant",
@@ -410,7 +414,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_003",
+                "message_id": f"msg_{msg_prefix}_003",
                 "create_time": (base_time + timedelta(minutes=1)).isoformat(),
                 "sender": self.user_id,
                 "sender_name": "Test User",
@@ -420,7 +424,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_004",
+                "message_id": f"msg_{msg_prefix}_004",
                 "create_time": (
                     base_time + timedelta(minutes=1, seconds=30)
                 ).isoformat(),
@@ -435,7 +439,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_005",
+                "message_id": f"msg_{msg_prefix}_005",
                 "create_time": (base_time + timedelta(hours=24)).isoformat(),
                 "sender": self.user_id,
                 "sender_name": "Test User",
@@ -446,7 +450,7 @@ class MemoryControllerTester:
             {
                 "group_id": self.group_id,
                 "group_name": "Test Group",
-                "message_id": "msg_006",
+                "message_id": f"msg_{msg_prefix}_006",
                 "create_time": (
                     base_time + timedelta(hours=24, seconds=30)
                 ).isoformat(),
@@ -543,7 +547,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_episodic(self):
-        """Test 2: GET /api/v1/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)
+        """Test 2: GET /api/v0/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -552,7 +556,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 2: GET /api/v1/memories - Fetch User Episodic Memory")
+        self.print_section("Test 2: GET /api/v0/memories - Fetch User Episodic Memory")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -753,7 +757,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_foresight(self):
-        """Test 3: GET /api/v1/memories - Fetch foresight (foresight type, pass parameters via body)
+        """Test 3: GET /api/v0/memories - Fetch foresight (foresight type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -762,7 +766,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 3: GET /api/v1/memories - Fetch Foresight")
+        self.print_section("Test 3: GET /api/v0/memories - Fetch Foresight")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -962,7 +966,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_event_log(self):
-        """Test 4: GET /api/v1/memories - Fetch user event log (event_log type, pass parameters via body)
+        """Test 4: GET /api/v0/memories - Fetch user event log (event_log type, pass parameters via body)
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided in request)
@@ -971,7 +975,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test 4: GET /api/v1/memories - Fetch User Event Log")
+        self.print_section("Test 4: GET /api/v0/memories - Fetch User Event Log")
 
         # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -1175,8 +1179,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_group_filter(self):
-        """Test: GET /api/v1/memories - Fetch memories with group_id filter"""
-        self.print_section("Test: GET /api/v1/memories - Fetch with group_id Filter")
+        """Test: GET /api/v0/memories - Fetch memories with group_id filter"""
+        self.print_section("Test: GET /api/v0/memories - Fetch with group_id Filter")
 
         # Test different memory types with group_id filter
         memory_types = ["episodic_memory", "event_log", "foresight"]
@@ -1220,8 +1224,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_time_range(self):
-        """Test: GET /api/v1/memories - Fetch memories with time range filter"""
-        self.print_section("Test: GET /api/v1/memories - Fetch with Time Range Filter")
+        """Test: GET /api/v0/memories - Fetch memories with time range filter"""
+        self.print_section("Test: GET /api/v0/memories - Fetch with Time Range Filter")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=30)).isoformat()
@@ -1274,8 +1278,8 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_with_combined_filters(self):
-        """Test: GET /api/v1/memories - Fetch memories with combined filters (user_id + group_id + time_range)"""
-        self.print_section("Test: GET /api/v1/memories - Fetch with Combined Filters")
+        """Test: GET /api/v0/memories - Fetch memories with combined filters (user_id + group_id + time_range)"""
+        self.print_section("Test: GET /api/v0/memories - Fetch with Combined Filters")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=7)).isoformat()
@@ -1319,7 +1323,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_profile_memory(self):
-        """Test: GET /api/v1/memories - Fetch user profile memory
+        """Test: GET /api/v0/memories - Fetch user profile memory
 
         Tests multiple scenarios:
         1. Only user_id (group_id NOT provided)
@@ -1328,7 +1332,7 @@ class MemoryControllerTester:
         4. user_id + group_id both have valid values
         5. user_id="__all__" + valid group_id
         """
-        self.print_section("Test: GET /api/v1/memories - Fetch User Profile Memory")
+        self.print_section("Test: GET /api/v0/memories - Fetch User Profile Memory")
 
         # Scenario 1: Only user_id, group_id NOT provided
         print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
@@ -1477,14 +1481,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_all_memory_types(self):
-        """Test: GET /api/v1/memories - Fetch all supported memory types
-
-        Note: Only tests with user_id as some memory types don't support group_id filtering:
-        - base_memory: Personal data, only supports specific user_id
-        - preference: Personal preferences, only supports specific user_id
-        - behavior_history: Personal behavior logs, only supports specific user_id
-        - entity: Not supported with group_id in current implementation
-        - relation: Not supported with group_id in current implementation
+        """Test: GET /api/v0/memories - Fetch all supported memory types
 
         Memory types that support group_id are tested separately in:
         - test_fetch_episodic() for episodic_memory
@@ -1492,20 +1489,10 @@ class MemoryControllerTester:
         - test_fetch_foresight() for foresight
         - test_fetch_profile_memory() for profile
         """
-        self.print_section("Test: GET /api/v1/memories - Fetch All Memory Types")
+        self.print_section("Test: GET /api/v0/memories - Fetch All Memory Types")
 
         # All supported memory types
-        memory_types = [
-            "episodic_memory",
-            "event_log",
-            "foresight",
-            "profile",
-            "base_memory",
-            "preference",
-            "entity",
-            "relation",
-            "behavior_history",
-        ]
+        memory_types = ["episodic_memory", "event_log", "foresight", "profile"]
 
         results_summary = []
 
@@ -1584,9 +1571,6 @@ class MemoryControllerTester:
             "memories" in result
         ), f"[{scenario_name}] result should contain memories field"
         assert (
-            "scores" in result
-        ), f"[{scenario_name}] result should contain scores field"
-        assert (
             "total_count" in result
         ), f"[{scenario_name}] result should contain total_count field"
         assert (
@@ -1603,9 +1587,6 @@ class MemoryControllerTester:
         assert isinstance(
             result["memories"], list
         ), f"[{scenario_name}] memories should be a list"
-        assert isinstance(
-            result["scores"], list
-        ), f"[{scenario_name}] scores should be a list"
         assert (
             result["total_count"] >= 0
         ), f"[{scenario_name}] total_count should be >= 0"
@@ -1653,19 +1634,16 @@ class MemoryControllerTester:
         """
         Validate that search results match expected user_id/group_id filters.
 
-        Search API returns memories grouped by group_id:
+        Search API returns a flat list of BaseMemory objects:
         {
             "memories": [
                 {
-                    "group_id_key": [
-                        {
-                            "memory_type": "episodic_memory",
-                            "user_id": "user_123",
-                            "group_id": "group_456",
-                            "timestamp": "...",
-                            "data": [...]
-                        }
-                    ]
+                    "memory_type": "episodic_memory",
+                    "user_id": "user_123",
+                    "group_id": "group_456",
+                    "timestamp": "...",
+                    "score": 0.85,
+                    ...
                 }
             ]
         }
@@ -1681,81 +1659,50 @@ class MemoryControllerTester:
         memories_checked = 0
 
         if result["total_count"] > 0 and len(result["memories"]) > 0:
-            # Iterate through each group's memories
-            for group_idx, memory_group in enumerate(result["memories"]):
+            for mem_idx, mem in enumerate(result["memories"]):
                 assert isinstance(
-                    memory_group, dict
-                ), f"[{scenario_name}] Memory group {group_idx} should be a dictionary"
+                    mem, dict
+                ), f"[{scenario_name}] Memory {mem_idx} should be a dictionary"
+                assert (
+                    "memory_type" in mem
+                ), f"[{scenario_name}] Memory {mem_idx} should contain memory_type"
 
-                # Iterate through memories within group (key is the group_id)
-                for group_id_key, memory_list in memory_group.items():
-                    assert isinstance(
-                        group_id_key, str
-                    ), f"[{scenario_name}] group_id_key should be string"
-                    assert isinstance(
-                        memory_list, list
-                    ), f"[{scenario_name}] Memory list for group {group_id_key} should be a list"
+                memories_checked += 1
 
-                    # Validate group_id from the grouping key itself
-                    if group_id_filter_type == "exact" and expected_group_id:
-                        assert group_id_key == expected_group_id, (
-                            f"[{scenario_name}] Memory group key should be {expected_group_id}, "
-                            f"actual: {group_id_key}"
+                # Validate user_id filter
+                mem_user_id = mem.get("user_id")
+                if user_id_filter_type == "exact" and expected_user_id:
+                    assert mem_user_id == expected_user_id, (
+                        f"[{scenario_name}] Memory {mem_idx} user_id should be {expected_user_id}, "
+                        f"actual: {mem_user_id}"
+                    )
+                elif user_id_filter_type == "null_or_empty":
+                    assert mem_user_id in (None, ""), (
+                        f"[{scenario_name}] Memory {mem_idx} user_id should be None or empty, "
+                        f"actual: {mem_user_id}"
+                    )
+                # "any" means no validation needed for user_id
+
+                # Validate group_id filter
+                mem_group_id = mem.get("group_id")
+                if group_id_filter_type == "exact" and expected_group_id:
+                    if mem_group_id is not None:
+                        assert mem_group_id == expected_group_id, (
+                            f"[{scenario_name}] Memory {mem_idx} group_id should be {expected_group_id}, "
+                            f"actual: {mem_group_id}"
                         )
-                    elif group_id_filter_type == "null_or_empty":
-                        assert (
-                            group_id_key in ("", "null", "None") or group_id_key == ""
-                        ), (
-                            f"[{scenario_name}] Memory group key should be empty/null, "
-                            f"actual: {group_id_key}"
+                elif group_id_filter_type == "null_or_empty":
+                    if mem_group_id is not None:
+                        assert mem_group_id in (None, ""), (
+                            f"[{scenario_name}] Memory {mem_idx} group_id should be None or empty, "
+                            f"actual: {mem_group_id}"
                         )
-
-                    # Validate each memory in the group
-                    for mem_idx, mem in enumerate(memory_list):
-                        assert isinstance(
-                            mem, dict
-                        ), f"[{scenario_name}] Memory {mem_idx} should be a dictionary"
-                        assert (
-                            "memory_type" in mem
-                        ), f"[{scenario_name}] Memory {mem_idx} should contain memory_type"
-
-                        memories_checked += 1
-
-                        # Validate user_id filter from the memory object
-                        mem_user_id = mem.get("user_id")
-                        if user_id_filter_type == "exact" and expected_user_id:
-                            assert mem_user_id == expected_user_id, (
-                                f"[{scenario_name}] Memory {mem_idx} user_id should be {expected_user_id}, "
-                                f"actual: {mem_user_id}"
-                            )
-                        elif user_id_filter_type == "null_or_empty":
-                            assert mem_user_id in (None, ""), (
-                                f"[{scenario_name}] Memory {mem_idx} user_id should be None or empty, "
-                                f"actual: {mem_user_id}"
-                            )
-                        # "any" means no validation needed for user_id
-
-                        # Validate group_id filter from the memory object (if present)
-                        mem_group_id = mem.get("group_id")
-                        if group_id_filter_type == "exact" and expected_group_id:
-                            # Also check the memory's own group_id field if it exists
-                            if mem_group_id is not None:
-                                assert mem_group_id == expected_group_id, (
-                                    f"[{scenario_name}] Memory {mem_idx} group_id should be {expected_group_id}, "
-                                    f"actual: {mem_group_id}"
-                                )
-                        elif group_id_filter_type == "null_or_empty":
-                            if mem_group_id is not None:
-                                assert mem_group_id in (None, ""), (
-                                    f"[{scenario_name}] Memory {mem_idx} group_id should be None or empty, "
-                                    f"actual: {mem_group_id}"
-                                )
-                        # "any" means no validation needed for group_id
+                # "any" means no validation needed for group_id
 
         print(f"    [Debug] Checked {memories_checked} memories in {scenario_name}")
 
     def test_search_memories_keyword(self):
-        """Test 5: GET /api/v1/memories/search - Keyword search (pass parameters via body)
+        """Test 5: GET /api/v0/memories/search - Keyword search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -1767,7 +1714,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 5: GET /api/v1/memories/search - Keyword Search")
+        self.print_section("Test 5: GET /api/v0/memories/search - Keyword Search")
 
         # =================================================================
         # Scenario 1: Neither user_id nor group_id provided - should return 400 error
@@ -1988,7 +1935,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_search_memories_vector(self):
-        """Test 6: GET /api/v1/memories/search - Vector search (pass parameters via body)
+        """Test 6: GET /api/v0/memories/search - Vector search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -2000,7 +1947,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 6: GET /api/v1/memories/search - Vector Search")
+        self.print_section("Test 6: GET /api/v0/memories/search - Vector Search")
 
         # =================================================================
         # Scenario 1: Neither user_id nor group_id provided - should return 400 error
@@ -2056,12 +2003,6 @@ class MemoryControllerTester:
         assert (
             metadata.get("user_id") == self.user_id
         ), "[Scenario 2] metadata user_id should match"
-
-        # Vector search should have importance_scores when there are results
-        if result["total_count"] > 0:
-            assert (
-                "importance_scores" in result
-            ), "[Scenario 2] Vector search result should contain importance_scores field"
 
         self._validate_search_memories_filter(
             result,
@@ -2224,7 +2165,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_search_memories_hybrid(self):
-        """Test 7: GET /api/v1/memories/search - Hybrid search (pass parameters via body)
+        """Test 7: GET /api/v0/memories/search - Hybrid search (pass parameters via body)
 
         Tests multiple scenarios for user_id/group_id parameter behavior:
         Note: user_id and group_id cannot BOTH be MAGIC_ALL (not provided or "__all__")
@@ -2236,7 +2177,7 @@ class MemoryControllerTester:
         5. user_id="__all__" + valid group_id (query_all for user_id)
         6. user_id=None or "" + valid group_id (filter for null/empty user_id)
         """
-        self.print_section("Test 7: GET /api/v1/memories/search - Hybrid Search")
+        self.print_section("Test 7: GET /api/v0/memories/search - Hybrid Search")
 
         now = datetime.now(ZoneInfo("UTC"))
         start_time = (now - timedelta(days=60)).isoformat()
@@ -2300,15 +2241,6 @@ class MemoryControllerTester:
         assert (
             metadata.get("user_id") == self.user_id
         ), "[Scenario 2] metadata user_id should match"
-
-        # Hybrid search should have importance_scores when there are results
-        if result["total_count"] > 0:
-            assert (
-                "importance_scores" in result
-            ), "[Scenario 2] Hybrid search result should contain importance_scores field"
-            assert (
-                metadata.get("source") == "hybrid"
-            ), "[Scenario 2] Hybrid search source should be hybrid"
 
         self._validate_search_memories_filter(
             result,
@@ -2479,19 +2411,16 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_save_conversation_meta(self):
-        """Test 8: POST /api/v1/memories/conversation-meta - Save conversation metadata"""
+        """Test 8: POST /api/v0/memories/conversation-meta - Save conversation metadata"""
         self.print_section(
-            "Test 8: POST /api/v1/memories/conversation-meta - Save Conversation Metadata"
+            "Test 8: POST /api/v0/memories/conversation-meta - Save Conversation Metadata"
         )
 
         now = datetime.now(ZoneInfo("UTC"))
+        # Note: scene and scene_desc are global-only fields (group_id=null).
+        # When group_id is provided, these fields are inherited from global config.
         data = {
             "version": "1.0",
-            "scene": "assistant",
-            "scene_desc": {
-                "description": "Project collaboration group chat",
-                "extra": {"category": "test"},
-            },
             "name": "Test Project Discussion Group",
             "description": "Project discussion group for testing",
             "group_id": self.group_id,
@@ -2519,13 +2448,10 @@ class MemoryControllerTester:
         result = response["result"]
         assert "id" in result, "result should contain id field"
         assert "group_id" in result, "result should contain group_id field"
-        assert "scene" in result, "result should contain scene field"
         assert "name" in result, "result should contain name field"
-        assert "version" in result, "result should contain version field"
 
         # Validate value correctness
         assert result["group_id"] == self.group_id, "Returned group_id should match"
-        assert result["scene"] == "assistant", "Returned scene should match"
         assert (
             result["name"] == "Test Project Discussion Group"
         ), "Returned name should match"
@@ -2535,9 +2461,9 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_patch_conversation_meta(self):
-        """Test 9: PATCH /api/v1/memories/conversation-meta - Partially update conversation metadata"""
+        """Test 9: PATCH /api/v0/memories/conversation-meta - Partially update conversation metadata"""
         self.print_section(
-            "Test 9: PATCH /api/v1/memories/conversation-meta - Partially Update Conversation Metadata"
+            "Test 9: PATCH /api/v0/memories/conversation-meta - Partially Update Conversation Metadata"
         )
 
         data = {
@@ -2586,7 +2512,7 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_delete_memories(self):
-        """Test 10: DELETE /api/v1/memories - Soft delete memories (pass parameters via body)
+        """Test 10: DELETE /api/v0/memories - Soft delete memories (pass parameters via body)
 
         Tests multiple scenarios for combined filter conditions:
         1. All MAGIC_ALL - should return 422 error (Pydantic validation)
@@ -2596,13 +2522,13 @@ class MemoryControllerTester:
         5. user_id + group_id (combined filters)
         6. Query parameters compatibility test
         """
-        self.print_section("Test 10: DELETE /api/v1/memories - Soft Delete Memories")
+        self.print_section("Test 10: DELETE /api/v0/memories - Soft Delete Memories")
 
         # =================================================================
         # Scenario 1: All MAGIC_ALL - should return 422 error (Pydantic validation)
         # =================================================================
         print("\n--- Scenario 1: All parameters are MAGIC_ALL (should return 422) ---")
-        data = {"event_id": "__all__", "user_id": "__all__", "group_id": "__all__"}
+        data = {"memory_id": "__all__", "user_id": "__all__", "group_id": "__all__"}
 
         status_code, response = self.call_delete_api("", data)
 
@@ -2620,11 +2546,11 @@ class MemoryControllerTester:
         )
 
         # =================================================================
-        # Scenario 2: Only event_id (single record deletion)
+        # Scenario 2: Only memory_id (single record deletion)
         # =================================================================
-        print("\n--- Scenario 2: Only event_id (delete single memory) ---")
+        print("\n--- Scenario 2: Only memory_id (delete single memory) ---")
 
-        # First, memorize a message to get an event_id for deletion
+        # First, memorize a message to get a memory_id for deletion
         print("  Step 1: Create a test memory...")
         base_time = datetime.now(ZoneInfo("UTC"))
         memorize_data = {
@@ -2643,8 +2569,8 @@ class MemoryControllerTester:
             memorize_status == 200
         ), f"Failed to create test memory: {memorize_status}"
 
-        # Get some memories to find an event_id to delete
-        print("  Step 2: Fetch memories to get event_id...")
+        # Get some memories to find a memory_id to delete
+        print("  Step 2: Fetch memories to get memory_id...")
         fetch_data = {
             "user_id": self.user_id,
             "group_id": self.group_id,
@@ -2654,28 +2580,29 @@ class MemoryControllerTester:
 
         fetch_status, fetch_response = self.call_get_with_body_api("", fetch_data)
 
-        event_id_to_delete = None
+        memory_id_to_delete = None
         if (
             fetch_status == 200
             and fetch_response.get("result", {}).get("total_count", 0) > 0
         ):
             memories = fetch_response["result"]["memories"]
             if len(memories) > 0:
-                # Get memcell event_id from memcell_event_id_list
+                # Get memcell memory_id from parent info
                 # Note: Delete API only supports deleting memcells, not episodic_memory
-                memcell_event_id_list = memories[0].get("memcell_event_id_list", [])
-                if memcell_event_id_list:
-                    event_id_to_delete = str(memcell_event_id_list[0])
+                parent_type = memories[0].get("parent_type")
+                parent_id = memories[0].get("parent_id")
+                if (
+                    parent_type == "memcell" and parent_id
+                ):  # ParentType.MEMCELL.value and parent_id:
+                    memory_id_to_delete = str(parent_id)
                 else:
-                    # Fallback: try event_id or id (for backward compatibility)
-                    event_id_to_delete = memories[0].get("event_id") or memories[0].get(
-                        "id"
-                    )
+                    # Fallback: try id field
+                    memory_id_to_delete = memories[0].get("id")
 
-        if event_id_to_delete:
-            print(f"  Step 3: Delete memory with event_id={event_id_to_delete}...")
+        if memory_id_to_delete:
+            print(f"  Step 3: Delete memory with memory_id={memory_id_to_delete}...")
             delete_data = {
-                "event_id": event_id_to_delete,
+                "memory_id": memory_id_to_delete,
                 "user_id": "__all__",
                 "group_id": "__all__",
             }
@@ -2699,13 +2626,10 @@ class MemoryControllerTester:
                 assert (
                     "count" in result
                 ), "[Scenario 2] result should contain count field"
-                assert (
-                    "event_id" in result["filters"]
-                ), "[Scenario 2] filters should contain event_id"
                 assert result["count"] >= 0, "[Scenario 2] count should be >= 0"
 
                 print(
-                    f"✅ Scenario 2 successful, deleted {result['count']} memory by event_id"
+                    f"✅ Scenario 2 successful, deleted {result['count']} memory by memory_id"
                 )
             elif status_code == 404:
                 print(
@@ -2747,7 +2671,7 @@ class MemoryControllerTester:
 
         print(f"  Step 2: Delete all memories for user_id={test_user_id}...")
         delete_data = {
-            "event_id": "__all__",
+            "memory_id": "__all__",
             "user_id": test_user_id,
             "group_id": "__all__",
         }
@@ -2758,9 +2682,8 @@ class MemoryControllerTester:
         if status_code == 200:
             assert response.get("status") == "ok", f"[Scenario 3] Status should be ok"
             result = response["result"]
-            assert (
-                "user_id" in result["filters"]
-            ), "[Scenario 3] filters should contain user_id"
+            assert "count" in result, "[Scenario 3] result should contain count field"
+            assert result["count"] >= 0, "[Scenario 3] count should be >= 0"
             print(
                 f"✅ Scenario 3 successful, deleted {result['count']} memories by user_id"
             )
@@ -2800,7 +2723,7 @@ class MemoryControllerTester:
 
         print(f"  Step 2: Delete all memories for group_id={test_group_id}...")
         delete_data = {
-            "event_id": "__all__",
+            "memory_id": "__all__",
             "user_id": "__all__",
             "group_id": test_group_id,
         }
@@ -2811,9 +2734,8 @@ class MemoryControllerTester:
         if status_code == 200:
             assert response.get("status") == "ok", f"[Scenario 4] Status should be ok"
             result = response["result"]
-            assert (
-                "group_id" in result["filters"]
-            ), "[Scenario 4] filters should contain group_id"
+            assert "count" in result, "[Scenario 4] result should contain count field"
+            assert result["count"] >= 0, "[Scenario 4] count should be >= 0"
             print(
                 f"✅ Scenario 4 successful, deleted {result['count']} memories by group_id"
             )
@@ -2858,7 +2780,7 @@ class MemoryControllerTester:
             f"  Step 2: Delete memories matching both user_id={combined_user_id} AND group_id={combined_group_id}..."
         )
         delete_data = {
-            "event_id": "__all__",
+            "memory_id": "__all__",
             "user_id": combined_user_id,
             "group_id": combined_group_id,
         }
@@ -2869,9 +2791,8 @@ class MemoryControllerTester:
         if status_code == 200:
             assert response.get("status") == "ok", f"[Scenario 5] Status should be ok"
             result = response["result"]
-            assert (
-                "user_id" in result["filters"] and "group_id" in result["filters"]
-            ), "[Scenario 5] filters should contain both user_id and group_id"
+            assert "count" in result, "[Scenario 5] result should contain count field"
+            assert result["count"] >= 0, "[Scenario 5] count should be >= 0"
             print(
                 f"✅ Scenario 5 successful, deleted {result['count']} memories with combined filters"
             )
@@ -3138,7 +3059,7 @@ Usage Examples:
   python tests/test_memory_controller.py --hash-key your_hash_key_here
 
   # Specify all parameters
-  python tests/test_memory_controller.py --base-url http://dev-server:1995 --user-id test_user --group-id test_group --organization-id my_org --space-id my_space --hash-key your_hash_key --timeout 60 --sync-mode true
+  python tests/test_memory_controller.py --base-url http://dev-server:1995 --user-id test_user --group-id test_group --organization-id my_org --space-id my_space --hash-key your_hash_key --timeout 60
         """,
     )
 
@@ -3222,7 +3143,7 @@ Usage Examples:
         "--sync-mode",
         type=lambda x: x.lower() in ("true", "1", "yes"),
         default=True,
-        help="Whether to enable sync mode (default: true). Set to true to disable background mode, ensuring sequential test effectiveness; set to false to use background mode",
+        help="Whether to enable sync mode (default: true, same as server default). Only need to pass --sync-mode false to explicitly use background mode",
     )
 
     return parser.parse_args()

@@ -8,7 +8,10 @@ import hashlib
 import os
 
 from memory_layer.llm.llm_provider import LLMProvider
-from memory_layer.memory_extractor.base_memory_extractor import MemoryExtractor, MemoryExtractRequest
+from memory_layer.memory_extractor.base_memory_extractor import (
+    MemoryExtractor,
+    MemoryExtractRequest,
+)
 from api_specs.memory_types import BaseMemory, MemoryType, MemCell
 from common_utils.datetime_utils import (
     get_now_with_timezone,
@@ -156,7 +159,7 @@ class GroupProfileMemory(BaseMemory):
 
     def __post_init__(self):
         """Set memory_type to GROUP_PROFILE."""
-        self.memory_type = MemoryType.GROUP_PROFILE
+        self.memory_type = "group_profile"  # MemoryType.GROUP_PROFILE
         # Ensure topics and roles are not None, preventing None values from historical data or exceptions
         if self.topics is None:
             self.topics = []
@@ -215,7 +218,7 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
             conversation_source: Conversation source, "original" or "episode"
             max_topics: Maximum number of topics
         """
-        super().__init__(MemoryType.GROUP_PROFILE)
+        super().__init__("group_profile")  # MemoryType.GROUP_PROFILE)
         self.llm_provider = llm_provider
         self.conversation_source = conversation_source
         self.max_topics = max_topics
@@ -232,7 +235,9 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
     def data_processor(self):
         """Lazy load data processor."""
         if self._data_processor is None:
-            from memory_layer.memory_extractor.group_profile.data_processor import GroupProfileDataProcessor
+            from memory_layer.memory_extractor.group_profile.data_processor import (
+                GroupProfileDataProcessor,
+            )
 
             self._data_processor = GroupProfileDataProcessor(self.conversation_source)
         return self._data_processor
@@ -241,7 +246,9 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
     def topic_processor(self):
         """Lazy load topic processor."""
         if self._topic_processor is None:
-            from memory_layer.memory_extractor.group_profile.topic_processor import TopicProcessor
+            from memory_layer.memory_extractor.group_profile.topic_processor import (
+                TopicProcessor,
+            )
 
             self._topic_processor = TopicProcessor(self.data_processor)
         return self._topic_processor
@@ -250,7 +257,9 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
     def role_processor(self):
         """Lazy load role processor."""
         if self._role_processor is None:
-            from memory_layer.memory_extractor.group_profile.role_processor import RoleProcessor
+            from memory_layer.memory_extractor.group_profile.role_processor import (
+                RoleProcessor,
+            )
 
             self._role_processor = RoleProcessor(self.data_processor)
         return self._role_processor
@@ -259,7 +268,9 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
     def llm_handler(self):
         """Lazy load LLM handler."""
         if self._llm_handler is None:
-            from memory_layer.memory_extractor.group_profile.llm_handler import GroupProfileLLMHandler
+            from memory_layer.memory_extractor.group_profile.llm_handler import (
+                GroupProfileLLMHandler,
+            )
 
             self._llm_handler = GroupProfileLLMHandler(
                 self.llm_provider, self.max_topics
@@ -409,7 +420,7 @@ class GroupProfileMemoryExtractor(MemoryExtractor):
 
             # ===== 8. Assemble final result =====
             group_profile = GroupProfileMemory(
-                memory_type=MemoryType.GROUP_PROFILE,
+                memory_type="group_profile",  # MemoryType.GROUP_PROFILE,
                 user_id="",
                 timestamp=get_now_with_timezone(),
                 ori_event_id_list=[

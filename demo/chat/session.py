@@ -61,7 +61,7 @@ class ChatSession:
 
         # API Configuration
         self.api_base_url = config.api_base_url
-        self.retrieve_url = f"{self.api_base_url}/api/v1/memories/search"
+        self.retrieve_url = f"{self.api_base_url}/api/v0/memories/search"
 
         # Last Retrieval Metadata
         self.last_retrieval_metadata: Optional[Dict[str, Any]] = None
@@ -292,8 +292,8 @@ class ChatSession:
             return response.json()
 
     async def _fetch_profile(self) -> List[Dict[str, Any]]:
-        """Fetch profile via GET /api/v1/memories."""
-        url = f"{self.api_base_url}/api/v1/memories"
+        """Fetch profile via GET /api/v0/memories."""
+        url = f"{self.api_base_url}/api/v0/memories"
         params = {"user_id": self.user_id, "memory_type": "profile", "limit": 10}
 
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:

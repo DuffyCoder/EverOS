@@ -22,7 +22,7 @@ Store memories via HTTP API (must specify scene):
 ```bash
 python src/bootstrap.py src/run_memorize.py \
   --input data/group_chat.json \
-  --api-url http://localhost:1995/api/v1/memories \
+  --api-url http://localhost:8001/api/v0/memories \
   --scene assistant
 ```
 
@@ -31,7 +31,7 @@ python src/bootstrap.py src/run_memorize.py \
 ```bash
 python src/bootstrap.py src/run_memorize.py \
   --input data/group_chat.json \
-  --api-url http://localhost:1995/api/v1/memories \
+  --api-url http://localhost:8001/api/v0/memories \
   --scene companion
 ```
 
@@ -110,7 +110,7 @@ The script executes the following steps:
 2. **Save Conversation Metadata**
    - Call `conversation-meta` interface
    - Save metadata such as scene, group information, user details
-   - API address: `{base_url}/api/v1/conversation-meta`
+   - API address: `{base_url}/api/v0/conversation-meta`
 
 3. **Process Messages Item by Item**
    - Call `memorize` interface sequentially for each message
@@ -131,7 +131,7 @@ The script executes the following steps:
 ======================================================================
 📄 Input File: /path/to/group_chat.json
 🔍 Validation Mode: No
-🌐 API Address: http://localhost:1995/api/v1/memories
+🌐 API Address: http://localhost:8001/api/v0/memories
 ======================================================================
 ======================================================================
 Validating Input File Format
@@ -160,10 +160,10 @@ Starting to Call memorize API Item by Item
 Group Name: Smart Sales Assistant Project Team
 Group ID: group_sales_ai_2025
 Number of Messages: 8
-API Address: http://localhost:1995/api/v1/memories
+API Address: http://localhost:8001/api/v0/memories
 
 --- Saving Conversation Metadata (conversation-meta) ---
-Saving conversation metadata to: http://localhost:1995/api/v1/conversation-meta
+Saving conversation metadata to: http://localhost:8001/api/v0/conversation-meta
 Scene: assistant, Group ID: group_sales_ai_2025
   ✓ Conversation metadata saved successfully
   Scene: assistant
@@ -237,7 +237,7 @@ Please ensure input file conforms to GroupChatFormat specification
 The script calls two API endpoints:
 
 1. **conversation-meta**: Save conversation metadata
-   - Path: `{base_url}/api/v1/conversation-meta`
+   - Path: `{base_url}/api/v0/conversation-meta`
    - Method: POST
    - Data: Contains metadata such as scene, group_id, user_details
 

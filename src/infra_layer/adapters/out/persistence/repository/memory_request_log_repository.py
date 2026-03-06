@@ -6,8 +6,9 @@ Memory request log data access layer, providing CRUD operations for memories req
 Used as a replacement for the conversation_data functionality.
 """
 
+import json
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pymongo.asynchronous.client_session import AsyncClientSession
 from core.observation.logger import get_logger
 from core.di.decorators import repository
@@ -62,6 +63,153 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
             logger.error("Failed to save Memory request log: %s", e)
             return None
 
+    async def save_from_raw_data(
+        self,
+        raw_data_content: Dict[str, Any],
+        data_id: Optional[str],
+        group_id: str,
+        group_name: Optional[str],
+        request_id: str,
+        version: Optional[str] = None,
+        endpoint_name: Optional[str] = None,
+        method: Optional[str] = None,
+        url: Optional[str] = None,
+        event_id: Optional[str] = None,
+        raw_input_dict: Optional[Dict[str, Any]] = None,
+        session: Optional[AsyncClientSession] = None,
+    ) -> Optional[str]:
+        """
+        Parse raw data fields, create a MemoryRequestLog document, and save it.
+
+        Extracts core message fields (sender, content, timestamps, etc.) from the
+        raw data content dict, constructs a MemoryRequestLog, and persists it.
+
+        Args:
+            raw_data_content: The content dict from RawData (raw_data.content)
+            data_id: Message ID (raw_data.data_id)
+            group_id: Conversation group ID
+            group_name: Group name
+            request_id: Request ID
+            version: API version
+            endpoint_name: Endpoint name
+            method: HTTP method
+            url: Request URL
+            event_id: Event ID
+            raw_input_dict: Raw input dictionary (used to generate raw_input_str)
+            session: Optional MongoDB session
+
+        Returns:
+            Optional[str]: Returns message_id if saved successfully, None otherwise
+        """
+        content_dict = raw_data_content or {}
+        message_id = data_id
+
+        # Extract core message fields
+        sender = (
+            content_dict.get("speaker_id")
+            or content_dict.get("createBy")
+            or content_dict.get("sender")
+        )
+        sender_name = (
+            content_dict.get("speaker_name")
+            or content_dict.get("sender_name")
+            or sender
+        )
+        content = content_dict.get("content")
+        role = content_dict.get("role")
+        message_create_time = self._parse_create_time(
+            content_dict.get("timestamp")
+            or content_dict.get("createTime")
+            or content_dict.get("create_time")
+        )
+        refer_list = content_dict.get("referList") or content_dict.get("refer_list")
+
+        # Generate raw_input_str
+        raw_input_str = None
+        if raw_input_dict:
+            try:
+                raw_input_str = json.dumps(raw_input_dict, ensure_ascii=False)
+            except (TypeError, ValueError):
+                pass
+
+        # Create MemoryRequestLog document
+        memory_request_log = MemoryRequestLog(
+            group_id=group_id,
+            request_id=request_id,
+            user_id=sender,
+            message_id=message_id,
+            message_create_time=message_create_time,
+            sender=sender,
+            sender_name=sender_name,
+            role=role,
+            content=content,
+            group_name=group_name,
+            refer_list=self._normalize_refer_list(refer_list),
+            raw_input=raw_input_dict or content_dict,
+            raw_input_str=raw_input_str,
+            version=version,
+            endpoint_name=endpoint_name,
+            method=method,
+            url=url,
+            event_id=event_id,
+        )
+
+        await self.save(memory_request_log, session=session)
+
+        logger.debug(
+            "Saved request log from raw data: group_id=%s, message_id=%s, content_preview=%s",
+            group_id,
+            message_id,
+            (content or "")[:50],
+        )
+
+        return message_id
+
+    @staticmethod
+    def _parse_create_time(create_time: Any) -> Optional[str]:
+        """Parse creation time and return ISO format string"""
+        if create_time is None:
+            return None
+        if isinstance(create_time, datetime):
+            return create_time.isoformat()
+        if isinstance(create_time, str):
+            try:
+                from common_utils.datetime_utils import from_iso_format
+
+                parsed = from_iso_format(create_time)
+                return parsed.isoformat() if parsed else create_time
+            except Exception:
+                return create_time
+        return None
+
+    @staticmethod
+    def _normalize_refer_list(refer_list: Any) -> Optional[List[str]]:
+        """
+        Normalize refer_list to a list of strings
+
+        Args:
+            refer_list: Original refer_list, could be a list of strings or dictionaries
+
+        Returns:
+            Normalized list of strings
+        """
+        if not refer_list:
+            return None
+
+        if not isinstance(refer_list, list):
+            return None
+
+        result = []
+        for item in refer_list:
+            if isinstance(item, str):
+                result.append(item)
+            elif isinstance(item, dict):
+                msg_id = item.get("message_id") or item.get("id")
+                if msg_id:
+                    result.append(str(msg_id))
+
+        return result if result else None
+
     # ==================== Query Methods ====================
 
     async def get_by_request_id(
@@ -84,6 +232,52 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
             return result
         except Exception as e:
             logger.error("Failed to get Memory request log by request ID: %s", e)
+            return None
+
+    async def find_one_by_group_user_message(
+        self,
+        group_id: str,
+        user_id: str,
+        message_id: str,
+        session: Optional[AsyncClientSession] = None,
+    ) -> Optional[MemoryRequestLog]:
+        """
+        Find a single Memory request log by group_id, user_id, and message_id
+
+        Used for duplicate detection before saving new request logs.
+        Uses composite index (group_id, user_id, message_id) for efficient lookup.
+
+        Args:
+            group_id: Conversation group ID
+            user_id: User ID (sender)
+            message_id: Message ID
+            session: Optional MongoDB session
+
+        Returns:
+            MemoryRequestLog if found, None otherwise
+        """
+        try:
+            result = await MemoryRequestLog.find_one(
+                {"group_id": group_id, "user_id": user_id, "message_id": message_id},
+                session=session,
+            )
+            if result:
+                logger.debug(
+                    "Found existing request log: group_id=%s, user_id=%s, message_id=%s",
+                    group_id,
+                    user_id,
+                    message_id,
+                )
+            return result
+        except Exception as e:
+            logger.error(
+                "Failed to find Memory request log by group_id/user_id/message_id: "
+                "group_id=%s, user_id=%s, message_id=%s, error=%s",
+                group_id,
+                user_id,
+                message_id,
+                e,
+            )
             return None
 
     async def find_by_group_id(
@@ -291,6 +485,64 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
             )
             return 0
 
+    async def delete_by_filters(
+        self,
+        user_id: Optional[str] = MAGIC_ALL,
+        group_id: Optional[str] = MAGIC_ALL,
+        session: Optional[AsyncClientSession] = None,
+    ) -> int:
+        """
+        Soft delete Memory request logs by filter conditions
+
+        Args:
+            user_id: User ID filter
+                - MAGIC_ALL ("__all__"): Don't filter by user_id
+                - Other values: Exact match
+            group_id: Group ID filter
+                - MAGIC_ALL ("__all__"): Don't filter by group_id
+                - Other values: Exact match
+            session: Optional MongoDB session
+
+        Returns:
+            Number of soft-deleted records
+        """
+        try:
+            filter_dict = {}
+
+            if user_id != MAGIC_ALL:
+                if user_id == "" or user_id is None:
+                    filter_dict["user_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["user_id"] = user_id
+
+            if group_id != MAGIC_ALL:
+                if group_id == "" or group_id is None:
+                    filter_dict["group_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["group_id"] = group_id
+
+            if not filter_dict:
+                logger.warning(
+                    "No filter conditions provided for delete_by_filters"
+                )
+                return 0
+
+            result = await self.model.delete_many(filter_dict, session=session)
+            count = result.modified_count if result else 0
+            logger.info(
+                "Soft deleted Memory request logs: filter=%s, deleted=%d",
+                filter_dict,
+                count,
+            )
+            return count
+        except Exception as e:
+            logger.error(
+                "Failed to soft delete Memory request logs: filter=%s, error=%s",
+                {"user_id": user_id, "group_id": group_id},
+                e,
+            )
+            return 0
+
     # ==================== Sync Status Management ====================
     # sync_status state transitions:
     # -1 (log record) -> 0 (window accumulation) -> 1 (used)
@@ -441,7 +693,7 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
     async def find_pending_by_filters(
         self,
         user_id: Optional[str] = MAGIC_ALL,
-        group_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
         sync_status_list: Optional[List[int]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -463,10 +715,7 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
                 - MAGIC_ALL: Don't filter by user_id
                 - None or "": Filter for null/empty values
                 - Other values: Exact match
-            group_id: Group ID filter
-                - MAGIC_ALL: Don't filter by group_id
-                - None or "": Filter for null/empty values
-                - Other values: Exact match
+            group_ids: List of Group IDs to filter (None to skip filtering, searches all groups)
             sync_status_list: List of sync_status values to filter by
                 - Default: [-1, 0] (pending and accumulating, i.e., unconsumed)
                 - [-1]: Just log records
@@ -498,13 +747,10 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
                 else:
                     query["user_id"] = user_id
 
-            # Handle group_id filter with MAGIC_ALL logic
-            if group_id != MAGIC_ALL:
-                if group_id == "" or group_id is None:
-                    # Explicitly filter for null or empty string
-                    query["group_id"] = {"$in": [None, ""]}
-                else:
-                    query["group_id"] = group_id
+            # Handle group_ids filter: None means no filter (search all groups)
+            if group_ids is not None and len(group_ids) > 0:
+                # Use $in for multiple group_ids
+                query["group_id"] = {"$in": group_ids}
 
             # Filter by sync_status
             if sync_status_list:
@@ -534,10 +780,10 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
             )
 
             logger.debug(
-                "Query pending Memory request logs: user_id=%s, group_id=%s, "
+                "Query pending Memory request logs: user_id=%s, group_ids=%s, "
                 "sync_status_list=%s, skip=%d, limit=%d, count=%d",
                 user_id,
-                group_id,
+                group_ids,
                 sync_status_list,
                 skip,
                 limit,
@@ -546,9 +792,9 @@ class MemoryRequestLogRepository(BaseRepository[MemoryRequestLog]):
             return results
         except Exception as e:
             logger.error(
-                "Failed to query pending Memory request logs: user_id=%s, group_id=%s, error=%s",
+                "Failed to query pending Memory request logs: user_id=%s, group_ids=%s, error=%s",
                 user_id,
-                group_id,
+                group_ids,
                 e,
             )
             return []

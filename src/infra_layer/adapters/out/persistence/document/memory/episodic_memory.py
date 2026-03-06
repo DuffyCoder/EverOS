@@ -1,14 +1,14 @@
 from datetime import datetime
-from token import OP
 from typing import List, Optional, Dict, Any
 from core.oxm.mongo.document_base import DocumentBase
+from core.oxm.mongo.document_base_with_soft_delete import DocumentBaseWithSoftDelete
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from core.oxm.mongo.audit_base import AuditBase
 from beanie import PydanticObjectId
 
 
-class EpisodicMemory(DocumentBase, AuditBase):
+class EpisodicMemory(DocumentBaseWithSoftDelete, AuditBase):
     """
     Episodic memory document model
 
@@ -35,10 +35,6 @@ class EpisodicMemory(DocumentBase, AuditBase):
     keywords: Optional[List[str]] = Field(default=None, description="Keywords")
     linked_entities: Optional[List[str]] = Field(
         default=None, description="Associated entity IDs"
-    )
-
-    memcell_event_id_list: Optional[List[str]] = Field(
-        default=None, description="Memory unit event ID"
     )
 
     parent_type: Optional[str] = Field(
@@ -86,6 +82,12 @@ class EpisodicMemory(DocumentBase, AuditBase):
 
         name = "episodic_memories"
         indexes = [
+            # Soft delete support - soft delete status index
+            IndexModel(
+                [("deleted_at", ASCENDING)],
+                name="idx_deleted_at",
+                sparse=True,  # Only index documents that are deleted
+            ),
             # Single field indexes
             IndexModel([("user_id", ASCENDING)], name="idx_user_id"),
             # Composite index on user ID and timestamp
@@ -124,3 +126,63 @@ class EpisodicMemory(DocumentBase, AuditBase):
         ]
         validate_on_save = True
         use_state_management = True
+
+
+class EpisodicMemoryProjection(DocumentBase, AuditBase):
+    """
+    Simplified episodic memory model (without vector)
+
+    Used in most scenarios where vector data is not needed, reducing data transfer and memory usage.
+    """
+
+    id: Optional[PydanticObjectId] = Field(default=None, description="Record ID")
+    user_id: Optional[str] = Field(
+        default=None, description="The individual involved, None indicates group memory"
+    )
+    user_name: Optional[str] = Field(default=None, description="Name of the individual")
+    group_id: Optional[str] = Field(default=None, description="Group ID")
+    group_name: Optional[str] = Field(default=None, description="Group name")
+    timestamp: datetime = Field(..., description="Occurrence time (timestamp)")
+    participants: Optional[List[str]] = Field(
+        default=None, description="Names of event participants"
+    )
+    summary: str = Field(..., min_length=1, description="Memory unit")
+    subject: Optional[str] = Field(default=None, description="Memory unit subject")
+    episode: str = Field(..., min_length=1, description="Episodic memory")
+    type: Optional[str] = Field(
+        default=None, description="Episode type, such as Conversation"
+    )
+    keywords: Optional[List[str]] = Field(default=None, description="Keywords")
+    linked_entities: Optional[List[str]] = Field(
+        default=None, description="Associated entity IDs"
+    )
+
+    parent_type: Optional[str] = Field(
+        default=None, description="Parent memory type (e.g., memcell)"
+    )
+    parent_id: Optional[str] = Field(default=None, description="Parent memory ID")
+
+    extend: Optional[Dict[str, Any]] = Field(
+        default=None, description="Reserved extension field"
+    )
+
+    # Vector model information (retain model name, but exclude vector data)
+    vector_model: Optional[str] = Field(
+        default=None, description="Vectorization model used"
+    )
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        json_encoders={
+            datetime: lambda dt: dt.isoformat(),
+            PydanticObjectId: lambda oid: str(oid),
+        },
+    )
+
+    @property
+    def event_id(self) -> Optional[PydanticObjectId]:
+        return self.id
+
+
+# Export models
+__all__ = ["EpisodicMemory", "EpisodicMemoryProjection"]

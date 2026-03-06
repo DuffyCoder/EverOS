@@ -20,6 +20,7 @@ class DataTypeEnum(str, Enum):
     """Data type enumeration"""
 
     CONVERSATION = "Conversation"
+    AGENTCONVERSATION = "AgentConversation"
 
 
 class Message(BaseModel):
@@ -117,6 +118,9 @@ class MemCell(DocumentBaseWithSoftDelete, AuditBase):
     foresight_memories: Optional[List] = Field(default=None, description="Foresight")
     event_log: Optional[Dict] = Field(
         default=None, description="Event Log atomic facts"
+    )
+    agent_case: Optional[Dict] = Field(
+        default=None, description="Agent case (task intent + compressed trajectory + feedback)"
     )
     extend: Optional[Dict] = Field(default=None, description="Extended fields")
 

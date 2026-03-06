@@ -15,10 +15,17 @@ from memory_layer.prompts import get_prompt_by
 from memory_layer.llm.llm_provider import LLMProvider
 
 from memory_layer.memory_extractor.base_memory_extractor import MemoryExtractor, MemoryExtractRequest
-from api_specs.memory_types import MemoryType, EpisodeMemory, RawDataType, MemCell
+from api_specs.memory_types import (
+    MemoryType,
+    EpisodeMemory,
+    RawDataType,
+    MemCell,
+    ParentType,
+)
 
 from common_utils.datetime_utils import get_now_with_timezone
 from agentic_layer.vectorize_service import get_vectorize_service
+from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
 
 from core.observation.logger import get_logger
 
@@ -63,6 +70,7 @@ class EpisodeMemoryExtractor(MemoryExtractor):
         """
         super().__init__(MemoryType.EPISODIC_MEMORY)
         self.llm_provider = llm_provider
+        self.default_parent_type = DEFAULT_MEMORIZE_CONFIG.default_episode_parent_type
         
         # Use custom prompts or get default via PromptManager
         self.episode_generation_prompt = episode_prompt or get_prompt_by("EPISODE_GENERATION_PROMPT")
@@ -212,7 +220,7 @@ class EpisodeMemoryExtractor(MemoryExtractor):
             return None
 
         # Prepare conversation text
-        if memcell.type == RawDataType.CONVERSATION:
+        if memcell.type in (RawDataType.CONVERSATION, RawDataType.AGENTCONVERSATION):
             conversation_text = self.get_conversation_json_text(memcell.original_data)
 
             # Select prompt and parameters
@@ -311,13 +319,14 @@ class EpisodeMemoryExtractor(MemoryExtractor):
 
         # Compute Embedding
         embedding_data = await self._compute_embedding(content)
+        vector = embedding_data.get("embedding") if embedding_data else None
+        vector_model = embedding_data.get("vector_model") if embedding_data else None
 
         # Create EpisodeMemory object
         episode_memory = EpisodeMemory(
             memory_type=MemoryType.EPISODIC_MEMORY,
             user_id=user_id,
             user_name=user_name,
-            ori_event_id_list=[memcell.event_id],
             timestamp=start_time,
             subject=title,
             summary=summary,
@@ -325,8 +334,11 @@ class EpisodeMemoryExtractor(MemoryExtractor):
             group_id=request.group_id,
             participants=participants,
             type=memcell.type,
-            memcell_event_id_list=[memcell.event_id],
-            extend=embedding_data,  # Add embedding to extend field
+            parent_type=self.default_parent_type,
+            parent_id=memcell.event_id,
+            vector=vector,
+            vector_model=vector_model,
+            extend=embedding_data,
         )
 
         logger.debug(f"✅ Episode extraction completed: subject='{title}'")

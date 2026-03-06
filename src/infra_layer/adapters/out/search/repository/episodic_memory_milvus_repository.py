@@ -58,7 +58,6 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
         keywords: Optional[List[str]] = None,
         linked_entities: Optional[List[str]] = None,
         subject: Optional[str] = None,
-        memcell_event_id_list: Optional[List[str]] = None,
         extend: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -85,7 +84,6 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
             keywords: List of keywords
             linked_entities: List of linked entity IDs
             subject: Event subject
-            memcell_event_id_list: List of memory cell event IDs
             extend: Extension fields
             created_at: Creation time
             updated_at: Update time
@@ -113,7 +111,6 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
                     "keywords": keywords or [],
                     "linked_entities": linked_entities or [],
                     "subject": subject or "",
-                    "memcell_event_id_list": memcell_event_id_list or [],
                     "extend": extend or {},
                     "created_at": created_at.isoformat(),
                     "updated_at": updated_at.isoformat(),
@@ -176,7 +173,7 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
         self,
         query_vector: List[float],
         user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         event_type: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -191,7 +188,7 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
         Args:
             query_vector: Query vector
             user_id: User ID filter
-            group_id: Group ID filter
+            group_ids: List of Group IDs to filter (None means no filter, searches all groups)
             event_type: Event type filter (e.g., conversation, email, etc.)
             start_time: Start timestamp filter
             end_time: End timestamp filter
@@ -214,13 +211,11 @@ class EpisodicMemoryMilvusRepository(BaseMilvusRepository[EpisodicMemoryCollecti
                     # Explicitly filter for null or empty
                     filter_expr.append('user_id == ""')
 
-            # Handle group_id filter: MAGIC_ALL means no filter
-            if group_id != MAGIC_ALL:
-                if group_id:
-                    filter_expr.append(f'group_id == "{group_id}"')
-                else:
-                    # Explicitly filter for null or empty
-                    filter_expr.append('group_id == ""')
+            # Handle group_ids filter: None means no filter (search all groups)
+            if group_ids is not None and len(group_ids) > 0:
+                # Use in operator for multiple group_ids
+                group_ids_str = ', '.join(f'"{g}"' for g in group_ids)
+                filter_expr.append(f'group_id in [{group_ids_str}]')
 
             if participant_user_id:
                 filter_expr.append(

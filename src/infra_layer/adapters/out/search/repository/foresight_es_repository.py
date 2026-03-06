@@ -184,7 +184,7 @@ class ForesightEsRepository(BaseRepository[ForesightDoc]):
         self,
         query: List[str],
         user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         parent_type: Optional[str] = None,
         parent_id: Optional[str] = None,
         keywords: Optional[List[str]] = None,
@@ -204,7 +204,7 @@ class ForesightEsRepository(BaseRepository[ForesightDoc]):
         Args:
             query: List of search terms, supports multiple terms
             user_id: User ID filter
-            group_id: Group ID filter
+            group_ids: List of Group IDs to filter (None means no filter, searches all groups)
             parent_type: Parent type filter (e.g., "memcell", "episode")
             parent_id: Parent memory ID filter
             keywords: Keyword filter
@@ -235,15 +235,10 @@ class ForesightEsRepository(BaseRepository[ForesightDoc]):
                         Q("bool", must_not=Q("exists", field="user_id"))
                     )
 
-            # Handle group_id filter: MAGIC_ALL means no filter
-            if group_id != MAGIC_ALL:
-                if group_id and group_id != "":
-                    filter_queries.append(Q("term", group_id=group_id))
-                elif group_id is None or group_id == "":
-                    # Explicitly filter for null or empty: documents where group_id does not exist
-                    filter_queries.append(
-                        Q("bool", must_not=Q("exists", field="group_id"))
-                    )
+            # Handle group_ids filter: None means no filter (search all groups)
+            if group_ids is not None and len(group_ids) > 0:
+                # Use terms query for multiple group_ids
+                filter_queries.append(Q("terms", group_id=group_ids))
 
             # Handle parent_id filter
             if parent_id:
@@ -409,3 +404,74 @@ class ForesightEsRepository(BaseRepository[ForesightDoc]):
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 return None
+
+    # ==================== Deletion functionality ====================
+
+    async def delete_by_filters(
+        self,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        date_range: Optional[Dict[str, Any]] = None,
+        refresh: bool = False,
+    ) -> int:
+        """
+        Batch delete foresight documents by filter conditions
+
+        Args:
+            user_id: User ID filter
+            group_id: Group ID filter
+            date_range: Time range filter, format: {"gte": "2024-01-01", "lte": "2024-12-31"}
+            refresh: Whether to refresh index immediately
+
+        Returns:
+            Number of deleted documents
+        """
+        try:
+            # Build filter conditions
+            filter_queries = []
+            # Handle user_id filter: MAGIC_ALL means no filter
+            if user_id != MAGIC_ALL and user_id is not None:
+                if user_id:  # Non-empty string: personal memories
+                    filter_queries.append({"term": {"user_id": user_id}})
+                else:  # Empty string: group memories
+                    filter_queries.append({"term": {"user_id": ""}})
+            # Handle group_id filter: MAGIC_ALL means no filter
+            if group_id != MAGIC_ALL and group_id:
+                filter_queries.append({"term": {"group_id": group_id}})
+            if date_range:
+                filter_queries.append({"range": {"timestamp": date_range}})
+
+            # At least one filter condition is required to prevent accidental deletion of all data
+            if not filter_queries:
+                raise ValueError(
+                    "At least one filter condition (user_id, group_id or date_range) must be provided"
+                )
+
+            # Build delete query
+            delete_query = {"bool": {"must": filter_queries}}
+
+            # Execute batch deletion
+            client = await self.get_client()
+            index_name = self.get_index_name()
+
+            response = await client.delete_by_query(
+                index=index_name, body={"query": delete_query}, refresh=refresh
+            )
+
+            deleted_count = response.get('deleted', 0)
+            logger.info(
+                "✅ Successfully batch deleted foresights by filters: user_id=%s, group_id=%s, deleted %d records",
+                user_id,
+                group_id,
+                deleted_count,
+            )
+            return deleted_count
+
+        except Exception as e:
+            logger.error(
+                "❌ Failed to batch delete foresights by filters: user_id=%s, group_id=%s, error=%s",
+                user_id,
+                group_id,
+                e,
+            )
+            raise

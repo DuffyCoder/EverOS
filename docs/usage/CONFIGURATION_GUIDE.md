@@ -11,12 +11,16 @@ This guide provides a detailed explanation of the configuration options in `env.
 
 Configuration for the LLM service used for memory extraction, Agentic retrieval, and Q&A generation.
 
+Provider selection is config-driven (e.g., `llm_config` in the app). When no scene-level provider is set, `LLM_PROVIDER` defines the default provider, and `LLM_API_KEY/LLM_BASE_URL` are only used as fallback for that default.
+
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `LLM_PROVIDER` | Yes | LLM provider, usually set to `openai` for compatibility with OpenAI SDK format | `openai` |
+| `LLM_PROVIDER` | No | Default provider type (used when scene config omits provider) | `openrouter` |
 | `LLM_MODEL` | Yes | Model name. **Evaluation** recommends `gpt-4o-mini`, **Demo** can use cost-effective models like `x-ai/grok-4-fast` | `gpt-4o-mini` |
-| `LLM_BASE_URL` | Yes | API base URL, supports compatible interfaces like OpenRouter, DeepSeek | `https://openrouter.ai/api/v1` |
-| `LLM_API_KEY` | Yes | Your API key | `sk-or-v1-xxxx` |
+| `{PROVIDER}_API_KEY` | Yes* | Provider-specific API key (e.g., `OPENROUTER_API_KEY`, `OPENAI_API_KEY`) | `sk-or-v1-xxxx` |
+| `{PROVIDER}_BASE_URL` | No | Provider-specific base URL (e.g., `OPENROUTER_BASE_URL`, `OPENAI_BASE_URL`) | `https://openrouter.ai/api/v1` |
+| `LLM_API_KEY` | No | Fallback API key for default provider (legacy compatibility) | `sk-or-v1-xxxx` |
+| `LLM_BASE_URL` | No | Fallback base URL for default provider (legacy compatibility) | `https://openrouter.ai/api/v1` |
 | `LLM_TEMPERATURE` | No | Generation temperature, lower values recommended for stable output | `0.3` |
 | `LLM_MAX_TOKENS` | No | Maximum generation tokens | `32768` |
 
@@ -95,7 +99,7 @@ Vector database, used for semantic retrieval.
 ## 5. Other Configuration
 
 ### API Server
-- `API_BASE_URL`: Base URL for V1 API, used for client connections (default `http://localhost:1995`)
+- `API_BASE_URL`: Base URL for V1 API, used for client connections (default `http://localhost:8001`)
 
 ### Environment & Logging
 - `LOG_LEVEL`: Log level (`INFO`, `DEBUG`, `WARNING`, `ERROR`)

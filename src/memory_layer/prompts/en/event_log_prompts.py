@@ -3,7 +3,10 @@ Event Log Extraction Prompts - English Version
 This module contains prompts for extracting structured event logs from episodic memory text.
 """
 
-EVENT_LOG_PROMPT = """You are an expert information extraction analyst and information architect.  
+EVENT_LOG_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
+You are an expert information extraction analyst and information architect.  
 Your task is to analyze the given raw conversation transcript (called "CONVERSATION_TEXT") and produce an event log optimized for factual retrieval.
 
 ---
@@ -78,4 +81,6 @@ Now analyze the provided conversation content and start time carefully, apply al
 Conversation start time: {{TIME}}
 Conversation content:
 {{INPUT_TEXT}}
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

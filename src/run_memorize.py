@@ -6,7 +6,7 @@ Read JSON files in GroupChatFormat format, convert and call memorize interface t
 
 Usage:
     # Call memorize interface: simple direct single message format, process one by one
-    python src/bootstrap.py src/run_memorize.py --input data/group_chat.json --api-url http://localhost:1995/api/v1/memories
+    python src/bootstrap.py src/run_memorize.py --input data/group_chat.json --api-url http://localhost:1995/api/v0/memories
 
     # Validate format only
     python src/bootstrap.py src/run_memorize.py --input data/example.json --validate-only
@@ -158,8 +158,8 @@ class GroupChatMemorizer:
                 }
 
                 # Get conversation-meta API address (constructed based on memories API)
-                # Assume memories API is http://host:port/api/v1/memories
-                # Then conversation-meta API is http://host:port/api/v1/memories/conversation-meta
+                # Assume memories API is http://host:port/api/v0/memories
+                # Then conversation-meta API is http://host:port/api/v0/memories/conversation-meta
                 conversation_meta_url = f"{self.api_url}/conversation-meta"
 
                 logger.info(f"Saving conversation metadata to: {conversation_meta_url}")
@@ -316,7 +316,7 @@ async def async_main():
         epilog="""
 Example usage:
   # Call memorize interface: simple direct single message format, process one by one
-  python src/bootstrap.py src/run_memorize.py --input data/group_chat.json --api-url http://localhost:1995/api/v1/memories
+  python src/bootstrap.py src/run_memorize.py --input data/group_chat.json --api-url http://localhost:1995/api/v0/memories
   
   # Validate format only (API address not required)
   python src/bootstrap.py src/run_memorize.py --input data/group_chat.json --validate-only
@@ -389,7 +389,7 @@ Input file format:
         logger.error("✗ Error: --api-url parameter must be provided")
         logger.error("   Usage:")
         logger.error(
-            "     python src/bootstrap.py src/run_memorize.py --input <file> --api-url http://localhost:1995/api/v1/memories"
+            "     python src/bootstrap.py src/run_memorize.py --input <file> --api-url http://localhost:1995/api/v0/memories"
         )
         logger.error("   Or use --validate-only to validate format only")
         sys.exit(1)

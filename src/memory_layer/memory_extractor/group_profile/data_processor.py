@@ -132,7 +132,9 @@ class GroupProfileDataProcessor:
             Merged and deduplicated memcell_ids (historical order unchanged, new ones appended in time order, up to max_count)
         """
         from common_utils.datetime_utils import get_now_with_timezone
-        from memory_layer.memory_extractor.group_profile_memory_extractor import convert_to_datetime
+        from memory_layer.memory_extractor.group_profile_memory_extractor import (
+            convert_to_datetime,
+        )
 
         historical = historical or []
 
@@ -324,7 +326,7 @@ class GroupProfileDataProcessor:
             return None
 
         for memory in old_memory_list:
-            if memory.memory_type == MemoryType.GROUP_PROFILE:
+            if memory.memory_type == "group_profile":  # MemoryType.GROUP_PROFILE:
                 existing_topics = getattr(memory, "topics", [])
                 # Ensure not None
                 if existing_topics is None:

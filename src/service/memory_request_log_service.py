@@ -6,9 +6,7 @@ Directly extract data from MemorizeRequest and save to MemoryRequestLog,
 replacing the original event listener approach to make timing more controllable.
 """
 
-import json
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 
 from common_utils.datetime_utils import to_iso_format
 from core.di import service
@@ -132,6 +130,9 @@ class MemoryRequestLogService:
         """
         Save a single RawData to MemoryRequestLog
 
+        Delegates to MemoryRequestLogRepository.save_from_raw_data for document
+        creation and persistence.
+
         Args:
             raw_data: RawData object
             group_id: Group ID
@@ -152,138 +153,70 @@ class MemoryRequestLogService:
             logger.debug("group_id is empty, skipping save")
             return None
 
-        # Extract fields from RawData
-        content_dict = raw_data.content or {}
-        message_id = raw_data.data_id
-
-        # Extract core message fields
-        # Note: Field names used by build_raw_data_from_simple_message differ from simple message format
-        # speaker_id / createBy -> sender
-        # speaker_name -> sender_name
-        # timestamp / createTime -> message_create_time
-        # referList -> refer_list
-        sender = (
-            content_dict.get("speaker_id")
-            or content_dict.get("createBy")
-            or content_dict.get("sender")
-        )
-        sender_name = (
-            content_dict.get("speaker_name")
-            or content_dict.get("sender_name")
-            or sender
-        )
-        content = content_dict.get("content")
-        # Message sender role ("user" for human, "assistant" for AI)
-        role = content_dict.get("role")
-        # Support multiple timestamp field names
-        message_create_time = self._parse_create_time(
-            content_dict.get("timestamp")
-            or content_dict.get("createTime")
-            or content_dict.get("create_time")
-        )
-        # Support multiple refer list field names
-        refer_list = content_dict.get("referList") or content_dict.get("refer_list")
-
-        # Generate raw_input_str
-        raw_input_str = None
-        if raw_input_dict:
-            try:
-                raw_input_str = json.dumps(raw_input_dict, ensure_ascii=False)
-            except (TypeError, ValueError):
-                pass
-
-        # Create MemoryRequestLog document
-        memory_request_log = MemoryRequestLog(
-            # Core identifier fields
+        return await repo.save_from_raw_data(
+            raw_data_content=raw_data.content or {},
+            data_id=raw_data.data_id,
             group_id=group_id,
-            request_id=request_id,
-            user_id=sender,
-            # Message core fields
-            message_id=message_id,
-            message_create_time=message_create_time,
-            sender=sender,
-            sender_name=sender_name,
-            role=role,
-            content=content,
             group_name=group_name,
-            refer_list=self._normalize_refer_list(refer_list),
-            # Raw input
-            raw_input=raw_input_dict or content_dict,
-            raw_input_str=raw_input_str,
-            # Request metadata
+            request_id=request_id,
             version=version,
             endpoint_name=endpoint_name,
             method=method,
             url=url,
-            # Event association
             event_id=event_id,
-            # sync_status=-1 indicates a newly saved log record
+            raw_input_dict=raw_input_dict,
         )
-
-        # Save to MongoDB
-        await repo.save(memory_request_log)
-
-        logger.debug(
-            "Saved request log: group_id=%s, message_id=%s, content_preview=%s",
-            group_id,
-            message_id,
-            (content or "")[:50],
-        )
-
-        return message_id
-
-    def _parse_create_time(self, create_time: Any) -> Optional[str]:
-        """Parse creation time and return ISO format string"""
-        if create_time is None:
-            return None
-        if isinstance(create_time, datetime):
-            return create_time.isoformat()
-        if isinstance(create_time, str):
-            # Validate if it's a valid time format, return directly if so
-            try:
-                from common_utils.datetime_utils import from_iso_format
-
-                parsed = from_iso_format(create_time)
-                return parsed.isoformat() if parsed else create_time
-            except Exception:
-                # Parsing failed, return original string
-                return create_time
-        return None
-
-    def _normalize_refer_list(self, refer_list: Any) -> Optional[List[str]]:
-        """
-        Normalize refer_list to a list of strings
-
-        Args:
-            refer_list: Original refer_list, could be a list of strings or dictionaries
-
-        Returns:
-            Normalized list of strings
-        """
-        if not refer_list:
-            return None
-
-        if not isinstance(refer_list, list):
-            return None
-
-        result = []
-        for item in refer_list:
-            if isinstance(item, str):
-                result.append(item)
-            elif isinstance(item, dict):
-                # If it's a dictionary, try to extract message_id
-                msg_id = item.get("message_id") or item.get("id")
-                if msg_id:
-                    result.append(str(msg_id))
-
-        return result if result else None
 
     # ==================== Query Methods ====================
+
+    async def check_duplicate_message(
+        self, group_id: str, user_id: str, message_id: str
+    ) -> bool:
+        """
+        Check if a message with the given group_id, user_id, and message_id already exists
+
+        Used for duplicate detection before processing new memorize requests.
+        This helps prevent duplicate message processing when the same message
+        is submitted multiple times.
+
+        Args:
+            group_id: Conversation group ID
+            user_id: User ID (sender)
+            message_id: Message ID
+
+        Returns:
+            bool: True if the message already exists, False otherwise
+        """
+        repo = self._get_repository()
+        try:
+            existing = await repo.find_one_by_group_user_message(
+                group_id=group_id, user_id=user_id, message_id=message_id
+            )
+            if existing:
+                logger.info(
+                    "Duplicate message detected: group_id=%s, user_id=%s, message_id=%s",
+                    group_id,
+                    user_id,
+                    message_id,
+                )
+                return True
+            return False
+        except Exception as e:
+            logger.error(
+                "Failed to check duplicate message: group_id=%s, user_id=%s, message_id=%s, error=%s",
+                group_id,
+                user_id,
+                message_id,
+                e,
+            )
+            # In case of error, return False to allow the request to proceed
+            # This is a fail-open approach to avoid blocking legitimate requests
+            return False
 
     async def get_pending_request_logs(
         self,
         user_id: Optional[str] = MAGIC_ALL,
-        group_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
         sync_status_list: Optional[List[int]] = None,
         limit: int = 1000,
         skip: int = 0,
@@ -303,10 +236,7 @@ class MemoryRequestLogService:
                 - MAGIC_ALL: Don't filter by user_id (default)
                 - None or "": Filter for null/empty values
                 - Other values: Exact match
-            group_id: Group ID filter
-                - MAGIC_ALL: Don't filter by group_id (default)
-                - None or "": Filter for null/empty values
-                - Other values: Exact match
+            group_ids: List of Group IDs to filter (None to skip filtering, searches all groups)
             sync_status_list: List of sync_status values to filter by
                 - Default: [-1, 0] (pending and accumulating, i.e., unconsumed)
                 - [-1]: Just log records
@@ -329,7 +259,7 @@ class MemoryRequestLogService:
         try:
             results = await repo.find_pending_by_filters(
                 user_id=user_id,
-                group_id=group_id,
+                group_ids=group_ids,
                 sync_status_list=sync_status_list,
                 limit=limit,
                 skip=skip,
@@ -337,19 +267,19 @@ class MemoryRequestLogService:
             )
 
             logger.debug(
-                "Retrieved pending request logs: user_id=%s, group_id=%s, "
+                "Retrieved pending request logs: user_id=%s, group_ids=%s, "
                 "sync_status_list=%s, count=%d",
                 user_id,
-                group_id,
+                group_ids,
                 sync_status_list,
                 len(results),
             )
             return results
         except Exception as e:
             logger.error(
-                "Failed to get pending request logs: user_id=%s, group_id=%s, error=%s",
+                "Failed to get pending request logs: user_id=%s, group_ids=%s, error=%s",
                 user_id,
-                group_id,
+                group_ids,
                 e,
             )
             return []
@@ -357,7 +287,7 @@ class MemoryRequestLogService:
     async def get_pending_messages(
         self,
         user_id: Optional[str] = MAGIC_ALL,
-        group_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
         limit: int = 1000,
     ) -> List[PendingMessage]:
         """
@@ -368,14 +298,14 @@ class MemoryRequestLogService:
 
         Args:
             user_id: User ID filter (MAGIC_ALL to skip filtering)
-            group_id: Group ID filter (MAGIC_ALL to skip filtering)
+            group_ids: List of Group IDs to filter (None to skip filtering, searches all groups)
             limit: Maximum number of records to return (default 1000)
 
         Returns:
             List[PendingMessage]: List of pending messages
         """
         logs = await self.get_pending_request_logs(
-            user_id=user_id, group_id=group_id, limit=limit
+            user_id=user_id, group_ids=group_ids, limit=limit
         )
 
         # Convert to list of PendingMessage
@@ -399,9 +329,9 @@ class MemoryRequestLogService:
             result.append(pending_msg)
 
         logger.debug(
-            "Converted %d pending request logs to PendingMessage: user_id=%s, group_id=%s",
+            "Converted %d pending request logs to PendingMessage: user_id=%s, group_ids=%s",
             len(result),
             user_id,
-            group_id,
+            group_ids,
         )
         return result

@@ -163,7 +163,7 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
     async def find_by_filters(
         self,
         user_id: Optional[str] = MAGIC_ALL,
-        group_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: Optional[int] = None,
@@ -172,17 +172,18 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
         model: Optional[Type[T]] = None,
     ) -> List[Union[ForesightRecord, ForesightRecordProjection]]:
         """
-        Retrieve list of foresights by filters (user_id, group_id, and/or validity time range)
+        Retrieve list of foresights by filters (user_id, group_ids, and/or validity time range)
 
         Args:
             user_id: User ID
                 - Not provided or MAGIC_ALL ("__all__"): Don't filter by user_id
                 - None or "": Filter for null/empty values (records with user_id as None or "")
                 - Other values: Exact match
-            group_id: Group ID
-                - Not provided or MAGIC_ALL ("__all__"): Don't filter by group_id
-                - None or "": Filter for null/empty values (records with group_id as None or "")
-                - Other values: Exact match
+            group_ids: List of Group IDs
+                - None: Skip group filtering
+                - []: Empty array, skip filtering
+                - ["g1"]: Single element array, exact match
+                - ["g1", "g2"]: Multiple elements, use $in operator
             start_time: Optional query start time (datetime object)
                 - Filters foresights whose validity period overlaps with [start_time, end_time)
                 - Will be converted to ISO date string (YYYY-MM-DD) internally
@@ -227,13 +228,15 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
                 else:
                     filter_dict["user_id"] = user_id
 
-            # Handle group_id filter
-            if group_id != MAGIC_ALL:
-                if group_id == "" or group_id is None:
-                    # Explicitly filter for null or empty string
-                    filter_dict["group_id"] = {"$in": [None, ""]}
+            # Handle group_ids filter (array, no MAGIC_ALL)
+            if group_ids is not None and len(group_ids) > 0:
+                if len(group_ids) == 1:
+                    # Single element: exact match
+                    filter_dict["group_id"] = group_ids[0]
                 else:
-                    filter_dict["group_id"] = group_id
+                    # Multiple elements: use $in operator
+                    filter_dict["group_id"] = {"$in": group_ids}
+            # group_ids is None or empty: skip group filtering
 
             # Use full version if model is not specified
             target_model = model if model is not None else self.model
@@ -246,16 +249,26 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
                     filter_dict, projection_model=target_model, session=session
                 )
 
+            # Sort by created_at descending (most recent first)
+            query = query.sort("-created_at")
+
             if skip:
                 query = query.skip(skip)
             if limit:
                 query = query.limit(limit)
 
+            logger.debug(
+                "🔍 ForesightRecord.find_by_filters query: %s, sort=-created_at, skip=%s, limit=%s",
+                query.get_filter_query(),
+                skip,
+                limit,
+            )
+
             results = await query.to_list()
             logger.debug(
-                "✅ Retrieved foresights successfully: user_id=%s, group_id=%s, time_range=[%s, %s), found %d records (model=%s)",
+                "✅ Retrieved foresights successfully: user_id=%s, group_ids=%s, time_range=[%s, %s), found %d records (model=%s)",
                 user_id,
-                group_id,
+                group_ids,
                 start_str,
                 end_str,
                 len(results),
@@ -266,71 +279,131 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
             logger.error("❌ Failed to retrieve foresights: %s", e)
             return []
 
-    async def delete_by_id(
-        self, memory_id: str, session: Optional[AsyncClientSession] = None
-    ) -> bool:
-        """
-        Delete personal foresight by ID
-
-        Args:
-            memory_id: Memory ID
-            session: Optional MongoDB session for transaction support
-
-        Returns:
-            Whether deletion was successful
-        """
-        try:
-            object_id = ObjectId(memory_id)
-            result = await self.model.find({"_id": object_id}, session=session).delete()
-            success = result.deleted_count > 0 if result else False
-
-            if success:
-                logger.info("✅ Deleted personal foresight successfully: %s", memory_id)
-            else:
-                logger.warning(
-                    "⚠️  Personal foresight to delete not found: %s", memory_id
-                )
-
-            return success
-        except Exception as e:
-            logger.error("❌ Failed to delete personal foresight: %s", e)
-            return False
-
-    async def delete_by_parent_id(
+    async def count_by_filters(
         self,
-        parent_id: str,
-        parent_type: Optional[str] = None,
+        user_id: Optional[str] = MAGIC_ALL,
+        group_ids: Optional[List[str]] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         session: Optional[AsyncClientSession] = None,
     ) -> int:
         """
-        Delete all foresights by parent memory ID and optionally parent type
+        Count foresights by filters (without pagination)
 
         Args:
-            parent_id: Parent memory ID
-            parent_type: Optional parent type filter (e.g., "memcell", "episode")
+            user_id: User ID filter (same semantics as find_by_filters)
+            group_ids: Group IDs filter (same semantics as find_by_filters)
+            start_time: Optional query start time (datetime object)
+            end_time: Optional query end time (datetime object)
+            session: Optional MongoDB session
+
+        Returns:
+            Total count of matching records
+        """
+        try:
+            # Build query filter (same as find_by_filters)
+            filter_dict = {}
+
+            # Convert datetime to ISO date string for foresight validity period comparison
+            start_str = to_date_str(start_time)
+            end_str = to_date_str(end_time)
+
+            # Handle time range filter (overlap query)
+            if start_str is not None and end_str is not None:
+                filter_dict["$and"] = [
+                    {"start_time": {"$lte": end_str}},
+                    {"end_time": {"$gte": start_str}},
+                ]
+            elif start_str is not None:
+                filter_dict["end_time"] = {"$gte": start_str}
+            elif end_str is not None:
+                filter_dict["start_time"] = {"$lte": end_str}
+
+            # Handle user_id filter
+            if user_id != MAGIC_ALL:
+                if user_id == "" or user_id is None:
+                    filter_dict["user_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["user_id"] = user_id
+
+            # Handle group_ids filter
+            if group_ids is not None and len(group_ids) > 0:
+                if len(group_ids) == 1:
+                    filter_dict["group_id"] = group_ids[0]
+                else:
+                    filter_dict["group_id"] = {"$in": group_ids}
+
+            count = await self.model.find(filter_dict, session=session).count()
+            logger.debug(
+                "✅ Counted foresights: user_id=%s, group_ids=%s, count=%d",
+                user_id,
+                group_ids,
+                count,
+            )
+            return count
+        except Exception as e:
+            logger.error("❌ Failed to count foresights: %s", e)
+            return 0
+
+    async def delete_by_filters(
+        self,
+        user_id: Optional[str] = MAGIC_ALL,
+        group_id: Optional[str] = MAGIC_ALL,
+        parent_id: Optional[str] = None,
+        session: Optional[AsyncClientSession] = None,
+    ) -> int:
+        """
+        Soft delete foresight records by filter conditions
+
+        Args:
+            user_id: User ID filter
+                - MAGIC_ALL ("__all__"): Don't filter by user_id
+                - Other values: Exact match
+            group_id: Group ID filter
+                - MAGIC_ALL ("__all__"): Don't filter by group_id
+                - Other values: Exact match
+            parent_id: Parent ID filter (for cascade delete)
             session: Optional MongoDB session for transaction support
 
         Returns:
             Number of deleted records
         """
         try:
-            query_filter = {"parent_id": parent_id}
-            if parent_type is not None:
-                query_filter["parent_type"] = parent_type
+            # Build query filter
+            filter_dict = {}
 
-            result = await self.model.find(query_filter, session=session).delete()
-            count = result.deleted_count if result else 0
+            # Handle user_id filter
+            if user_id != MAGIC_ALL:
+                if user_id == "" or user_id is None:
+                    filter_dict["user_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["user_id"] = user_id
+
+            # Handle group_id filter
+            if group_id != MAGIC_ALL:
+                if group_id == "" or group_id is None:
+                    filter_dict["group_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["group_id"] = group_id
+
+            # Handle parent_id filter
+            if parent_id:
+                filter_dict["parent_id"] = parent_id
+
+            if not filter_dict:
+                logger.warning("⚠️  No filter conditions provided for delete_by_filters")
+                return 0
+
+            result = await self.model.delete_many(filter_dict, session=session)
+            count = result.modified_count if result else 0
             logger.info(
-                "✅ Deleted foresights by parent memory ID successfully: %s (type=%s), deleted %d records",
-                parent_id,
-                parent_type,
+                "✅ Successfully deleted foresight records by filters: filter=%s, deleted %d records",
+                filter_dict,
                 count,
             )
             return count
         except Exception as e:
-            logger.error(
-                "❌ Failed to delete foresights by parent episodic memory ID: %s", e
-            )
+            logger.error("❌ Failed to delete foresight records by filters: %s", e)
             return 0
 
 

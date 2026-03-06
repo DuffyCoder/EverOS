@@ -31,24 +31,30 @@ except ImportError:
 
 class ClusterState:
     """Internal state for a single group's clustering."""
-    
-    def __init__(self):
+
+    def __init__(self, group_id: str = ""):
         """Initialize empty cluster state."""
+        self.group_id: str = group_id
         self.event_ids: List[str] = []
         self.timestamps: List[float] = []
         self.vectors: List[np.ndarray] = []
         self.cluster_ids: List[str] = []
         self.eventid_to_cluster: Dict[str, str] = {}
         self.next_cluster_idx: int = 0
-        
+
         # Centroid-based clustering state
         self.cluster_centroids: Dict[str, np.ndarray] = {}
         self.cluster_counts: Dict[str, int] = {}
         self.cluster_last_ts: Dict[str, Optional[float]] = {}
-    
+
     def assign_new_cluster(self, event_id: str) -> str:
-        """Assign a new cluster ID to an event."""
-        cluster_id = f"cluster_{self.next_cluster_idx:03d}"
+        """Assign a new cluster ID to an event.
+
+        Generates a globally unique cluster_id by prefixing with group_id.
+        Format: {group_id}__c{idx:03d}
+        """
+        prefix = f"{self.group_id}__" if self.group_id else ""
+        cluster_id = f"{prefix}cluster_{self.next_cluster_idx:03d}"
         self.next_cluster_idx += 1
         self.eventid_to_cluster[event_id] = cluster_id
         self.cluster_ids.append(cluster_id)
@@ -98,6 +104,7 @@ class ClusterState:
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for serialization."""
         return {
+            "group_id": self.group_id,
             "event_ids": self.event_ids,
             "timestamps": self.timestamps,
             "cluster_ids": self.cluster_ids,
@@ -110,11 +117,11 @@ class ClusterState:
             "cluster_counts": self.cluster_counts,
             "cluster_last_ts": self.cluster_last_ts,
         }
-    
+
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "ClusterState":
         """Create ClusterState from dictionary."""
-        state = ClusterState()
+        state = ClusterState(group_id=data.get("group_id", ""))
         state.event_ids = list(data.get("event_ids", []))
         state.timestamps = list(data.get("timestamps", []))
         state.cluster_ids = list(data.get("cluster_ids", []))

@@ -147,7 +147,7 @@ class EventLogMilvusRepository(BaseMilvusRepository[EventLogCollection]):
         self,
         query_vector: List[float],
         user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         parent_type: Optional[str] = None,
         parent_id: Optional[str] = None,
         event_type: Optional[str] = None,
@@ -164,7 +164,7 @@ class EventLogMilvusRepository(BaseMilvusRepository[EventLogCollection]):
         Args:
             query_vector: Query vector
             user_id: User ID filter
-            group_id: Group ID filter
+            group_ids: List of Group IDs to filter (None means no filter, searches all groups)
             parent_type: Parent type filter (e.g., "memcell", "episode")
             parent_id: Parent memory ID filter
             event_type: Event type filter
@@ -189,13 +189,11 @@ class EventLogMilvusRepository(BaseMilvusRepository[EventLogCollection]):
                     # Explicitly filter for null or empty
                     filter_expr.append('user_id == ""')
 
-            # Handle group_id filter: MAGIC_ALL means no filter
-            if group_id != MAGIC_ALL:
-                if group_id:
-                    filter_expr.append(f'group_id == "{group_id}"')
-                else:
-                    # Explicitly filter for null or empty
-                    filter_expr.append('group_id == ""')
+            # Handle group_ids filter: None means no filter (search all groups)
+            if group_ids is not None and len(group_ids) > 0:
+                # Use in operator for multiple group_ids
+                group_ids_str = ', '.join(f'"{g}"' for g in group_ids)
+                filter_expr.append(f'group_id in [{group_ids_str}]')
 
             if participant_user_id:
                 filter_expr.append(
@@ -301,69 +299,6 @@ class EventLogMilvusRepository(BaseMilvusRepository[EventLogCollection]):
 
     # ==================== Deletion Functionality ====================
 
-    async def delete_by_id(self, log_id: str) -> bool:
-        """
-        Delete event log document by log_id
-
-        Args:
-            log_id: Unique identifier of the event log
-
-        Returns:
-            True if deletion succeeds, otherwise False
-        """
-        try:
-            success = await super().delete_by_id(log_id)
-            if success:
-                logger.debug(
-                    "✅ Successfully deleted event log by log_id: log_id=%s", log_id
-                )
-            return success
-        except Exception as e:
-            logger.error(
-                "❌ Failed to delete event log by log_id: log_id=%s, error=%s",
-                log_id,
-                e,
-            )
-            return False
-
-    async def delete_by_parent_id(
-        self, parent_id: str, parent_type: Optional[str] = None
-    ) -> int:
-        """
-        Delete all associated event logs by parent memory ID and optionally parent type
-
-        Args:
-            parent_id: Parent memory ID
-            parent_type: Optional parent type filter (e.g., "memcell", "episode")
-
-        Returns:
-            Number of deleted documents
-        """
-        try:
-            expr = f'parent_id == "{parent_id}"'
-            if parent_type is not None:
-                expr += f' and parent_type == "{parent_type}"'
-
-            # First query the number of documents to delete
-            results = await self.collection.query(expr=expr, output_fields=["id"])
-            delete_count = len(results)
-
-            if delete_count > 0:
-                # Perform deletion
-                await self.collection.delete(expr)
-
-            logger.debug(
-                "✅ Successfully deleted event logs by parent_id: %s (type=%s), deleted %d records",
-                parent_id,
-                parent_type,
-                delete_count,
-            )
-            return delete_count
-
-        except Exception as e:
-            logger.error("❌ Failed to delete event logs by parent_id: %s", e)
-            raise
-
     async def delete_by_filters(
         self,
         user_id: Optional[str] = None,
@@ -389,9 +324,7 @@ class EventLogMilvusRepository(BaseMilvusRepository[EventLogCollection]):
             # Handle user_id filter: MAGIC_ALL means no filter
             if user_id != MAGIC_ALL and user_id is not None:
                 if user_id:  # Non-empty string: personal memory
-                    # Check both user_id field and participants array
-                    user_filter = f'(user_id == "{user_id}" or array_contains(participants, "{user_id}"))'
-                    filter_expr.append(user_filter)
+                    filter_expr.append(f'user_id == "{user_id}"')
                 else:  # Empty string: group memory
                     filter_expr.append('user_id == ""')
             # Handle group_id filter: MAGIC_ALL means no filter

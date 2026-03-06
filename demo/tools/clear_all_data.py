@@ -9,7 +9,6 @@ import time
 from typing import Dict, Any, List
 
 from pymilvus import utility, Collection
-from pymilvus import utility, Collection
 
 from infra_layer.adapters.out.search.milvus.memory.episodic_memory_collection import (
     EpisodicMemoryCollection,
@@ -20,6 +19,15 @@ from infra_layer.adapters.out.search.milvus.memory.foresight_collection import (
 from infra_layer.adapters.out.search.milvus.memory.event_log_collection import (
     EventLogCollection,
 )
+from infra_layer.adapters.out.search.milvus.memory.user_profile_collection import (
+    UserProfileCollection,
+)
+from infra_layer.adapters.out.search.milvus.memory.agent_case_collection import (
+    AgentCaseCollection,
+)
+from infra_layer.adapters.out.search.milvus.memory.agent_skill_collection import (
+    AgentSkillCollection,
+)
 from infra_layer.adapters.out.search.elasticsearch.memory.episodic_memory import (
     EpisodicMemoryDoc,
 )
@@ -27,6 +35,12 @@ from infra_layer.adapters.out.search.elasticsearch.memory.foresight import (
     ForesightDoc,
 )
 from infra_layer.adapters.out.search.elasticsearch.memory.event_log import EventLogDoc
+from infra_layer.adapters.out.search.elasticsearch.memory.agent_case import (
+    AgentCaseDoc,
+)
+from infra_layer.adapters.out.search.elasticsearch.memory.agent_skill import (
+    AgentSkillDoc,
+)
 from core.di import get_bean_by_type
 from core.component.redis_provider import RedisProvider
 from core.component.mongodb_client_factory import MongoDBClientFactory
@@ -119,6 +133,9 @@ def _clear_milvus(
         EpisodicMemoryCollection,
         ForesightCollection,
         EventLogCollection,
+        UserProfileCollection,
+        AgentCaseCollection,
+        AgentSkillCollection,
     ]
     for cls in collection_classes:
         collection = cls()
@@ -198,6 +215,8 @@ async def _clear_elasticsearch(
             EpisodicMemoryDoc.get_index_name(),
             ForesightDoc.get_index_name(),
             EventLogDoc.get_index_name(),
+            AgentCaseDoc.get_index_name(),
+            AgentSkillDoc.get_index_name(),
         ]
 
         if rebuild_index:
@@ -228,7 +247,7 @@ async def _clear_elasticsearch(
             from core.oxm.es.es_utils import EsIndexInitializer
             initializer = EsIndexInitializer()
             await initializer.initialize_indices(
-                [EpisodicMemoryDoc, ForesightDoc, EventLogDoc]
+                [EpisodicMemoryDoc, ForesightDoc, EventLogDoc, AgentCaseDoc, AgentSkillDoc]
             )
             stats["recreated"] = True
             if verbose:

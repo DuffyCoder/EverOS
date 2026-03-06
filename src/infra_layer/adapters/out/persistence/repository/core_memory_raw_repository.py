@@ -77,74 +77,31 @@ class CoreMemoryRawRepository(BaseRepository[CoreMemory]):
     # ==================== Basic CRUD Methods ====================
 
     async def get_by_user_id(
-        self,
-        user_id: str,
-        version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
-        session: Optional[AsyncClientSession] = None,
+        self, user_id: str, session: Optional[AsyncClientSession] = None
     ) -> Union[Optional[CoreMemory], List[CoreMemory]]:
         """
         Get core memory by user ID
 
         Args:
             user_id: User ID
-            version_range: Version range (start, end), inclusive interval [start, end].
-                          If not provided or None, get the latest version (sorted by version descending)
-                          If provided, return all versions within the range
             session: Optional MongoDB session for transaction support
 
         Returns:
-            If version_range is None, return a single CoreMemory or None
-            If version_range is not None, return List[CoreMemory]
+            Return a single CoreMemory or None
         """
         try:
             query_filter = {"user_id": user_id}
-
-            # Handle version range query
-            if version_range:
-                start_version, end_version = version_range
-                version_filter = {}
-                if start_version is not None:
-                    version_filter["$gte"] = start_version
-                if end_version is not None:
-                    version_filter["$lte"] = end_version
-                if version_filter:
-                    query_filter["version"] = version_filter
-
-            # If no version range is specified, get the latest version (single result)
-            if version_range is None:
-                result = await self.model.find_one(
-                    query_filter,
-                    sort=[
-                        ("version", -1)
-                    ],  # Sort by version descending to get the latest
-                    session=session,
-                )
-                if result:
-                    logger.debug(
-                        "✅ Successfully retrieved core memory by user ID: %s, version=%s",
-                        user_id,
-                        result.version,
-                    )
-                else:
-                    logger.debug("ℹ️  Core memory not found: user_id=%s", user_id)
-                return result
-            else:
-                # If version range is specified, get all matching versions
-                results = await self.model.find(
-                    query_filter,
-                    sort=[("version", -1)],
-                    session=session,  # Sort by version descending
-                ).to_list()
-                logger.debug(
-                    "✅ Successfully retrieved core memory versions by user ID: %s, version_range=%s, found %d records",
-                    user_id,
-                    version_range,
-                    len(results),
-                )
-                return results
+            # Get the latest version (single result)
+            results = await self.model.find(query_filter, session=session).to_list()
+            logger.debug(
+                "✅ Successfully retrieved core memory versions by user ID: %s, found %d records",
+                user_id,
+                len(results),
+            )
+            return results
         except Exception as e:
             logger.error("❌ Failed to retrieve core memory by user ID: %s", e)
-            return None if version_range is None else []
+            return None
 
     async def update_by_user_id(
         self,

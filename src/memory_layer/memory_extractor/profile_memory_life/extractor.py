@@ -103,7 +103,6 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
                 user_id=request.user_id or "",
                 group_id=request.group_id or "",
                 timestamp=get_now_with_timezone(),
-                ori_event_id_list=[],
             )
         else:
             logger.info(

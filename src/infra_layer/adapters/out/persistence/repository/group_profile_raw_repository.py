@@ -80,18 +80,13 @@ class GroupProfileRawRepository(BaseRepository[GroupProfile]):
     # ==================== Basic CRUD Methods ====================
 
     async def get_by_group_id(
-        self,
-        group_id: str,
-        version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
-        session: Optional[AsyncClientSession] = None,
+        self, group_id: str, session: Optional[AsyncClientSession] = None
     ) -> Optional[GroupProfile]:
         """
         Get group profile by group ID
 
         Args:
             group_id: Group ID
-            version_range: Version range (start, end), inclusive [start, end].
-                          If not provided or None, get the latest version (sorted by version descending)
             session: Optional MongoDB session for transaction support
 
         Returns:
@@ -100,27 +95,12 @@ class GroupProfileRawRepository(BaseRepository[GroupProfile]):
         try:
             query_filter = {"group_id": group_id}
 
-            # Handle version range query
-            if version_range:
-                start_version, end_version = version_range
-                version_filter = {}
-                if start_version is not None:
-                    version_filter["$gte"] = start_version
-                if end_version is not None:
-                    version_filter["$lte"] = end_version
-                if version_filter:
-                    query_filter["version"] = version_filter
-
-            # Sort by version descending to get the latest version
-            result = await self.model.find_one(
-                query_filter, sort=[("version", -1)], session=session
-            )
+            # Get the latest version (single result)
+            result = await self.model.find_one(query_filter, session=session)
 
             if result:
                 logger.debug(
-                    "✅ Successfully retrieved group profile by group ID: %s, version=%s",
-                    group_id,
-                    result.version,
+                    "✅ Successfully retrieved group profile by group ID: %s", group_id
                 )
             else:
                 logger.debug("ℹ️  Group profile not found: group_id=%s", group_id)

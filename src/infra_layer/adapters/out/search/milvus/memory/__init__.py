@@ -13,5 +13,13 @@ from infra_layer.adapters.out.search.milvus.memory.foresight_collection import (
 from infra_layer.adapters.out.search.milvus.memory.event_log_collection import (
     EventLogCollection,
 )
+from infra_layer.adapters.out.search.milvus.memory.user_profile_collection import (
+    UserProfileCollection,
+)
 
-__all__ = ["EpisodicMemoryCollection", "ForesightCollection", "EventLogCollection"]
+__all__ = [
+    "EpisodicMemoryCollection",
+    "ForesightCollection",
+    "EventLogCollection",
+    "UserProfileCollection",
+]

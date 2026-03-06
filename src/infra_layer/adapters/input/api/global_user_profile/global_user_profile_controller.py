@@ -38,7 +38,7 @@ class GlobalUserProfileController(BaseController):
             global_user_profile_service: Global user profile service (via dependency injection)
         """
         super().__init__(
-            prefix="/api/v1/global-user-profile",
+            prefix="/api/v0/global-user-profile",
             tags=["Global User Profile"],
             default_auth="none",  # Adjust authentication strategy as needed
         )
@@ -77,7 +77,7 @@ class GlobalUserProfileController(BaseController):
         ```
 
         ## API path:
-        POST /api/v1/global-user-profile/custom
+        POST /api/v0/global-user-profile/custom
         """,
         responses={
             200: {

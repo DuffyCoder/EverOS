@@ -13,6 +13,7 @@ from core.di.decorators import repository
 from core.constants.exceptions import ValidationException
 from infra_layer.adapters.out.persistence.document.memory.conversation_meta import (
     ConversationMeta,
+    LlmCustomSettingModel,
 )
 from memory_layer.profile_manager.config import ScenarioType
 
@@ -46,21 +47,49 @@ class ConversationMetaRawRepository(BaseRepository[ConversationMeta]):
         """
         if scene not in ALLOWED_SCENES:
             error_message = (
-                f"invalid scene value: {scene}, "
-                f"allowed values: {ALLOWED_SCENES}"
+                f"invalid scene value: {scene}, " f"allowed values: {ALLOWED_SCENES}"
             )
             logger.error("❌ Scene validation failed: %s", error_message)
             raise ValidationException(
                 message=error_message,
                 field="scene",
-                details={
-                    "invalid_value": scene,
-                    "allowed_values": ALLOWED_SCENES,
-                },
+                details={"invalid_value": scene, "allowed_values": ALLOWED_SCENES},
             )
 
     async def get_by_group_id(
         self, group_id: Optional[str], session: Optional[AsyncClientSession] = None
+    ) -> Optional[ConversationMeta]:
+        """
+        Get conversation metadata by group ID (no fallback)
+
+        Args:
+            group_id: Group ID (can be None to get default/global config)
+            session: Optional MongoDB session, used for transaction support
+
+        Returns:
+            Conversation metadata object or None if not found.
+        """
+        try:
+            conversation_meta = await self.model.find_one(
+                {"group_id": group_id}, session=session
+            )
+            if conversation_meta:
+                logger.debug(
+                    "✅ Successfully retrieved conversation metadata by group_id: %s",
+                    group_id,
+                )
+            return conversation_meta
+        except Exception as e:
+            logger.error(
+                "❌ Failed to retrieve conversation metadata by group_id: %s", e
+            )
+            return None
+
+    async def get_by_group_id_with_fallback(
+        self,
+        group_id: Optional[str],
+        session: Optional[AsyncClientSession] = None,
+        key: Optional[str] = None,
     ) -> Optional[ConversationMeta]:
         """
         Get conversation metadata by group ID with automatic fallback to default config
@@ -68,10 +97,13 @@ class ConversationMetaRawRepository(BaseRepository[ConversationMeta]):
         Args:
             group_id: Group ID (can be None to get default config directly)
             session: Optional MongoDB session, used for transaction support
+            key: Optional field key to check. If provided and the key's value is missing
+                 in the found record, will fallback to global config to get that field value.
 
         Returns:
             Conversation metadata object or None.
             If group_id is provided but not found, automatically falls back to default config.
+            If key is provided and its value is missing, merges the value from global config.
         """
         try:
             # First try to find by exact group_id
@@ -83,6 +115,22 @@ class ConversationMetaRawRepository(BaseRepository[ConversationMeta]):
                     "✅ Successfully retrieved conversation metadata by group_id: %s",
                     group_id,
                 )
+                # If key is provided, check if the key's value exists
+                if key and group_id is not None:
+                    key_value = getattr(conversation_meta, key, None)
+                    if key_value is None:
+                        # Key value is missing, try to get from global config
+                        logger.debug(
+                            "⚡ Key '%s' not found in group_id %s, "
+                            "falling back to global config for this field",
+                            key,
+                            group_id,
+                        )
+                        global_meta = await self.model.find_one(
+                            {"group_id": None}, session=session
+                        )
+                        if global_meta:
+                            return global_meta
                 return conversation_meta
 
             # If group_id is None or not found, no fallback needed for None case
@@ -109,50 +157,30 @@ class ConversationMetaRawRepository(BaseRepository[ConversationMeta]):
             )
             return None
 
-    async def list_by_scene(
-        self,
-        scene: str,
-        limit: Optional[int] = None,
-        skip: Optional[int] = None,
-        session: Optional[AsyncClientSession] = None,
-    ) -> List[ConversationMeta]:
+    async def get_llm_custom_setting(
+        self, group_id: Optional[str], session: Optional[AsyncClientSession] = None
+    ) -> Optional[LlmCustomSettingModel]:
         """
-        Get list of conversation metadata by scene identifier
+        Get LLM custom setting from global config (group_id=None).
+
+        llm_custom_setting is only stored in global config, so this method
+        always queries the global config regardless of the provided group_id.
 
         Args:
-            scene: Scene identifier
-            limit: Limit on number of returned items
-            skip: Number of items to skip
+            group_id: Group ID (used only for logging)
             session: Optional MongoDB session
 
         Returns:
-            List of conversation metadata
+            LlmCustomSettingModel from global config, or None if not configured
         """
-        try:
-            # Validate scene field
-            self._validate_scene(scene=scene)
-
-            query = self.model.find({"scene": scene}, session=session)
-            if skip:
-                query = query.skip(skip)
-            if limit:
-                query = query.limit(limit)
-
-            result = await query.to_list()
+        global_meta = await self.get_by_group_id_with_fallback(None, session=session)
+        if global_meta and global_meta.llm_custom_setting:
             logger.debug(
-                "✅ Successfully retrieved conversation metadata list by scene: scene=%s, count=%d",
-                scene,
-                len(result),
+                "✅ Retrieved llm_custom_setting from global config for group_id: %s",
+                group_id,
             )
-            return result
-        except ValidationException:
-            # Re-raise ValidationException to propagate detailed error info
-            raise
-        except Exception as e:
-            logger.error(
-                "❌ Failed to retrieve conversation metadata list by scene: %s", e
-            )
-            return []
+            return global_meta.llm_custom_setting
+        return None
 
     async def create_conversation_meta(
         self,
@@ -214,6 +242,7 @@ class ConversationMetaRawRepository(BaseRepository[ConversationMeta]):
             if "scene" in update_data:
                 self._validate_scene(update_data["scene"])
 
+            # Use simple get without fallback - we need exact match for update
             conversation_meta = await self.get_by_group_id(group_id, session=session)
             if conversation_meta:
                 for key, value in update_data.items():

@@ -6,7 +6,7 @@ Provides business logic for conversation metadata operations.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from core.di import service
 from core.di.utils import get_bean_by_type
@@ -16,12 +16,14 @@ from infra_layer.adapters.out.persistence.repository.conversation_meta_raw_repos
 from infra_layer.adapters.out.persistence.document.memory.conversation_meta import (
     ConversationMeta,
     UserDetailModel,
+    LlmCustomSettingModel,
 )
 from infra_layer.adapters.input.api.dto.memory_dto import (
     ConversationMetaCreateRequest,
     ConversationMetaPatchRequest,
     ConversationMetaResponse,
 )
+from service.conversation_meta_checker import ConversationMetaChecker, Operation
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,16 @@ class ConversationMetaService:
         Returns:
             ConversationMetaResponse DTO
         """
+        # Convert llm_custom_setting model to dict for response
+        llm_setting = getattr(meta, "llm_custom_setting", None)
+        llm_setting_dict = llm_setting.to_dict() if llm_setting else None
+
         return ConversationMetaResponse(
             id=str(meta.id),
             group_id=meta.group_id,
             scene=meta.scene,
             scene_desc=meta.scene_desc,
+            llm_custom_setting=llm_setting_dict,
             name=meta.name,
             description=meta.description,
             conversation_created_at=meta.conversation_created_at,
@@ -95,7 +102,7 @@ class ConversationMetaService:
             ConversationMetaResponse or None if not found
         """
         repo = self._get_repository()
-        meta = await repo.get_by_group_id(group_id)
+        meta = await repo.get_by_group_id_with_fallback(group_id)
 
         if not meta:
             logger.debug("Conversation metadata not found for group_id: %s", group_id)
@@ -119,29 +126,59 @@ class ConversationMetaService:
 
         Returns:
             ConversationMetaResponse or None if failed
+
+        Raises:
+            ValidationException: If validation fails based on config level
         """
         repo = self._get_repository()
 
         # Convert user_details to UserDetailModel
-        user_details_model = {}
+        user_details_model = None
         if request.user_details:
+            user_details_model = {}
             for uid, detail in request.user_details.items():
                 user_details_model[uid] = UserDetailModel(
                     full_name=detail.full_name, role=detail.role, extra=detail.extra
                 )
 
-        saved_meta = await repo.upsert_by_group_id(
+        # Convert llm_custom_setting to LlmCustomSettingModel
+        llm_setting_model = LlmCustomSettingModel.from_any(
+            getattr(request, "llm_custom_setting", None)
+        )
+
+        # Validate request based on config level (global vs group) + model whitelist
+        ConversationMetaChecker.validate_create_request(
             group_id=request.group_id,
-            conversation_data={
+            scene=request.scene,
+            scene_desc=request.scene_desc,
+            name=request.name,
+            llm_custom_setting=llm_setting_model,
+        )
+
+        # Build conversation data - all fields go through build_save_data
+        # This filters based on:
+        # - Config level (GLOBAL_ONLY_FIELDS / GROUP_ONLY_FIELDS)
+        # - Operation type (IMMUTABLE_ON_PATCH for PATCH)
+        # - Fields not in any restriction set are allowed for both levels
+        conversation_data = ConversationMetaChecker.build_save_data(
+            group_id=request.group_id,
+            operation=Operation.CREATE,
+            fields={
                 "scene": request.scene,
                 "scene_desc": request.scene_desc,
+                "llm_custom_setting": llm_setting_model,
                 "name": request.name,
                 "description": request.description,
                 "conversation_created_at": request.created_at,
                 "default_timezone": request.default_timezone,
                 "user_details": user_details_model,
-                "tags": request.tags or [],
+                "tags": request.tags,
             },
+            exclude_none=True,
+        )
+
+        saved_meta = await repo.upsert_by_group_id(
+            group_id=request.group_id, conversation_data=conversation_data
         )
 
         if not saved_meta:
@@ -168,10 +205,13 @@ class ConversationMetaService:
 
         Returns:
             Tuple of (ConversationMetaResponse or None, list of updated field names)
+
+        Raises:
+            ValidationException: If validation fails based on config level
         """
         repo = self._get_repository()
 
-        # Check if exists
+        # Check if exists (no fallback - we need exact match for PATCH)
         existing_meta = await repo.get_by_group_id(request.group_id)
         if not existing_meta:
             logger.warning(
@@ -180,42 +220,60 @@ class ConversationMetaService:
             )
             return None, []
 
-        # Build update data from request fields
-        filtered_data = {}
-        updated_fields = []
-
-        if request.name is not None:
-            filtered_data["name"] = request.name
-            updated_fields.append("name")
-
-        if request.description is not None:
-            filtered_data["description"] = request.description
-            updated_fields.append("description")
-
-        if request.scene_desc is not None:
-            filtered_data["scene_desc"] = request.scene_desc
-            updated_fields.append("scene_desc")
-
-        if request.tags is not None:
-            filtered_data["tags"] = request.tags
-            updated_fields.append("tags")
-
-        if request.default_timezone is not None:
-            filtered_data["default_timezone"] = request.default_timezone
-            updated_fields.append("default_timezone")
-
+        # Convert user_details to UserDetailModel if provided
+        user_details_model = None
         if request.user_details is not None:
             user_details_model = {}
             for uid, detail in request.user_details.items():
                 user_details_model[uid] = UserDetailModel(
                     full_name=detail.full_name, role=detail.role, extra=detail.extra
                 )
-            filtered_data["user_details"] = user_details_model
-            updated_fields.append("user_details")
+
+        # Convert llm_custom_setting to LlmCustomSettingModel if provided
+        llm_setting_model = LlmCustomSettingModel.from_any(
+            getattr(request, "llm_custom_setting", None)
+        )
+
+        # Validate patch request based on config level + model whitelist
+        ConversationMetaChecker.validate_patch_request(
+            group_id=request.group_id,
+            update_fields={
+                k: v
+                for k, v in {
+                    "name": request.name,
+                    "scene_desc": request.scene_desc,
+                    "llm_custom_setting": llm_setting_model,
+                }.items()
+                if v is not None
+            },
+            llm_custom_setting=llm_setting_model,
+        )
+
+        # Build update data - all fields go through build_save_data
+        # This filters based on:
+        # - Config level (GLOBAL_ONLY_FIELDS / GROUP_ONLY_FIELDS)
+        # - Operation type (IMMUTABLE_ON_PATCH - e.g., scene cannot be modified)
+        # - Fields not in any restriction set are allowed for both levels
+        filtered_data = ConversationMetaChecker.build_save_data(
+            group_id=request.group_id,
+            operation=Operation.PATCH,
+            fields={
+                "name": request.name,
+                "description": request.description,
+                "scene_desc": request.scene_desc,
+                "llm_custom_setting": llm_setting_model,
+                "tags": request.tags,
+                "default_timezone": request.default_timezone,
+                "user_details": user_details_model,
+            },
+            exclude_none=True,
+        )
 
         if not filtered_data:
             logger.debug("No fields to update for group_id=%s", request.group_id)
             return self._to_response(existing_meta), []
+
+        updated_fields = list(filtered_data.keys())
 
         # Perform update
         updated_meta = await repo.update_by_group_id(

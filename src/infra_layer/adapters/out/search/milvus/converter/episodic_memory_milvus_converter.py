@@ -136,7 +136,6 @@ class EpisodicMemoryMilvusConverter(BaseMilvusConverter[EpisodicMemoryCollection
             "linked_entities": getattr(source_doc, 'linked_entities', None),
             # MongoDB specific fields
             "subject": getattr(source_doc, 'subject', None),
-            "memcell_event_id_list": getattr(source_doc, 'memcell_event_id_list', None),
             # Extension fields
             "extend": getattr(source_doc, 'extend', None),
         }

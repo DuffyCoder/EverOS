@@ -24,6 +24,8 @@ class MemCellExtractRequest:
 
     old_memory_list: Optional[List[BaseMemory]] = None
     smart_mask_flag: Optional[bool] = False
+    # Force boundary trigger - when True, skip boundary detection and create MemCell directly
+    flush: bool = False
 
 
 @dataclass

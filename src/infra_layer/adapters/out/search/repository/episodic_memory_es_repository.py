@@ -95,7 +95,6 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
         keywords: Optional[List[str]] = None,
         linked_entities: Optional[List[str]] = None,
         subject: Optional[str] = None,
-        memcell_event_id_list: Optional[List[str]] = None,
         parent_type: Optional[str] = None,
         parent_id: Optional[str] = None,
         extend: Optional[Dict[str, Any]] = None,
@@ -121,7 +120,6 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
             keywords: List of keywords
             linked_entities: List of linked entity IDs
             subject: Event title (new field)
-            memcell_event_id_list: List of memory cell event IDs (new field)
             extend: Extension fields
             created_at: Creation time
             updated_at: Update time
@@ -154,7 +152,6 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
                 keywords=keywords or [],
                 linked_entities=linked_entities or [],
                 subject=subject or '',
-                memcell_event_id_list=memcell_event_id_list or [],
                 parent_type=parent_type or '',
                 parent_id=parent_id or '',
                 extend=extend or {},
@@ -187,7 +184,7 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
         self,
         query: List[str],
         user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         event_type: Optional[str] = None,
         keywords: Optional[List[str]] = None,
         date_range: Optional[Dict[str, Any]] = None,
@@ -210,7 +207,7 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
         Args:
             query: List of search terms, supports multiple search terms
             user_id: User ID filter
-            group_id: Group ID filter
+            group_ids: List of Group IDs to filter (None means no filter, searches all groups)
             event_type: Event type filter
             keywords: Keywords filter
             date_range: Time range filter, format: {"gte": "2024-01-01", "lte": "2024-12-31"}
@@ -237,11 +234,11 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
                 size=100
             )
 
-            # 3. Combined query
+            # 3. Combined query with multiple groups
             await repo.multi_search(
                 query=["meeting", "discussion"],
                 user_id="user123",
-                group_id="group456",
+                group_ids=["group456", "group789"],
                 event_type="Conversation",
                 keywords=["work", "project"],
                 date_range={"gte": "2024-01-01"}
@@ -264,15 +261,10 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
                         Q("bool", must_not=Q("exists", field="user_id"))
                     )
 
-            # Handle group_id filter: MAGIC_ALL means no filter
-            if group_id != MAGIC_ALL:
-                if group_id and group_id != "":
-                    filter_queries.append(Q("term", group_id=group_id))
-                elif group_id is None or group_id == "":
-                    # Explicitly filter for null or empty: documents where group_id does not exist
-                    filter_queries.append(
-                        Q("bool", must_not=Q("exists", field="group_id"))
-                    )
+            # Handle group_ids filter: None means no filter (search all groups)
+            if group_ids is not None and len(group_ids) > 0:
+                # Use terms query for multiple group_ids
+                filter_queries.append(Q("terms", group_id=group_ids))
 
             if participant_user_id:
                 filter_queries.append(Q("term", participants=participant_user_id))
@@ -448,7 +440,6 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
         keywords: Optional[List[str]] = None,
         linked_entities: Optional[List[str]] = None,
         subject: Optional[str] = None,
-        memcell_event_id_list: Optional[List[str]] = None,
         parent_type: Optional[str] = None,
         parent_id: Optional[str] = None,
         extend: Optional[Dict[str, Any]] = None,
@@ -483,7 +474,6 @@ class EpisodicMemoryEsRepository(BaseRepository[EpisodicMemoryDoc]):
             keywords=keywords,
             linked_entities=linked_entities,
             subject=subject,
-            memcell_event_id_list=memcell_event_id_list,
             parent_type=parent_type,
             parent_id=parent_id,
             extend=extend,

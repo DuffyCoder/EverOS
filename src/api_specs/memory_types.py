@@ -17,6 +17,7 @@ class RawDataType(Enum):
     """Types of content that can be processed."""
 
     CONVERSATION = "Conversation"
+    AGENTCONVERSATION = "AgentConversation"
 
     @classmethod
     def from_string(cls, type_str: Optional[str]) -> Optional['RawDataType']:
@@ -24,7 +25,7 @@ class RawDataType(Enum):
         Convert string type to RawDataType enum
 
         Args:
-            type_str: Type string, such as "Conversation", "Email", etc.
+            type_str: Type string, such as "Conversation", "AgentConversation", etc.
 
         Returns:
             RawDataType enum value, returns None if conversion fails
@@ -93,6 +94,8 @@ class MemCell:
     foresights: Optional[List['Foresight']] = None  # list of prospective associations
     # Event Log field
     event_log: Optional[Any] = None  # Event Log object
+    # Agent experience data (for AGENT_CONVERSATION type)
+    agent_case: Optional['AgentCase'] = None
     # extend fields, can be used to store any additional information
     extend: Optional[Dict[str, Any]] = None
 
@@ -133,6 +136,11 @@ class MemCell:
                 if self.event_log
                 else None
             ),
+            "agent_case": (
+                self.agent_case.to_dict()
+                if self.agent_case
+                else None
+            ),
             "extend": self.extend,
         }
 
@@ -144,19 +152,17 @@ class BaseMemory:
     Contains common fields shared by all memory types.
     """
 
-    memory_type: MemoryType
+    memory_type: Union[MemoryType, str]
     user_id: str
     timestamp: datetime
-    ori_event_id_list: List[str]
 
+    ori_event_id_list: Optional[List[str]] = None
     group_id: Optional[str] = None
     group_name: Optional[str] = None
     participants: Optional[List[str]] = None
     type: Optional[RawDataType] = None
     keywords: Optional[List[str]] = None
     linked_entities: Optional[List[str]] = None
-
-    memcell_event_id_list: Optional[List[str]] = None
     user_name: Optional[str] = None
     extend: Optional[Dict[str, Any]] = None
 
@@ -166,6 +172,10 @@ class BaseMemory:
 
     # ID field for retrieval
     id: Optional[str] = None
+
+    # Retrieval-related fields
+    score: Optional[float] = None
+    original_data: Optional[List[Dict[str, Any]]] = None
 
     def _format_timestamp(self) -> Optional[str]:
         """Format timestamp to ISO string"""
@@ -185,13 +195,14 @@ class BaseMemory:
             "user_id": self.user_id,
             "user_name": self.user_name,
             "timestamp": self._format_timestamp(),
-            "ori_event_id_list": self.ori_event_id_list,
             "group_id": self.group_id,
             "group_name": self.group_name,
             "participants": self.participants,
             "type": self.type.value if self.type else None,
             "keywords": self.keywords,
             "linked_entities": self.linked_entities,
+            "score": self.score,
+            "original_data": self.original_data,
             "extend": self.extend,
         }
 
@@ -204,6 +215,8 @@ class EpisodeMemory(BaseMemory):
     subject: Optional[str] = None
     summary: Optional[str] = None
     episode: Optional[str] = None
+    parent_type: Optional[str] = None
+    parent_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = super().to_dict()
@@ -211,6 +224,8 @@ class EpisodeMemory(BaseMemory):
         d["subject"] = self.subject
         d["summary"] = self.summary
         d["episode"] = self.episode
+        d["parent_type"] = self.parent_type
+        d["parent_id"] = self.parent_id
         return d
 
 
@@ -244,7 +259,6 @@ class EventLog(BaseMemory):
             memory_type=MemoryType.from_string(data.get("memory_type")),
             user_id=data.get("user_id", ""),
             timestamp=data.get("timestamp"),
-            ori_event_id_list=data.get("ori_event_id_list", []),
             time=data.get("time", ""),
             atomic_fact=data.get("atomic_fact", []),
             fact_embeddings=data.get("fact_embeddings"),
@@ -275,3 +289,103 @@ class Foresight(BaseMemory):
         d["parent_type"] = self.parent_type
         d["parent_id"] = self.parent_id
         return d
+
+
+@dataclass
+class AgentCase:
+    """Agent experience extracted from an agent conversation MemCell.
+
+    Each MemCell produces at most one experience. Multiple conversation turns
+    that solve the same problem are synthesized into a single experience record.
+
+    Fields:
+    - task_intent: Retrieval key - the task rewritten as a standalone statement
+    - approach: Natural-language numbered steps with inline decisions, results, and lessons
+    - quality_score: How well the agent completed this task (0.0-1.0)
+    """
+
+    task_intent: str  # rewritten complete intent as retrieval key
+    approach: str  # numbered steps + decisions + results + lessons
+    quality_score: Optional[float] = None  # 0.0-1.0, task completion quality
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_intent": self.task_intent,
+            "approach": self.approach,
+            "quality_score": self.quality_score,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentCase":
+        return cls(
+            task_intent=data.get("task_intent", ""),
+            approach=data.get("approach", ""),
+            quality_score=data.get("quality_score"),
+        )
+
+
+@dataclass
+class AgentSkill(BaseMemory):
+    """Reusable skill derived from clustered AgentCases.
+
+    Skills belong to a specific cluster and user (agent owner).
+    user_id and timestamp are Optional because they default from the extraction context.
+    """
+
+    # Override BaseMemory required fields — AgentSkill fills these from extraction context
+    user_id: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+    name: Optional[str] = None
+    description: Optional[str] = None  # What this skill does and when to use it
+    content: Optional[str] = None  # Skill content
+    confidence: float = 0.0
+    cluster_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "name": self.name,
+            "description": self.description,
+            "content": self.content,
+            "confidence": self.confidence,
+            "cluster_id": self.cluster_id,
+        })
+        # AgentSkill: remove timestamp and internal fields
+        d.pop("timestamp", None)
+        d.pop("vector", None)
+        d.pop("vector_model", None)
+        return d
+
+
+@dataclass
+class AgentCaseMemory(BaseMemory):
+    """Agent experience as a retrieval result.
+
+    Returned by vector/hybrid search when memory_type=agent_case.
+    Distinct from AgentCase (which is an embedded sub-object in FetchMemResult).
+    """
+
+    task_intent: Optional[str] = None
+    approach: Optional[str] = None
+    quality_score: Optional[float] = None
+    parent_type: Optional[str] = None
+    parent_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict()
+        d.update({
+            "task_intent": self.task_intent,
+            "approach": self.approach,
+            "quality_score": self.quality_score,
+            "parent_type": self.parent_type,
+            "parent_id": self.parent_id,
+        })
+        # Remove internal fields
+        d.pop("vector", None)
+        d.pop("vector_model", None)
+        return d
+
+
+# Union type for search/retrieve API response
+RetrieveMemoryModel = Union[EpisodeMemory, EventLog, Foresight, AgentSkill, AgentCaseMemory]

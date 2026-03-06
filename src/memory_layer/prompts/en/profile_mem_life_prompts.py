@@ -4,7 +4,10 @@ Explicit information + Implicit traits extraction.
 """
 
 # Incremental update prompt
-PROFILE_LIFE_UPDATE_PROMPT = '''You are a user profile updater. Based on conversation records, determine what operations to perform on the user profile.
+PROFILE_LIFE_UPDATE_PROMPT = '''
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
+You are a user profile updater. Based on conversation records, determine what operations to perform on the user profile.
 
 【Current User Profile】(Each item has an index number)
 {current_profile}
@@ -64,10 +67,16 @@ With operations (can combine multiple add/update/delete):
   ],
   "update_note": "added 2 explicit info and 1 implicit trait, updated 1, deleted 1"
 }}
-```'''
+```
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+'''
 
 # Compact prompt
-PROFILE_LIFE_COMPACT_PROMPT = '''The current user profile has {total_items} items (explicit_info + implicit_traits combined), exceeding the limit of {max_items}.
+PROFILE_LIFE_COMPACT_PROMPT = '''
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
+The current user profile has {total_items} items (explicit_info + implicit_traits combined), exceeding the limit of {max_items}.
 
 Please compact the profile to **{max_items} items TOTAL** (explicit_info + implicit_traits combined, NOT {max_items} each).
 
@@ -91,10 +100,16 @@ Current Profile:
   ],
   "compact_note": "Explain what was deleted/merged"
 }}
-```'''
+```
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+'''
 
 # Initial extraction prompt (for batch extraction)
-PROFILE_LIFE_INITIAL_EXTRACTION_PROMPT = '''You are a "User Profile Analyst". Please read the conversation below and build a user profile.
+PROFILE_LIFE_INITIAL_EXTRACTION_PROMPT = '''
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
+You are a "User Profile Analyst". Please read the conversation below and build a user profile.
 
 【Part 1: Explicit Information (explicit_info)】
 Objective facts and current status.
@@ -132,6 +147,8 @@ Output JSON directly in the following format:
   ]
 }}
 ```
+
+LANGUAGE RULE: Detect the language of the input conversation and respond in the SAME language. If the conversation is in Chinese, output in Chinese. If in English, output in English.
 
 【Original Conversation】
 {conversation_text}'''

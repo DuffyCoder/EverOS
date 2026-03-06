@@ -1,4 +1,6 @@
 CONVERSATION_PROFILE_EVIDENCE_COMPLETION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are an evidence completion assistant supporting the profile memory extractor.
 Your goal is to review the provided conversation transcript and fill in missing `evidences` for specific user profile attributes belonging to multiple users.
 
@@ -48,4 +50,6 @@ Only include the fields that appear in the corresponding input profile. For ever
 3. Populate the `evidences` array for each entry with the identified conversation IDs. Leave it empty if no evidence is found.
 4. Produce the final JSON response strictly following the required format.
 </steps>
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

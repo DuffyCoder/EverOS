@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Union
 
 from core.di import get_bean_by_type, get_bean, service
 from core.oxm.constants import MAGIC_ALL
@@ -21,6 +21,9 @@ from infra_layer.adapters.out.persistence.document.memory.foresight_record impor
 )
 from infra_layer.adapters.out.persistence.repository.episodic_memory_raw_repository import (
     EpisodicMemoryRawRepository,
+)
+from infra_layer.adapters.out.persistence.document.memory.episodic_memory import (
+    EpisodicMemoryProjection,
 )
 from infra_layer.adapters.out.persistence.repository.core_memory_raw_repository import (
     CoreMemoryRawRepository,
@@ -41,6 +44,9 @@ from infra_layer.adapters.out.persistence.document.memory.event_log_record impor
 from infra_layer.adapters.out.persistence.repository.foresight_record_repository import (
     ForesightRecordRawRepository,
 )
+from infra_layer.adapters.out.persistence.repository.memcell_raw_repository import (
+    MemCellRawRepository,
+)
 from infra_layer.adapters.out.persistence.document.memory.foresight_record import (
     ForesightRecordProjection,
 )
@@ -49,6 +55,12 @@ from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository
 )
 from infra_layer.adapters.out.persistence.repository.global_user_profile_raw_repository import (
     GlobalUserProfileRawRepository,
+)
+from infra_layer.adapters.out.persistence.repository.agent_case_raw_repository import (
+    AgentCaseRawRepository,
+)
+from infra_layer.adapters.out.persistence.repository.agent_skill_raw_repository import (
+    AgentSkillRawRepository,
 )
 from api_specs.dtos import FetchMemResponse
 from api_specs.memory_models import (
@@ -63,6 +75,8 @@ from api_specs.memory_models import (
     CoreMemoryModel,
     EventLogModel,
     ForesightModel,
+    AgentCaseModel,
+    AgentSkillModel,
     Metadata,
 )
 
@@ -77,11 +91,11 @@ class FetchMemoryServiceInterface(ABC):
         self,
         user_id: str,
         memory_type: MemoryType,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
-        version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
-        limit: int = 10,
+        page: int = 1,
+        page_size: int = 20,
     ) -> FetchMemResponse:
         """
         Find memories by user ID and optional filters
@@ -89,11 +103,11 @@ class FetchMemoryServiceInterface(ABC):
         Args:
             user_id: User ID
             memory_type: Memory type
-            group_id: Group ID for group memory retrieval (optional)
+            group_ids: List of Group IDs for batch query (None to skip group filtering)
             start_time: Start time for time range filtering (optional)
             end_time: End time for time range filtering (optional)
-            version_range: Version range (start, end), closed interval [start, end]
-            limit: Limit on number of returned items
+            page: Page number, starts from 1
+            page_size: Number of records per page
 
         Returns:
             Memory query response
@@ -118,6 +132,8 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         self._foresight_record_repo = None
         self._user_profile_repo = None
         self._global_user_profile_repo = None
+        self._agent_case_repo = None
+        self._agent_skill_repo = None
         logger.info("FetchMemoryServiceImpl initialized")
 
     def _get_repositories(self):
@@ -142,6 +158,12 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
             self._global_user_profile_repo = get_bean_by_type(
                 GlobalUserProfileRawRepository
             )
+        if self._agent_case_repo is None:
+            self._agent_case_repo = get_bean_by_type(
+                AgentCaseRawRepository
+            )
+        if self._agent_skill_repo is None:
+            self._agent_skill_repo = get_bean_by_type(AgentSkillRawRepository)
 
     async def _get_user_details_cache(self, group_id: str) -> dict:
         """
@@ -162,8 +184,10 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
                 self._get_repositories()
 
             # Query conversation metadata
-            conversation_meta = await self._conversation_meta_repo.get_by_group_id(
-                group_id
+            conversation_meta = (
+                await self._conversation_meta_repo.get_by_group_id_with_fallback(
+                    group_id, key="user_details"
+                )
             )
 
             if not conversation_meta or not conversation_meta.user_details:
@@ -186,6 +210,42 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
 
         except Exception as e:
             logger.warning(f"Failed to get user details cache: {e}")
+            return {}
+
+    async def _get_memcells_for_memories(self, memories: list) -> dict:
+        """
+        Batch fetch MemCells for memories that have parent_type='memcell'
+
+        Args:
+            memories: List of memory records (EpisodicMemory/EventLog/ForesightRecord)
+
+        Returns:
+            Dict[parent_id, MemCell]: Mapping dictionary
+        """
+        # Collect parent_ids (only parent_type=memcell)
+        parent_ids = []
+        for mem in memories:
+            parent_type = getattr(mem, 'parent_type', None)
+            parent_id = getattr(mem, 'parent_id', None)
+            if parent_type == 'memcell' and parent_id:
+                parent_ids.append(parent_id)
+
+        if not parent_ids:
+            return {}
+
+        # Deduplicate
+        unique_parent_ids = list(set(parent_ids))
+
+        try:
+            # Batch fetch MemCells
+            memcell_repo = get_bean_by_type(MemCellRawRepository)
+            memcells_cache = await memcell_repo.get_by_event_ids(unique_parent_ids)
+            logger.debug(
+                f"Fetched {len(memcells_cache)} MemCells for {len(unique_parent_ids)} parent_ids"
+            )
+            return memcells_cache
+        except Exception as e:
+            logger.warning(f"Failed to fetch MemCells: {e}")
             return {}
 
     def _convert_base_memory(self, core_memory) -> BaseMemoryModel:
@@ -292,66 +352,18 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
 
         return memories
 
-    def _convert_core_memory(
-        self, core_memory, metadata: Metadata = None
-    ) -> CoreMemoryModel:
-        """Convert core memory document to model"""
-        # If no metadata provided, create a simple one
-        if metadata is None:
-            metadata = Metadata(
-                source=MemoryType.CORE.value,
-                user_id=core_memory.user_id,
-                memory_type=MemoryType.CORE.value,
-            )
-
-        return CoreMemoryModel(
-            id=str(core_memory.id),
-            user_id=core_memory.user_id,
-            version=core_memory.version,
-            is_latest=core_memory.is_latest,
-            # BaseMemory fields
-            user_name=core_memory.user_name,
-            gender=core_memory.gender,
-            position=core_memory.position,
-            supervisor_user_id=core_memory.supervisor_user_id,
-            team_members=core_memory.team_members,
-            okr=core_memory.okr,
-            base_location=core_memory.base_location,
-            hiredate=core_memory.hiredate,
-            age=core_memory.age,
-            department=core_memory.department,
-            # Profile fields
-            hard_skills=core_memory.hard_skills,
-            soft_skills=core_memory.soft_skills,
-            output_reasoning=core_memory.output_reasoning,
-            motivation_system=core_memory.motivation_system,
-            fear_system=core_memory.fear_system,
-            value_system=core_memory.value_system,
-            humor_use=core_memory.humor_use,
-            colloquialism=core_memory.colloquialism,
-            personality=core_memory.personality,
-            way_of_decision_making=core_memory.way_of_decision_making,
-            projects_participated=core_memory.projects_participated,
-            user_goal=core_memory.user_goal,
-            work_responsibility=core_memory.work_responsibility,
-            working_habit_preference=core_memory.working_habit_preference,
-            interests=core_memory.interests,
-            tendency=core_memory.tendency,
-            # Common fields
-            extend=core_memory.extend,
-            created_at=core_memory.created_at,
-            updated_at=core_memory.updated_at,
-            metadata=metadata,
-        )
-
     def _convert_episodic_memory(
-        self, episodic_memory, user_details_cache: dict = None
+        self,
+        episodic_memory,
+        user_details_cache: dict = None,
+        memcells_cache: dict = None,
     ) -> EpisodicMemoryModel:
         """Convert episodic memory document to model
 
         Args:
             episodic_memory: Episodic memory document
             user_details_cache: User details cache for batch metadata creation
+            memcells_cache: MemCell cache for original_data retrieval
         """
         # Create metadata with user details from cache
         user_info = (
@@ -362,60 +374,52 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         metadata = Metadata(
             source=MemoryType.EPISODIC_MEMORY.value,
             user_id=episodic_memory.user_id,
-            group_id=episodic_memory.group_id,
-            memory_type=MemoryType.EPISODIC_MEMORY.value,
+            group_ids=[episodic_memory.group_id] if episodic_memory.group_id else None,
+            memory_types=[MemoryType.EPISODIC_MEMORY.value],
             full_name=user_info.get('full_name'),
             email=user_info.get('email'),
             phone=user_info.get('phone'),
         )
 
+        # Get original_data from MemCell cache
+        original_data = None
+        parent_type = getattr(episodic_memory, 'parent_type', None)
+        parent_id = getattr(episodic_memory, 'parent_id', None)
+        if parent_type == 'memcell' and parent_id and memcells_cache:
+            memcell = memcells_cache.get(parent_id)
+            if memcell and hasattr(memcell, 'original_data') and memcell.original_data:
+                original_data = memcell.original_data
+
         return EpisodicMemoryModel(
             id=str(episodic_memory.id),
             user_id=episodic_memory.user_id,
             episode_id=str(episodic_memory.event_id),
-            title=episodic_memory.subject,
+            episode=episodic_memory.episode,
+            subject=episodic_memory.subject,
             summary=episodic_memory.summary,
+            timestamp=episodic_memory.timestamp,
             participants=episodic_memory.participants or [],
             location=(
                 episodic_memory.extend.get("location", "")
                 if episodic_memory.extend
                 else ""
             ),
-            key_events=episodic_memory.keywords or [],
+            keywords=episodic_memory.keywords or [],
             group_id=episodic_memory.group_id,
             group_name=episodic_memory.group_name,
             created_at=episodic_memory.created_at,
             updated_at=episodic_memory.updated_at,
             metadata=metadata,
-        )
-
-    def _convert_behavior_history(self, behavior) -> BehaviorHistoryModel:
-        """Convert behavior history document to model"""
-        return BehaviorHistoryModel(
-            id=str(behavior.id),
-            user_id=behavior.user_id,
-            action_type=(
-                behavior.behavior_type[0]
-                if behavior.behavior_type
-                else "Unknown behavior"
-            ),
-            action_description=f"Behavior type: {behavior.behavior_type}",
-            context=behavior.meta or {},
-            result="Success",
-            session_id=behavior.event_id,
-            created_at=behavior.created_at,
-            updated_at=behavior.updated_at,
-            metadata=Metadata(
-                source=MemoryType.BEHAVIOR_HISTORY.value,
-                user_id=behavior.user_id,
-                memory_type=MemoryType.BEHAVIOR_HISTORY.value,
-            ),
+            parent_type=parent_type,
+            parent_id=parent_id,
+            original_data=original_data,
         )
 
     def _convert_event_log(
         self,
         event_log: Union[EventLogRecord, EventLogRecordProjection],
         user_details_cache: dict = None,
+        memcells_cache: dict = None,
     ) -> EventLogModel:
         """Convert event log document to model
 
@@ -425,6 +429,7 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         Args:
             event_log: Event log document
             user_details_cache: User details cache for batch metadata creation
+            memcells_cache: MemCell cache for original_data retrieval
         """
         # Create metadata with user details from cache
         user_info = (
@@ -433,12 +438,23 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         metadata = Metadata(
             source=MemoryType.EVENT_LOG.value,
             user_id=event_log.user_id,
-            group_id=event_log.group_id,
-            memory_type=MemoryType.EVENT_LOG.value,
+            group_ids=[event_log.group_id] if event_log.group_id else None,
+            memory_types=[MemoryType.EVENT_LOG.value],
             full_name=user_info.get('full_name'),
             email=user_info.get('email'),
             phone=user_info.get('phone'),
         )
+
+        # Get original_data from MemCell cache
+        original_data = None
+        if (
+            event_log.parent_type == 'memcell'
+            and event_log.parent_id
+            and memcells_cache
+        ):
+            memcell = memcells_cache.get(event_log.parent_id)
+            if memcell and hasattr(memcell, 'original_data') and memcell.original_data:
+                original_data = memcell.original_data
 
         return EventLogModel(
             id=str(event_log.id),
@@ -460,12 +476,14 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
             created_at=event_log.created_at,
             updated_at=event_log.updated_at,
             metadata=metadata,
+            original_data=original_data,
         )
 
     def _convert_foresight_record(
         self,
         foresight_record: Union[ForesightRecord, ForesightRecordProjection],
         user_details_cache: dict = None,
+        memcells_cache: dict = None,
     ) -> ForesightModel:
         """Convert foresight record document to model
 
@@ -475,6 +493,7 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         Args:
             foresight_record: Foresight record document
             user_details_cache: User details cache for batch metadata creation
+            memcells_cache: MemCell cache for original_data retrieval
         """
         # Create metadata with user details from cache
         uid = foresight_record.user_id or ""
@@ -482,16 +501,31 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         metadata = Metadata(
             source=MemoryType.FORESIGHT.value,
             user_id=uid,
-            group_id=foresight_record.group_id,
-            memory_type=MemoryType.FORESIGHT.value,
+            group_ids=(
+                [foresight_record.group_id] if foresight_record.group_id else None
+            ),
+            memory_types=[MemoryType.FORESIGHT.value],
             full_name=user_info.get('full_name'),
             email=user_info.get('email'),
             phone=user_info.get('phone'),
         )
 
+        # Get original_data from MemCell cache
+        original_data = None
+        if (
+            foresight_record.parent_type == 'memcell'
+            and foresight_record.parent_id
+            and memcells_cache
+        ):
+            memcell = memcells_cache.get(foresight_record.parent_id)
+            if memcell and hasattr(memcell, 'original_data') and memcell.original_data:
+                original_data = memcell.original_data
+
         return ForesightModel(
             id=str(foresight_record.id),
             content=foresight_record.content,
+            foresight=foresight_record.content,
+            evidence=foresight_record.evidence,
             parent_type=foresight_record.parent_type,
             parent_id=foresight_record.parent_id,
             user_id=foresight_record.user_id,
@@ -506,10 +540,59 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
                 foresight_record, 'vector', None
             ),  # ForesightRecordProjection does not have vector field
             vector_model=foresight_record.vector_model,
-            evidence=foresight_record.evidence,
             extend=foresight_record.extend,
             created_at=foresight_record.created_at,
             updated_at=foresight_record.updated_at,
+            metadata=metadata,
+            original_data=original_data,
+        )
+
+    def _convert_agent_case(self, record) -> AgentCaseModel:
+        """Convert AgentCaseRecord to AgentCaseModel."""
+        metadata = Metadata(
+            source=MemoryType.AGENT_CASE.value,
+            user_id=record.user_id or "",
+            group_ids=[record.group_id] if record.group_id else None,
+            memory_types=[MemoryType.AGENT_CASE.value],
+        )
+
+        return AgentCaseModel(
+            id=str(record.id),
+            user_id=record.user_id,
+            group_id=record.group_id,
+            timestamp=record.timestamp,
+            task_intent=record.task_intent or "",
+            approach=record.approach or "",
+            quality_score=record.quality_score,
+            parent_type=record.parent_type,
+            parent_id=record.parent_id,
+            extend=record.extend,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            metadata=metadata,
+        )
+
+    def _convert_agent_skill(self, record) -> AgentSkillModel:
+        """Convert AgentSkillRecord to AgentSkillModel."""
+        metadata = Metadata(
+            source=MemoryType.AGENT_SKILL.value,
+            user_id=record.user_id or "",
+            group_ids=[record.group_id] if record.group_id else None,
+            memory_types=[MemoryType.AGENT_SKILL.value],
+        )
+
+        return AgentSkillModel(
+            id=str(record.id),
+            cluster_id=record.cluster_id,
+            name=record.name,
+            content=record.content,
+            user_id=record.user_id,
+            description=record.description,
+            group_id=record.group_id,
+            confidence=record.confidence,
+            extend=record.extend,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
             metadata=metadata,
         )
 
@@ -517,11 +600,11 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         self,
         user_id: str,
         memory_type: MemoryType,
-        group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
-        version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
-        limit: int = 10,
+        page: int = 1,
+        page_size: int = 20,
     ) -> FetchMemResponse:
         """
         Find memories by user ID and optional filters
@@ -529,12 +612,11 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         Args:
             user_id: User ID (MAGIC_ALL to skip user filtering)
             memory_type: Memory type
-            group_id: Group ID for group memory retrieval (MAGIC_ALL to skip group filtering)
+            group_ids: List of Group IDs for batch query (None to skip group filtering)
             start_time: Start time for time range filtering (ISO format string)
             end_time: End time for time range filtering (ISO format string)
-            version_range: Version range (start, end), closed interval [start, end].
-                          If not provided or None, get the latest version (ordered by version descending)
-            limit: Limit on number of returned items
+            page: Page number, starts from 1
+            page_size: Number of records per page
 
         Returns:
             Memory query response
@@ -554,14 +636,19 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
         - RELATION: No time filtering supported in current implementation
         - BEHAVIOR_HISTORY: No time filtering supported in current implementation
         """
+        # Convert page/page_size to limit/offset for internal use
+        limit = page_size
+        offset = (page - 1) * page_size
+
         logger.debug(
-            f"Fetching {memory_type} memories for user_id={user_id}, group_id={group_id}, "
-            f"time_range=[{start_time}, {end_time}], limit={limit}"
+            f"Fetching {memory_type} memories for user_id={user_id}, group_ids={group_ids}, "
+            f"time_range=[{start_time}, {end_time}], page={page}, page_size={page_size}"
         )
 
         try:
             self._get_repositories()
             memories = []
+            total_count = 0  # Total matching records for pagination
 
             # Parse time range if provided
             start_dt = from_iso_format(start_time) if start_time else None
@@ -569,98 +656,155 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
 
             # Fetch user details cache once for batch metadata creation
             # This optimizes performance by querying conversation_meta only once
-            user_details_cache = await self._get_user_details_cache(group_id)
+            # Use first group_id for user details cache (for backward compatibility)
+            first_group_id = group_ids[0] if group_ids and len(group_ids) > 0 else None
+            user_details_cache = await self._get_user_details_cache(first_group_id)
             logger.debug(
                 f"Fetched user details cache with {len(user_details_cache)} users"
             )
 
             match memory_type:
                 case MemoryType.FORESIGHT:
-                    # Foresight: supports group_id filtering and time range overlap queries
+                    # Foresight: supports group_ids filtering and time range overlap queries
                     # Time filtering is based on foresight validity period (start_time, end_time fields)
-                    foresight_records = (
-                        await self._foresight_record_repo.find_by_filters(
+
+                    # Query records and count in parallel
+                    foresight_records, total_count = await asyncio.gather(
+                        self._foresight_record_repo.find_by_filters(
                             user_id=user_id,
-                            group_id=group_id,
+                            group_ids=group_ids,
                             start_time=start_dt,
                             end_time=end_dt,
                             limit=limit,
+                            skip=offset,
                             model=ForesightRecordProjection,
-                        )
+                        ),
+                        self._foresight_record_repo.count_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                        ),
+                    )
+
+                    # Batch fetch MemCells for original_data
+                    memcells_cache = await self._get_memcells_for_memories(
+                        foresight_records
                     )
 
                     memories = [
                         self._convert_foresight_record(
-                            record, user_details_cache=user_details_cache
+                            record,
+                            user_details_cache=user_details_cache,
+                            memcells_cache=memcells_cache,
                         )
                         for record in foresight_records
                     ]
 
                 case MemoryType.EPISODIC_MEMORY:
-                    # Episodic memory: fully supports group_id and timestamp filtering at DB level
-                    episodic_memories = await self._episodic_repo.find_by_filters(
-                        user_id=user_id,
-                        group_id=group_id,
-                        start_time=start_dt,
-                        end_time=end_dt,
-                        limit=limit,
-                        sort_desc=True,
+                    # Episodic memory: fully supports group_ids and timestamp filtering at DB level
+
+                    # Query records and count in parallel
+                    episodic_memories, total_count = await asyncio.gather(
+                        self._episodic_repo.find_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                            limit=limit,
+                            skip=offset,
+                            sort_desc=True,
+                            model=EpisodicMemoryProjection,
+                        ),
+                        self._episodic_repo.count_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                        ),
+                    )
+
+                    # Batch fetch MemCells for original_data
+                    memcells_cache = await self._get_memcells_for_memories(
+                        episodic_memories
                     )
 
                     memories = [
                         self._convert_episodic_memory(
-                            mem, user_details_cache=user_details_cache
+                            mem,
+                            user_details_cache=user_details_cache,
+                            memcells_cache=memcells_cache,
                         )
                         for mem in episodic_memories
                     ]
                 case MemoryType.EVENT_LOG:
-                    # Event log: fully supports group_id and timestamp filtering at DB level
-                    event_logs = await self._event_log_repo.find_by_filters(
-                        user_id=user_id,
-                        group_id=group_id,
-                        start_time=start_dt,
-                        end_time=end_dt,
-                        limit=limit,
-                        sort_desc=True,
-                        model=EventLogRecordProjection,
+                    # Event log: fully supports group_ids and timestamp filtering at DB level
+
+                    # Query records and count in parallel
+                    event_logs, total_count = await asyncio.gather(
+                        self._event_log_repo.find_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                            limit=limit,
+                            skip=offset,
+                            sort_desc=True,
+                            model=EventLogRecordProjection,
+                        ),
+                        self._event_log_repo.count_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                        ),
                     )
+
+                    # Batch fetch MemCells for original_data
+                    memcells_cache = await self._get_memcells_for_memories(event_logs)
 
                     memories = [
                         self._convert_event_log(
-                            event_log, user_details_cache=user_details_cache
+                            event_log,
+                            user_details_cache=user_details_cache,
+                            memcells_cache=memcells_cache,
                         )
                         for event_log in event_logs
                     ]
 
                 case MemoryType.PROFILE:
-                    # Profile: supports user_id and group_id filtering, no time filtering
+                    # Profile: supports user_id and group_ids filtering, no time filtering
                     # Uses created_at/updated_at fields (not time range filterable)
                     # Also fetches global_user_profile and returns CombinedProfileModel
 
-                    # Fetch user_profiles and global_user_profile concurrently
-                    user_profiles_task = self._user_profile_repo.find_by_filters(
-                        user_id=user_id, group_id=group_id, limit=limit
-                    )
+                    # Fetch user_profiles, count, and global_user_profile concurrently
+                    tasks = [
+                        self._user_profile_repo.find_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            limit=limit,
+                            skip=offset,
+                        ),
+                        self._user_profile_repo.count_by_filters(
+                            user_id=user_id, group_ids=group_ids
+                        ),
+                    ]
 
-                    global_profile_task = None
                     if user_id and user_id != MAGIC_ALL:
-                        global_profile_task = (
+                        tasks.append(
                             self._global_user_profile_repo.get_by_user_id(
                                 user_id=user_id
                             )
                         )
-
-                    # Execute concurrently
-                    if global_profile_task:
-                        user_profiles, global_user_profile = await asyncio.gather(
-                            user_profiles_task, global_profile_task
+                        user_profiles, total_count, global_user_profile = (
+                            await asyncio.gather(*tasks)
                         )
                     else:
-                        user_profiles = await user_profiles_task
+                        user_profiles, total_count = await asyncio.gather(*tasks)
                         global_user_profile = None
 
                     profile_models = [
-                        self._convert_user_profile(up) for up in user_profiles[:limit]
+                        self._convert_user_profile(up) for up in user_profiles
                     ]
 
                     global_profile_model = None
@@ -672,69 +816,67 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
                     # Return CombinedProfileModel containing both profiles
                     combined_profile = CombinedProfileModel(
                         user_id=user_id,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         profiles=profile_models,
                         global_profile=global_profile_model,
                     )
                     memories = [combined_profile]
 
-                case MemoryType.BASE_MEMORY:
-                    # Base memory: extract basic information from core memory
-                    # Does NOT support group_id or time filtering (single record per user)
-                    if user_id and user_id != MAGIC_ALL:
-                        core_memory = await self._core_repo.get_by_user_id(user_id)
-                        if core_memory:
-                            memories = [self._convert_base_memory(core_memory)]
-                        else:
-                            memories = []
-                    else:
-                        logger.warning("BASE_MEMORY requires a specific user_id")
-                        memories = []
+                case MemoryType.AGENT_CASE:
+                    agent_cases, total_count = await asyncio.gather(
+                        self._agent_case_repo.find_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                            limit=limit,
+                            skip=offset,
+                            sort_desc=True,
+                        ),
+                        self._agent_case_repo.count_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                        ),
+                    )
 
-                case MemoryType.PREFERENCE:
-                    # Preferences: extract preference settings from core memory
-                    # Does NOT support group_id or time filtering (single record per user)
-                    if user_id and user_id != MAGIC_ALL:
-                        core_memory = await self._core_repo.get_by_user_id(user_id)
-                        if core_memory:
-                            memories = self._convert_preferences_from_core_memory(
-                                core_memory
-                            )
-                        else:
-                            memories = []
-                    else:
-                        logger.warning("PREFERENCE requires a specific user_id")
-                        memories = []
+                    memories = [
+                        self._convert_agent_case(record)
+                        for record in agent_cases
+                    ]
 
-                case MemoryType.BEHAVIOR_HISTORY:
-                    # Behavior history: user behaviors sorted by time
-                    # Does NOT support group_id or time filtering in current implementation
-                    # TODO: BehaviorHistory repository needs enhancement for filtering
-                    if user_id and user_id != MAGIC_ALL:
-                        behaviors = await self._behavior_repo.get_by_user_id(
-                            user_id, limit=limit
-                        )
-                        memories = [
-                            self._convert_behavior_history(behavior)
-                            for behavior in behaviors
-                        ]
-                    else:
-                        logger.warning("BEHAVIOR_HISTORY requires a specific user_id")
-                        memories = []
+                case MemoryType.AGENT_SKILL:
+                    skill_records, total_count = await asyncio.gather(
+                        self._agent_skill_repo.find_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                            limit=limit,
+                            skip=offset,
+                        ),
+                        self._agent_skill_repo.count_by_filters(
+                            user_id=user_id,
+                            group_ids=group_ids,
+                        ),
+                    )
+
+                    memories = [
+                        self._convert_agent_skill(record) for record in skill_records
+                    ]
+
             # Create response-level metadata (for the query itself)
             # This is query-level metadata, not user-specific
             response_metadata = Metadata(
                 source=memory_type.value,
                 user_id=user_id,
-                group_id=group_id,
-                memory_type=memory_type.value,
-                limit=limit,
+                group_ids=group_ids,
+                memory_types=[memory_type.value],
             )
 
             return FetchMemResponse(
                 memories=memories,
-                total_count=len(memories),
-                has_more=len(memories) == limit,
+                total_count=total_count,  # Total matching records for pagination
+                count=len(memories),  # Current page record count
                 metadata=response_metadata,
             )
 
@@ -743,20 +885,19 @@ class FetchMemoryServiceImpl(FetchMemoryServiceInterface):
 
             traceback.print_exc()
             logger.error(
-                f"Error fetching memories for user_id={user_id}, group_id={group_id}: {e}",
+                f"Error fetching memories for user_id={user_id}, group_ids={group_ids}: {e}",
                 exc_info=True,
             )
             # Return error response with basic metadata
             error_metadata = Metadata(
                 source=memory_type.value,
                 user_id=user_id,
-                group_id=group_id,
-                memory_type=memory_type.value,
-                limit=limit,
+                group_ids=group_ids,
+                memory_types=[memory_type.value],
             )
 
             return FetchMemResponse(
-                memories=[], total_count=0, has_more=False, metadata=error_metadata
+                memories=[], total_count=0, count=0, metadata=error_metadata
             )
 
 

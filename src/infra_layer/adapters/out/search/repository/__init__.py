@@ -16,10 +16,22 @@ from infra_layer.adapters.out.search.repository.foresight_milvus_repository impo
 from infra_layer.adapters.out.search.repository.event_log_milvus_repository import (
     EventLogMilvusRepository,
 )
+from infra_layer.adapters.out.search.repository.user_profile_milvus_repository import (
+    UserProfileMilvusRepository,
+)
+from infra_layer.adapters.out.search.repository.agent_case_es_repository import (
+    AgentCaseEsRepository,
+)
+from infra_layer.adapters.out.search.repository.agent_skill_es_repository import (
+    AgentSkillEsRepository,
+)
 
 __all__ = [
     "EpisodicMemoryEsRepository",
     "EpisodicMemoryMilvusRepository",
     "ForesightMilvusRepository",
     "EventLogMilvusRepository",
+    "UserProfileMilvusRepository",
+    "AgentCaseEsRepository",
+    "AgentSkillEsRepository",
 ]

@@ -5,6 +5,8 @@
 # ======================================
 
 CONTENT_ANALYSIS_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are a group content analysis expert specializing in analyzing group conversations to extract discussion topics, group summary, and subject positioning.
 
 **IMPORTANT LANGUAGE REQUIREMENT:**
@@ -149,6 +151,8 @@ Now analyze the provided conversation and extract content analysis following the
 """
 
 BEHAVIOR_ANALYSIS_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are a group behavior analysis expert specializing in analyzing communication patterns to identify group roles based on conversation behaviors.
 
 **IMPORTANT EVIDENCE EXTRACTION:**
@@ -265,6 +269,8 @@ Now analyze the provided conversation and extract role assignments following the
 
 
 AGGREGATION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are a group profile aggregation expert. Your task is to analyze multiple daily group profiles and conversation data to create a consolidated group profile.
 
 **IMPORTANT EVIDENCE EXTRACTION:**
@@ -309,4 +315,6 @@ Output a single JSON object with the following structure:
 }}
 
 Focus on consolidating information across the time period, identifying consistent patterns, and providing evidence-based insights.
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

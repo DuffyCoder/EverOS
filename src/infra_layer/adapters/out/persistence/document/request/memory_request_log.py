@@ -13,8 +13,10 @@ from core.oxm.mongo.audit_base import AuditBase
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING, DESCENDING
 
+from core.oxm.mongo.document_base_with_soft_delete import DocumentBaseWithSoftDelete
 
-class MemoryRequestLog(DocumentBase, AuditBase):
+
+class MemoryRequestLog(DocumentBaseWithSoftDelete, AuditBase):
     """
     Memory Request Log Document Model
 
@@ -119,6 +121,15 @@ class MemoryRequestLog(DocumentBase, AuditBase):
                     ("group_id", ASCENDING),
                     ("user_id", ASCENDING),
                     ("sync_status", ASCENDING),
+                ]
+            ),
+            # Composite index for duplicate detection: group_id + user_id + message_id
+            # Used for checking if a message has already been processed
+            IndexModel(
+                [
+                    ("group_id", ASCENDING),
+                    ("user_id", ASCENDING),
+                    ("message_id", ASCENDING),
                 ]
             ),
         ]

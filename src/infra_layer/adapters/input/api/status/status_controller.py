@@ -38,8 +38,8 @@ class StatusController(BaseController):
             request_status_service: Request status service (via dependency injection)
         """
         super().__init__(
-            prefix="/api/v1/stats",
-            tags=["Stats - Request Status"],
+            prefix="/api/v0/status",
+            tags=["Status - Request Status"],
             default_auth="none",  # Adjust authentication strategy as needed
         )
         self.request_status_service = request_status_service
@@ -68,10 +68,13 @@ class StatusController(BaseController):
         Pass parameters via Query Parameter (recommended):
         - request_id: Request ID
 
+        Or via Request Body (for compatibility):
+        - request_id: Request ID
+
         Or via HTTP Header (deprecated, will be removed in future versions):
         - X-Request-Id: Request ID
 
-        If both are provided, Query Parameter takes precedence.
+        Priority: Query Parameter > Request Body > HTTP Header
 
         ## Use cases:
         - Tracking status of background requests
@@ -81,7 +84,7 @@ class StatusController(BaseController):
         - Request status data has a TTL of 1 hour; it will no longer be queryable after expiration
 
         ## API path:
-        GET /api/v1/stats/request?request_id=xxx
+        GET /api/v0/status/request?request_id=xxx
         """,
         responses={
             200: {
@@ -112,7 +115,7 @@ class StatusController(BaseController):
                 "content": {
                     "application/json": {
                         "example": {
-                            "detail": "Missing required parameter: request_id (query param) or X-Request-Id (header)"
+                            "detail": "Missing required parameter: request_id (query param / body) or X-Request-Id (header)"
                         }
                     }
                 },
@@ -135,18 +138,32 @@ class StatusController(BaseController):
         Pass parameters via Query Parameter (recommended):
         - request_id: Request ID
 
+        Or via Request Body (for compatibility):
+        - request_id: Request ID
+
         Or via HTTP Header (deprecated):
         - X-Request-Id: Request ID
 
         Returns:
             RequestStatusResponse: Request status response
         """
-        # Parameter validation - query param takes precedence over header
-        effective_request_id = request_id or x_request_id
+        # Try to get request_id from body if not provided in query param
+        body_request_id: Optional[str] = None
+        if not request_id:
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    body_request_id = body.get("request_id")
+            except Exception:
+                # Body parsing failed (empty body or invalid JSON), ignore
+                pass
+
+        # Parameter validation - priority: query param > body > header
+        effective_request_id = request_id or body_request_id or x_request_id
         if not effective_request_id:
             raise HTTPException(
                 status_code=400,
-                detail="Missing required parameter: request_id (query param) or X-Request-Id (header)",
+                detail="Missing required parameter: request_id (query param / body) or X-Request-Id (header)",
             )
 
         try:

@@ -20,7 +20,6 @@ class RerankMemResponse:
     memories: List[Dict[str, List[Any]]] = field(default_factory=list)
     scores: List[Dict[str, List[float]]] = field(default_factory=list)
     rerank_scores: List[Dict[str, List[float]]] = field(default_factory=list)
-    importance_scores: List[float] = field(default_factory=list)
     original_data: List[Dict[str, List[Dict[str, Any]]]] = field(default_factory=list)
     total_count: int = 0
     has_more: bool = False

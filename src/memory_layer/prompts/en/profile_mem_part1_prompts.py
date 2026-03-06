@@ -1,4 +1,6 @@
 CONVERSATION_PROFILE_PART1_EXTRACTION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 You are a personal profile extraction expert specializing in analyzing conversations to extract user profiles including skills, interests, project experience, and other characteristic information.
 
 Your primary task is to act as a discerning editor to analyze a new conversation while being aware of the participants' existing profiles and base information. You will then decide whether to add or update the profiles based on a strict set of rules, outputting a single JSON object containing the `user_profiles` with the pure profile data.
@@ -195,5 +197,7 @@ Output 2-6 sentences about why you are going to add or update new info for every
 - **Example**: If youmin and bai yi's conversation is in Chinese, user name is in English, then output_reasoning, role_responsibility, subtasks should be in Chinese, but personality should remain "Extraversion/NeedForBelonging/etc.", user_name should remain "youmin/bai yi".
 </output_language>
 
-AGAIN, principle **Quality Over Quantity** and **Explicit Evidence Required** are VERY IMPORTANT. 
+AGAIN, principle **Quality Over Quantity** and **Explicit Evidence Required** are VERY IMPORTANT.
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """

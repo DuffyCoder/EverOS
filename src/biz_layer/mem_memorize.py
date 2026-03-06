@@ -1,8 +1,12 @@
-from dataclasses import dataclass
+import asyncio
+import json
 import random
 import time
-import json
 import traceback
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any
 
 from memory_layer.profile_manager.config import ScenarioType
 from agentic_layer.metrics.memorize_metrics import (
@@ -15,13 +19,12 @@ from memory_layer.memory_manager import MemoryManager
 from api_specs.memory_types import (
     MemoryType,
     MemCell,
-    BaseMemory,
     EpisodeMemory,
     RawDataType,
     Foresight,
+    EventLog,
 )
-from api_specs.memory_types import EventLog
-from biz_layer.memorize_config import DEFAULT_MEMORIZE_CONFIG
+from biz_layer.memorize_config import MemorizeConfig, DEFAULT_MEMORIZE_CONFIG
 from memory_layer.memory_extractor.profile_memory_extractor import ProfileMemory
 from core.di import get_bean_by_type
 from infra_layer.adapters.out.persistence.repository.episodic_memory_raw_repository import (
@@ -54,17 +57,11 @@ from infra_layer.adapters.out.persistence.repository.group_profile_raw_repositor
 from infra_layer.adapters.out.persistence.repository.conversation_data_raw_repository import (
     ConversationDataRepository,
 )
-from api_specs.memory_types import RawDataType
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass
-import uuid
-from datetime import datetime, timedelta
-import os
-import asyncio
-from collections import defaultdict
+from infra_layer.adapters.out.persistence.repository.agent_case_raw_repository import (
+    AgentCaseRawRepository,
+)
 from common_utils.datetime_utils import get_now_with_timezone, to_iso_format
 from memory_layer.memcell_extractor.base_memcell_extractor import StatusResult
-import traceback
 
 from core.observation.logger import get_logger
 from infra_layer.adapters.out.search.elasticsearch.converter.episodic_memory_converter import (
@@ -76,13 +73,50 @@ from infra_layer.adapters.out.search.milvus.converter.episodic_memory_milvus_con
 from infra_layer.adapters.out.search.repository.episodic_memory_milvus_repository import (
     EpisodicMemoryMilvusRepository,
 )
+from infra_layer.adapters.out.search.milvus.converter.agent_case_milvus_converter import (
+    AgentCaseMilvusConverter,
+)
+from infra_layer.adapters.out.search.repository.agent_case_milvus_repository import (
+    AgentCaseMilvusRepository,
+)
+from infra_layer.adapters.out.search.milvus.converter.agent_skill_milvus_converter import (
+    AgentSkillMilvusConverter,
+)
+from infra_layer.adapters.out.search.repository.agent_skill_milvus_repository import (
+    AgentSkillMilvusRepository,
+)
 from infra_layer.adapters.out.search.repository.episodic_memory_es_repository import (
     EpisodicMemoryEsRepository,
+)
+from infra_layer.adapters.out.search.elasticsearch.converter.agent_case_converter import (
+    AgentCaseConverter,
+)
+from infra_layer.adapters.out.search.repository.agent_case_es_repository import (
+    AgentCaseEsRepository,
+)
+from infra_layer.adapters.out.search.elasticsearch.converter.agent_skill_converter import (
+    AgentSkillConverter,
+)
+from infra_layer.adapters.out.search.repository.agent_skill_es_repository import (
+    AgentSkillEsRepository,
 )
 from biz_layer.mem_sync import MemorySyncService
 from core.context.context import get_current_app_info
 
 logger = get_logger(__name__)
+
+
+async def _load_llm_custom_setting(group_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Load and normalize llm_custom_setting from global config."""
+    conversation_meta_repo = get_bean_by_type(ConversationMetaRawRepository)
+    llm_custom_setting = await conversation_meta_repo.get_llm_custom_setting(group_id)
+    if not llm_custom_setting:
+        return None
+    if hasattr(llm_custom_setting, "model_dump"):
+        return llm_custom_setting.model_dump()
+    if hasattr(llm_custom_setting, "dict"):
+        return llm_custom_setting.dict()
+    return llm_custom_setting
 
 
 @dataclass
@@ -91,20 +125,17 @@ class MemoryDocPayload:
     doc: Any
 
 
-from biz_layer.memorize_config import MemorizeConfig, DEFAULT_MEMORIZE_CONFIG
-
-
 async def _trigger_clustering(
     group_id: str,
     memcell: MemCell,
     scene: Optional[str] = None,
     config: MemorizeConfig = DEFAULT_MEMORIZE_CONFIG,
 ) -> None:
-    """Trigger MemCell clustering
+    """Trigger MemCell clustering, profile extraction, and agent skill extraction.
 
     Args:
         group_id: Group ID
-        memcell: The MemCell just saved
+        memcell: The MemCell just saved (may contain agent_case for agent conversations)
         scene: Conversation scene (used to determine Profile extraction strategy)
             - "group_chat": use group_chat scene
             - "assistant": use assistant scene
@@ -123,12 +154,7 @@ async def _trigger_clustering(
         from infra_layer.adapters.out.persistence.repository.cluster_state_raw_repository import (
             ClusterStateRawRepository,
         )
-        from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository import (
-            UserProfileRawRepository,
-        )
-        from memory_layer.llm.llm_provider import LLMProvider
         from core.di import get_bean_by_type
-        import os
 
         logger.info(f"[Clustering] Retrieving ClusterStateRawRepository...")
         # Get MongoDB storage
@@ -148,7 +174,7 @@ async def _trigger_clustering(
         # Load clustering state
         state_dict = await cluster_storage.load_cluster_state(group_id)
         cluster_state = (
-            ClusterState.from_dict(state_dict) if state_dict else ClusterState()
+            ClusterState.from_dict(state_dict) if state_dict else ClusterState(group_id=group_id)
         )
         logger.info(
             f"[Clustering] Loaded clustering state: {len(cluster_state.event_ids)} clustered events"
@@ -203,10 +229,18 @@ async def _trigger_clustering(
                 config=config,
             )
 
+        # Agent skill extraction (incremental, from in-memory experience on memcell)
+        if cluster_id and memcell.agent_case:
+            await _trigger_agent_skill_extraction(
+                group_id=group_id,
+                cluster_id=cluster_id,
+                cluster_state=cluster_state,
+                memcell=memcell,
+                config=config,
+            )
+
     except Exception as e:
         # Clustering failed, print detailed error and re-raise
-        import traceback
-
         error_msg = f"[Clustering] ❌ Triggering clustering failed: {e}"
         logger.error(error_msg, exc_info=True)
         print(error_msg)  # Ensure visible in console
@@ -237,7 +271,7 @@ async def _trigger_profile_extraction(
         from infra_layer.adapters.out.persistence.repository.user_profile_raw_repository import (
             UserProfileRawRepository,
         )
-        from memory_layer.llm.llm_provider import LLMProvider
+        from memory_layer.llm.llm_provider import build_default_provider
         from core.di import get_bean_by_type
         import os
 
@@ -259,18 +293,7 @@ async def _trigger_profile_extraction(
         memcell_repo = get_bean_by_type(MemCellRawRepository)
 
         # Create LLM Provider
-        llm_provider = LLMProvider(
-            provider_type=os.getenv("LLM_PROVIDER", "openai"),
-            model=os.getenv("LLM_MODEL", "gpt-4.1-mini"),  # skip-sensitive-check
-            base_url=os.getenv("LLM_BASE_URL"),  # skip-sensitive-check
-            api_key=os.getenv("LLM_API_KEY"),  # skip-sensitive-check
-            temperature=float(
-                os.getenv("LLM_TEMPERATURE", "0.3")
-            ),  # skip-sensitive-check
-            max_tokens=int(
-                os.getenv("LLM_MAX_TOKENS", "16384")
-            ),  # skip-sensitive-check
-        )
+        llm_provider = build_default_provider()
 
         # Determine scenario
         profile_scenario = (
@@ -404,11 +427,157 @@ async def _trigger_profile_extraction(
         logger.error(f"[Profile] ❌ Profile extraction failed: {e}", exc_info=True)
 
 
+async def _trigger_agent_skill_extraction(
+    group_id: str,
+    cluster_id: str,
+    cluster_state,  # ClusterState
+    memcell: MemCell,
+    config: MemorizeConfig = DEFAULT_MEMORIZE_CONFIG,
+) -> None:
+    """Trigger incremental AgentSkill extraction for a MemScene cluster.
+
+    Uses the in-memory AgentCase BO from memcell.agent_case directly
+    (no DB read needed), and merges new insights into the existing skill base.
+
+    Args:
+        group_id: Group ID
+        cluster_id: The cluster (MemScene) to extract skills for
+        cluster_state: Current clustering state (provides event_id -> cluster mapping)
+        memcell: The MemCell currently being processed (contains agent_case with user_id)
+        config: Memory extraction configuration
+    """
+    try:
+        from types import SimpleNamespace
+        from infra_layer.adapters.out.persistence.repository.agent_skill_raw_repository import (
+            AgentSkillRawRepository,
+        )
+        from memory_layer.memory_extractor.agent_skill_extractor import (
+            AgentSkillExtractor,
+        )
+        from memory_layer.llm.llm_provider import build_default_provider
+        from core.lock.redis_distributed_lock import distributed_lock
+
+        # Check total cluster experience count against threshold (no lock needed)
+        cluster_event_ids = [
+            eid
+            for eid, cid in (cluster_state.eventid_to_cluster or {}).items()
+            if cid == cluster_id
+        ]
+        if len(cluster_event_ids) < config.skill_min_experiences:
+            logger.debug(
+                f"[AgentSkill] Cluster {cluster_id} has {len(cluster_event_ids)} "
+                f"experiences (min={config.skill_min_experiences}), skipping"
+            )
+            return
+
+        # Distributed lock: protect the read-modify-write cycle per cluster
+        lock_resource = f"agent_skill:{cluster_id}"
+        async with distributed_lock(
+            resource=lock_resource,
+            timeout=60.0,
+            blocking_timeout=80.0,
+        ) as acquired:
+            if not acquired:
+                logger.error(
+                    f"[AgentSkill] Failed to acquire lock for cluster={cluster_id}, skipping"
+                )
+                return
+
+            # Fetch existing skills for incremental merging
+            skill_repo = get_bean_by_type(AgentSkillRawRepository)
+            existing_skills = await skill_repo.get_by_cluster_id(cluster_id)
+
+            logger.info(
+                f"[AgentSkill] Incremental extraction: cluster={cluster_id}, "
+                f"new_experience=1, existing_skills={len(existing_skills)}"
+            )
+
+            # Wrap in-memory BO into a format compatible with _format_experiences
+            experience_wrapper = SimpleNamespace(
+                timestamp=memcell.timestamp,
+                task_intent=memcell.agent_case.task_intent,
+                approach=memcell.agent_case.approach,
+                quality_score=memcell.agent_case.quality_score,
+            )
+
+            # Resolve user_id from the memcell's original conversation data
+            user_id = _extract_user_id_from_memcell(memcell)
+
+            # Run incremental skill extraction
+            llm_provider = build_default_provider()
+            extractor = AgentSkillExtractor(llm_provider=llm_provider)
+            new_skill_records = await extractor.extract_and_save(
+                cluster_id=cluster_id,
+                group_id=group_id,
+                new_experience_records=[experience_wrapper],
+                existing_skill_records=existing_skills,
+                skill_repo=skill_repo,
+                user_id=user_id,
+            )
+
+            logger.info(
+                f"[AgentSkill] Extracted {len(new_skill_records)} skill items for cluster={cluster_id}"
+            )
+
+            if new_skill_records:
+                # Collect old record IDs for search engine sync (use str for Milvus/ES)
+                old_skill_ids = [str(r.id) for r in existing_skills]
+
+                # Milvus sync: insert new → flush → delete old
+                try:
+                    agent_skill_milvus_repo = get_bean_by_type(AgentSkillMilvusRepository)
+                    inserted_count = 0
+                    for record in new_skill_records:
+                        milvus_entity = AgentSkillMilvusConverter.from_mongo(record)
+                        if milvus_entity.get("vector"):
+                            await agent_skill_milvus_repo.insert(milvus_entity, flush=False)
+                            inserted_count += 1
+                        else:
+                            logger.warning(
+                                f"[AgentSkill] Milvus skip (no vector): record={record.id}"
+                            )
+                    if inserted_count > 0:
+                        await agent_skill_milvus_repo.flush()
+                    for old_id in old_skill_ids:
+                        await agent_skill_milvus_repo.delete_by_id(old_id)
+                    logger.info(
+                        f"[AgentSkill] Synced {inserted_count}/{len(new_skill_records)} items to Milvus for cluster={cluster_id}"
+                    )
+                except Exception as milvus_exc:
+                    logger.warning(
+                        f"[AgentSkill] Milvus sync failed for cluster={cluster_id}: {milvus_exc}"
+                    )
+
+                # ES sync: insert new → delete old
+                try:
+                    agent_skill_es_repo = get_bean_by_type(AgentSkillEsRepository)
+                    for record in new_skill_records:
+                        es_doc = AgentSkillConverter.from_mongo(record)
+                        await agent_skill_es_repo.create(es_doc)
+                    for old_id in old_skill_ids:
+                        await agent_skill_es_repo.delete_by_id(old_id)
+                    logger.info(
+                        f"[AgentSkill] Synced {len(new_skill_records)} items to ES for cluster={cluster_id}"
+                    )
+                except Exception as es_exc:
+                    logger.warning(
+                        f"[AgentSkill] ES sync failed for cluster={cluster_id}: {es_exc}"
+                    )
+
+    except Exception as e:
+        logger.error(
+            f"[AgentSkill] Skill extraction failed for cluster={cluster_id}: {e}",
+            exc_info=True,
+        )
+
+
 from biz_layer.mem_db_operations import (
     _convert_timestamp_to_time,
     _convert_episode_memory_to_doc,
     _convert_foresight_to_doc,
     _convert_event_log_to_docs,
+    _convert_agent_case_to_doc,
+    _extract_user_id_from_memcell,
     _save_memcell_to_database,
     _save_profile_memory_to_core,
     _update_status_for_continuing_conversation,
@@ -418,7 +587,6 @@ from biz_layer.mem_db_operations import (
     _normalize_datetime_for_storage,
     _convert_projects_participated_list,
 )
-from typing import Tuple
 
 
 def if_memorize(memcell: MemCell) -> bool:
@@ -438,7 +606,9 @@ class ExtractionState:
     scene: str
     is_assistant_scene: bool
     participants: List[str]
-    parent_type: str = None
+    episode_parent_type: str = None
+    foresight_parent_type: str = None
+    eventlog_parent_type: str = None
     parent_id: str = None
     group_episode: Optional[EpisodeMemory] = None
     group_episode_memories: List[EpisodeMemory] = None
@@ -450,8 +620,18 @@ class ExtractionState:
         self.episode_memories = []
         self.parent_docs_map = {}
         # Set default parent info from memcell
-        if self.parent_type is None:
-            self.parent_type = DEFAULT_MEMORIZE_CONFIG.default_parent_type
+        if self.episode_parent_type is None:
+            self.episode_parent_type = (
+                DEFAULT_MEMORIZE_CONFIG.default_episode_parent_type
+            )
+        if self.foresight_parent_type is None:
+            self.foresight_parent_type = (
+                DEFAULT_MEMORIZE_CONFIG.default_foresight_parent_type
+            )
+        if self.eventlog_parent_type is None:
+            self.eventlog_parent_type = (
+                DEFAULT_MEMORIZE_CONFIG.default_eventlog_parent_type
+            )
         if self.parent_id is None:
             self.parent_id = self.memcell.event_id
 
@@ -473,7 +653,7 @@ async def process_memory_extraction(
     # Get metrics labels
     space_id = get_space_id_for_metrics()
     raw_data_type = memcell.type.value if memcell.type else 'unknown'
-    
+
     # 1. Initialize state
     init_start = time.perf_counter()
     state = await _init_extraction_state(memcell, request, current_time)
@@ -487,7 +667,7 @@ async def process_memory_extraction(
     # 2. Parallel extract: Episode + (assistant scene) Foresight/EventLog
     foresight_memories, event_logs = [], []
     extract_start = time.perf_counter()
-    
+
     # Wrapper functions to track individual stage durations
     async def _timed_extract_episodes():
         start = time.perf_counter()
@@ -499,7 +679,7 @@ async def process_memory_extraction(
             duration_seconds=time.perf_counter() - start,
         )
         return result
-    
+
     async def _timed_extract_foresights():
         start = time.perf_counter()
         result = await _extract_foresights(state, memory_manager)
@@ -510,7 +690,7 @@ async def process_memory_extraction(
             duration_seconds=time.perf_counter() - start,
         )
         return result
-    
+
     async def _timed_extract_event_logs():
         start = time.perf_counter()
         result = await _extract_event_logs(state, memory_manager)
@@ -521,8 +701,36 @@ async def process_memory_extraction(
             duration_seconds=time.perf_counter() - start,
         )
         return result
-    
-    if state.is_assistant_scene:
+
+    # Agent experience extraction (for AGENT_CONVERSATION type)
+    agent_case = None
+
+    async def _timed_extract_agent_case():
+        start = time.perf_counter()
+        result = await _extract_agent_case(state, memory_manager)
+        record_extraction_stage(
+            space_id=space_id,
+            raw_data_type=raw_data_type,
+            stage='extract_agent_case',
+            duration_seconds=time.perf_counter() - start,
+        )
+        return result
+
+    is_agent_conversation = (
+        state.memcell.type == RawDataType.AGENTCONVERSATION
+        if state.memcell.type
+        else False
+    )
+
+    if is_agent_conversation and state.is_assistant_scene:
+        # Agent conversations in assistant scene: extract episodes + agent experience in parallel
+        _, foresight_memories, event_logs, agent_case = await asyncio.gather(
+            _timed_extract_episodes(),
+            _timed_extract_foresights(),
+            _timed_extract_event_logs(),
+            _timed_extract_agent_case(),
+        )
+    elif state.is_assistant_scene:
         _, foresight_memories, event_logs = await asyncio.gather(
             _timed_extract_episodes(),
             _timed_extract_foresights(),
@@ -560,8 +768,15 @@ async def process_memory_extraction(
             memory_type='event_log',
             count=len(event_logs),
         )
+    if agent_case:
+        record_memory_extracted(
+            space_id=space_id,
+            raw_data_type=raw_data_type,
+            memory_type='agent_case',
+            count=1,
+        )
 
-    # 3. Update MemCell and trigger clustering
+    # 3. Update MemCell and trigger clustering (+ agent skill extraction)
     cluster_start = time.perf_counter()
     await _update_memcell_and_cluster(state)
     record_extraction_stage(
@@ -575,7 +790,9 @@ async def process_memory_extraction(
     memories_count = 0
     if if_memorize(memcell):
         save_start = time.perf_counter()
-        memories_count = await _process_memories(state, foresight_memories, event_logs)
+        memories_count = await _process_memories(
+            state, foresight_memories, event_logs
+        )
         record_extraction_stage(
             space_id=space_id,
             raw_data_type=raw_data_type,
@@ -591,7 +808,9 @@ async def _init_extraction_state(
 ) -> ExtractionState:
     """Initialize extraction state"""
     conversation_meta_repo = get_bean_by_type(ConversationMetaRawRepository)
-    conversation_meta = await conversation_meta_repo.get_by_group_id(request.group_id)
+    conversation_meta = await conversation_meta_repo.get_by_group_id_with_fallback(
+        request.group_id
+    )
     scene = (
         conversation_meta.scene
         if conversation_meta and conversation_meta.scene
@@ -654,8 +873,8 @@ def _process_episode_results(state: ExtractionState, results: List[Any]):
         )
         group_episode = None
     elif group_episode:
-        group_episode.ori_event_id_list = [state.memcell.event_id]
-        group_episode.memcell_event_id_list = [state.memcell.event_id]
+        group_episode.parent_type = state.episode_parent_type
+        group_episode.parent_id = state.parent_id
         state.group_episode_memories.append(group_episode)
         state.group_episode = group_episode
         state.memcell.episode = group_episode.episode
@@ -671,8 +890,8 @@ def _process_episode_results(state: ExtractionState, results: List[Any]):
                 )
                 continue
             if result:
-                result.ori_event_id_list = [state.memcell.event_id]
-                result.memcell_event_id_list = [state.memcell.event_id]
+                result.parent_type = state.episode_parent_type
+                result.parent_id = state.parent_id
                 state.episode_memories.append(result)
                 logger.info(
                     f"[MemCell Processing] ✅ Personal Episode successful: user_id={user_id}"
@@ -713,9 +932,12 @@ async def _update_memcell_and_cluster(state: ExtractionState):
             participants=state.memcell.participants,
             type=state.memcell.type,
             episode=state.group_episode.episode,
+            agent_case=state.memcell.agent_case,
         )
         await _trigger_clustering(
-            state.request.group_id, memcell_for_clustering, state.scene
+            state.request.group_id,
+            memcell_for_clustering,
+            state.scene,
         )
         logger.info(
             f"[MemCell Processing] ✅ Clustering completed (scene={state.scene})"
@@ -729,7 +951,7 @@ async def _process_memories(
     foresight_memories: List[Foresight],
     event_logs: List[EventLog],
 ) -> int:
-    """Save Episodes and Foresight/EventLog
+    """Save Episodes, Foresight/EventLog, and AgentCase
 
     Returns:
         int: Total number of memories saved
@@ -746,6 +968,7 @@ async def _process_memories(
     episodes_count = 0
     foresight_count = 0
     eventlog_count = 0
+    agent_case_count = 0
 
     if episodes_to_save:
         await _save_episodes(state, episodes_to_save, episodic_source)
@@ -757,11 +980,15 @@ async def _process_memories(
         foresight_count = len(foresight_memories)
         eventlog_count = len(event_logs)
 
+    # Save agent experience (agent conversation only)
+    if state.memcell.agent_case:
+        agent_case_count = await _save_agent_case(state)
+
     await update_status_after_memcell(
         state.request, state.memcell, state.current_time, state.request.raw_data_type
     )
 
-    return episodes_count + foresight_count + eventlog_count
+    return episodes_count + foresight_count + eventlog_count + agent_case_count
 
 
 async def _extract_foresights(
@@ -776,7 +1003,7 @@ async def _extract_foresights(
     for mem in result:
         mem.group_id = state.request.group_id
         mem.group_name = state.request.group_name
-        mem.parent_type = state.parent_type
+        mem.parent_type = state.foresight_parent_type
         mem.parent_id = state.parent_id
     return result
 
@@ -792,9 +1019,24 @@ async def _extract_event_logs(
         return []
     result.group_id = state.request.group_id
     result.group_name = state.request.group_name
-    result.parent_type = state.parent_type
+    result.parent_type = state.eventlog_parent_type
     result.parent_id = state.parent_id
     return [result]
+
+
+async def _extract_agent_case(
+    state: ExtractionState, memory_manager: MemoryManager
+):
+    """Extract AgentCase from memcell (agent conversation only)."""
+    result = await memory_manager.extract_memory(
+        memcell=state.memcell,
+        memory_type=MemoryType.AGENT_CASE,
+        group_id=state.request.group_id,
+    )
+    if isinstance(result, Exception) or not result:
+        return None
+    state.memcell.agent_case = result
+    return result
 
 
 def _clone_episodes_for_users(state: ExtractionState) -> List[EpisodeMemory]:
@@ -902,6 +1144,28 @@ async def _save_foresight_and_eventlog(
         await save_memory_docs(payloads)
 
 
+async def _save_agent_case(state: ExtractionState) -> int:
+    """Save AgentCase to database.
+
+    Returns:
+        int: Number of agent experiences saved (0 or 1)
+    """
+    try:
+        agent_case = state.memcell.agent_case
+        doc = _convert_agent_case_to_doc(
+            agent_case, state.memcell, state.current_time
+        )
+        payloads = [MemoryDocPayload(MemoryType.AGENT_CASE, doc)]
+        await save_memory_docs(payloads)
+        logger.info(
+            f"[MemCell Processing] ✅ AgentCase saved: intent='{agent_case.task_intent[:80]}'"
+        )
+        return 1
+    except Exception as e:
+        logger.error(f"[MemCell Processing] ❌ Failed to save AgentCase: {e}")
+        return 0
+
+
 def extract_message_time(raw_data):
     """
     Extract message time from RawData object
@@ -973,7 +1237,9 @@ async def preprocess_conv_request(
         status = await status_repo.get_by_group_id(request.group_id)
         if status and status.last_memcell_time:
             start_time = status.last_memcell_time
-            logger.info(f"[preprocess] Using last_memcell_time as start_time: {start_time}")
+            logger.info(
+                f"[preprocess] Using last_memcell_time as start_time: {start_time}"
+            )
 
         # Step 1: Get historical messages, excluding current request's messages
         # Only get messages after last_memcell_time (current memcell's accumulated messages)
@@ -1012,7 +1278,7 @@ async def update_status_when_no_memcell(
     current_time: datetime,
     data_type: RawDataType,
 ):
-    if data_type == RawDataType.CONVERSATION:
+    if data_type in (RawDataType.CONVERSATION, RawDataType.AGENTCONVERSATION):
         # Try to update status table
         try:
             status_repo = get_bean_by_type(ConversationStatusRawRepository)
@@ -1038,7 +1304,7 @@ async def update_status_when_no_memcell(
                         latest_time = last_msg.timestamp
 
                 if not latest_time:
-                    latest_time = min(latest_time, current_time)
+                    latest_time = current_time
 
                 # Use encapsulated function to update conversation continuation status
                 await _update_status_for_continuing_conversation(
@@ -1057,7 +1323,7 @@ async def update_status_after_memcell(
     current_time: datetime,
     data_type: RawDataType,
 ):
-    if data_type == RawDataType.CONVERSATION:
+    if data_type in (RawDataType.CONVERSATION, RawDataType.AGENTCONVERSATION):
         # Update last_memcell_time in status table to memcell's timestamp
         try:
             status_repo = get_bean_by_type(ConversationStatusRawRepository)
@@ -1082,21 +1348,6 @@ async def update_status_after_memcell(
             logger.error(f"Final status table update failed: {e}")
     else:
         pass
-
-
-async def save_personal_profile_memory(
-    profile_memories: List[ProfileMemory], version: Optional[str] = None
-):
-    logger.info(
-        f"[mem_memorize] Saving {len(profile_memories)} personal profile memories to database"
-    )
-    # Initialize Repository instance
-    core_memory_repo = get_bean_by_type(CoreMemoryRawRepository)
-
-    # Save personal profile memories to GroupUserProfileMemoryRawRepository
-    for profile_mem in profile_memories:
-        await _save_profile_memory_to_core(profile_mem, core_memory_repo, version)
-        # Remove individual operation success log
 
 
 async def save_memory_docs(
@@ -1182,7 +1433,9 @@ async def save_memory_docs(
         if saved_profiles:
             saved_result[MemoryType.PROFILE] = saved_profiles
 
-    group_profile_docs = grouped_docs.get(MemoryType.GROUP_PROFILE, [])
+    group_profile_docs = grouped_docs.get(
+        "group_profile", []
+    )  # MemoryType.GROUP_PROFILE, [])
     if group_profile_docs:
         group_profile_repo = get_bean_by_type(GroupProfileRawRepository)
         saved_group_profiles = []
@@ -1193,7 +1446,37 @@ async def save_memory_docs(
             except Exception as exc:
                 logger.error(f"Failed to save Group Profile memory: {exc}")
         if saved_group_profiles:
-            saved_result[MemoryType.GROUP_PROFILE] = saved_group_profiles
+            saved_result["group_profile"] = (
+                saved_group_profiles  # MemoryType.GROUP_PROFILE] = saved_group_profiles
+            )
+
+    # Agent Experience
+    agent_case_docs = grouped_docs.get(MemoryType.AGENT_CASE, [])
+    if agent_case_docs:
+        agent_exp_repo = get_bean_by_type(AgentCaseRawRepository)
+        agent_exp_milvus_repo = get_bean_by_type(AgentCaseMilvusRepository)
+        saved_agent_cases = []
+        for doc in agent_case_docs:
+            try:
+                saved_doc = await agent_exp_repo.append_experience(doc)
+                if saved_doc:
+                    saved_agent_cases.append(saved_doc)
+                    try:
+                        milvus_entity = AgentCaseMilvusConverter.from_mongo(saved_doc)
+                        if milvus_entity.get("vector"):
+                            await agent_exp_milvus_repo.insert(milvus_entity, flush=False)
+                    except Exception as milvus_exc:
+                        logger.warning(f"Failed to sync AgentCase to Milvus: {milvus_exc}")
+                    try:
+                        es_doc = AgentCaseConverter.from_mongo(saved_doc)
+                        agent_exp_es_repo = get_bean_by_type(AgentCaseEsRepository)
+                        await agent_exp_es_repo.create(es_doc)
+                    except Exception as es_exc:
+                        logger.warning(f"Failed to sync AgentCase to ES: {es_exc}")
+            except Exception as exc:
+                logger.error(f"Failed to save AgentCase: {exc}")
+        if saved_agent_cases:
+            saved_result[MemoryType.AGENT_CASE] = saved_agent_cases
 
     return saved_result
 
@@ -1226,10 +1509,9 @@ async def load_core_memories(
                 # Directly create ProfileMemory object
                 profile_memory = ProfileMemory(
                     # Memory base class required fields
-                    memory_type=MemoryType.CORE,
+                    memory_type="core",  # MemoryType.CORE
                     user_id=user_id,
                     timestamp=to_iso_format(current_time),
-                    ori_event_id_list=[],
                     # Memory base class optional fields
                     subject=f"{getattr(core_memory, 'user_name', user_id)}'s personal profile",
                     summary=f"User {user_id}'s basic information: {getattr(core_memory, 'position', 'unknown role')}",
@@ -1281,24 +1563,38 @@ async def memorize(request: MemorizeRequest) -> int:
         current_time = get_now_with_timezone() + timedelta(seconds=1)
     logger.info(f"[mem_memorize] Current time: {current_time}")
 
-    memory_manager = MemoryManager()
     conversation_data_repo = get_bean_by_type(ConversationDataRepository)
 
     # Note: Request logs are saved in controller layer for better timing control
     # (sync_status=-1, will be confirmed later based on boundary detection result)
 
     # ===== Preprocess and get historical data =====
+    llm_custom_setting = None
     if request.raw_data_type == RawDataType.CONVERSATION:
         request = await preprocess_conv_request(request, current_time)
         if request == None:
             logger.warning(f"[mem_memorize] preprocess_conv_request returned None")
             return 0
+    elif request.raw_data_type == RawDataType.AGENTCONVERSATION:
+        # Agent conversations reuse the same preprocessing as regular conversations
+        request = await preprocess_conv_request(request, current_time)
+        if request == None:
+            logger.warning(f"[mem_memorize] preprocess_conv_request (agent) returned None")
+            return 0
+
+        # Fetch llm_custom_setting from global config (inherits automatically)
+        # Note: llm_custom_setting is only stored in global config (group_id=None)
+        llm_custom_setting = await _load_llm_custom_setting(request.group_id)
+        if llm_custom_setting:
+            logger.info(
+                f"[mem_memorize] Using llm_custom_setting from global config for group {request.group_id}"
+            )
 
     # Boundary detection
     # Get metrics labels
     space_id = get_space_id_for_metrics()
     raw_data_type = request.raw_data_type.value if request.raw_data_type else 'unknown'
-    
+
     logger.info("=" * 80)
     logger.info(f"[Boundary Detection] Start detection: group_id={request.group_id}")
     logger.info(
@@ -1309,6 +1605,9 @@ async def memorize(request: MemorizeRequest) -> int:
     )
     logger.info("=" * 80)
 
+    # Initialize MemoryManager with custom config
+    memory_manager = MemoryManager(llm_config=llm_custom_setting)
+
     memcell_start = time.perf_counter()
     memcell_result = await memory_manager.extract_memcell(
         request.history_raw_data_list,
@@ -1317,6 +1616,7 @@ async def memorize(request: MemorizeRequest) -> int:
         request.group_id,
         request.group_name,
         request.user_id_list,
+        flush=request.flush,
     )
     record_extraction_stage(
         space_id=space_id,
@@ -1324,7 +1624,9 @@ async def memorize(request: MemorizeRequest) -> int:
         stage='extract_memcell',
         duration_seconds=time.perf_counter() - memcell_start,
     )
-    logger.debug(f"[mem_memorize] Extracting MemCell took: {time.perf_counter() - memcell_start} seconds")
+    logger.debug(
+        f"[mem_memorize] Extracting MemCell took: {time.perf_counter() - memcell_start} seconds"
+    )
 
     if memcell_result == None:
         logger.warning(f"[mem_memorize] Skipped extracting MemCell")
@@ -1360,18 +1662,69 @@ async def memorize(request: MemorizeRequest) -> int:
         return 0
     else:
         logger.info(f"[mem_memorize] Successfully extracted MemCell")
-        # Judged as boundary, mark all accumulated data as used (restart accumulation)
-        # Exclude current request's new messages so they can start the next accumulation
-        try:
-            new_message_ids = [
-                r.data_id for r in request.new_raw_data_list if r.data_id
-            ]
+
+    # Initialize outside try block to ensure it's always defined
+    need_second_memcell = False
+
+    try:
+        new_message_ids = [r.data_id for r in request.new_raw_data_list if r.data_id]
+
+        # === Step 1: Determine if we need a second MemCell (for flush mode) ===
+        # This is needed when: flush=True AND LLM detected boundary at history
+        # (i.e., first MemCell only contains history, new needs separate MemCell)
+        memcell_msg_count = len(memcell.original_data) if memcell.original_data else 0
+        history_count = len(request.history_raw_data_list)
+        new_count = len(request.new_raw_data_list)
+        expected_total = history_count + new_count
+
+        need_second_memcell = (
+            request.flush and new_count > 0 and memcell_msg_count < expected_total
+        )
+
+        logger.debug(
+            f"[mem_memorize] MemCell analysis: memcell_msgs={memcell_msg_count}, "
+            f"history={history_count}, new={new_count}, need_second_memcell={need_second_memcell}"
+        )
+
+        # === Step 2: Mark message status based on the situation ===
+        if need_second_memcell:
+            # Flush mode + need second MemCell: only mark history as used for now
+            # New messages will be marked after second MemCell is processed
             delete_success = await conversation_data_repo.delete_conversation_data(
                 request.group_id, exclude_message_ids=new_message_ids
             )
             if delete_success:
-                logger.info(
-                    f"[mem_memorize] Judged as boundary, history marked as used (excluded {len(new_message_ids)} new): group_id={request.group_id}"
+                logger.debug(
+                    f"[mem_memorize] Flush mode (need second MemCell): history marked as used, "
+                    f"new ({len(new_message_ids)}) will be processed separately: group_id={request.group_id}"
+                )
+            else:
+                logger.warning(
+                    f"[mem_memorize] Failed to mark history: group_id={request.group_id}"
+                )
+        elif request.flush:
+            # Flush mode + no second MemCell needed: all messages are in first MemCell
+            delete_success = await conversation_data_repo.delete_conversation_data(
+                request.group_id, exclude_message_ids=[]
+            )
+            if delete_success:
+                logger.debug(
+                    f"[mem_memorize] Flush mode: all messages marked as used "
+                    f"(including {len(new_message_ids)} new): group_id={request.group_id}"
+                )
+            else:
+                logger.warning(
+                    f"[mem_memorize] Failed to clear conversation history: group_id={request.group_id}"
+                )
+        else:
+            # Normal/force_split mode: history marked as used, new starts next accumulation
+            delete_success = await conversation_data_repo.delete_conversation_data(
+                request.group_id, exclude_message_ids=new_message_ids
+            )
+            if delete_success:
+                logger.debug(
+                    f"[mem_memorize] Boundary detected, history marked as used "
+                    f"(excluded {len(new_message_ids)} new): group_id={request.group_id}"
                 )
             else:
                 logger.warning(
@@ -1381,23 +1734,19 @@ async def memorize(request: MemorizeRequest) -> int:
             await conversation_data_repo.save_conversation_data(
                 request.new_raw_data_list, request.group_id
             )
-        except Exception as e:
-            logger.error(
-                f"[mem_memorize] Exception while marking conversation history: {e}"
-            )
-            traceback.print_exc()
-    # TODO: Read status table, read accumulated MemCell data table, determine whether to perform memorize calculation
+    except Exception as e:
+        logger.error(
+            f"[mem_memorize] Exception while marking conversation history: {e}"
+        )
+        traceback.print_exc()
 
-    # Save MemCell to table
+    # === Step 3: Save and process first MemCell ===
     memcell = await _save_memcell_to_database(memcell, current_time)
     logger.info(f"[mem_memorize] Successfully saved MemCell: {memcell.event_id}")
-
-    # Get current request_id
 
     app_info = get_current_app_info()
     request_id = app_info.get('request_id')
 
-    # Directly execute memory extraction (blocking/asynchronous logic controlled by middleware layer request_process)
     try:
         memories_count = await process_memory_extraction(
             memcell, request, memory_manager, current_time
@@ -1405,6 +1754,55 @@ async def memorize(request: MemorizeRequest) -> int:
         logger.info(
             f"[mem_memorize] ✅ Memory extraction completed, count={memories_count}, request_id={request_id}"
         )
+
+        # === Step 4: Create and process second MemCell if needed ===
+        if need_second_memcell:
+            logger.info(
+                f"[mem_memorize] Creating second MemCell for {new_count} new messages"
+            )
+            second_result = await memory_manager.extract_memcell(
+                history_raw_data_list=[],  # empty history
+                new_raw_data_list=request.new_raw_data_list,
+                raw_data_type=request.raw_data_type,
+                group_id=request.group_id,
+                group_name=request.group_name,
+                user_id_list=request.user_id_list,
+                flush=True,  # force create MemCell
+            )
+            if second_result and second_result[0]:
+                second_memcell = second_result[0]
+                second_memcell = await _save_memcell_to_database(
+                    second_memcell, current_time
+                )
+                logger.info(
+                    f"[mem_memorize] Saved second MemCell: {second_memcell.event_id}"
+                )
+
+                # Process memory extraction for second MemCell
+                second_memories_count = await process_memory_extraction(
+                    second_memcell, request, memory_manager, current_time
+                )
+                memories_count += second_memories_count
+                logger.info(
+                    f"[mem_memorize] ✅ Second MemCell completed, "
+                    f"count={second_memories_count}, total={memories_count}"
+                )
+
+                # Now mark new messages as used (after second MemCell is processed)
+                await conversation_data_repo.delete_conversation_data(
+                    request.group_id, exclude_message_ids=[]
+                )
+                logger.info(
+                    f"[mem_memorize] New messages marked as used after second MemCell: group_id={request.group_id}"
+                )
+            else:
+                # Second MemCell creation failed - mark new messages as used anyway
+                # to prevent them from being processed again in the next request
+                logger.warning(
+                    f"[mem_memorize] Second MemCell creation failed for {new_count} new messages, "
+                    f"marking them as used to avoid reprocessing: group_id={request.group_id}"
+                )
+
         return memories_count
     except Exception as e:
         logger.error(f"[mem_memorize] ❌ Memory extraction failed: {e}")

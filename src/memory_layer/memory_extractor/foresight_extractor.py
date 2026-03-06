@@ -76,7 +76,6 @@ class ForesightExtractor(MemoryExtractor):
         user_id: str,
         user_name: Optional[str] = None,
         group_id: Optional[str] = None,
-        ori_event_id_list: Optional[List[str]] = None,
     ) -> List[Foresight]:
         """
         Generate foresight association predictions from raw conversation text.
@@ -87,7 +86,6 @@ class ForesightExtractor(MemoryExtractor):
             user_id: Target user id
             user_name: Optional user display name
             group_id: Optional group id
-            ori_event_id_list: Optional original event id list
 
         Returns:
             List of foresight items (up to 10 items), including time information
@@ -130,7 +128,6 @@ class ForesightExtractor(MemoryExtractor):
                     start_time=start_time,
                     user_id=user_id,
                     timestamp=timestamp,
-                    ori_event_id_list=ori_event_id_list or [],
                     group_id=group_id,
                 )
 
@@ -204,7 +201,6 @@ class ForesightExtractor(MemoryExtractor):
         start_time: Optional[str] = None,
         user_id: str = "",
         timestamp: Optional[datetime] = None,
-        ori_event_id_list: Optional[List[str]] = None,
         group_id: Optional[str] = None,
     ) -> List[Foresight]:
         """
@@ -215,7 +211,6 @@ class ForesightExtractor(MemoryExtractor):
             start_time: Start time, format YYYY-MM-DD
             user_id: User ID for the foresight
             timestamp: Timestamp for the foresight
-            ori_event_id_list: Original event ID list
             group_id: Group ID
 
         Returns:
@@ -298,7 +293,6 @@ class ForesightExtractor(MemoryExtractor):
                         memory_type=MemoryType.FORESIGHT,
                         user_id=user_id,
                         timestamp=timestamp or get_now_with_timezone(),
-                        ori_event_id_list=ori_event_id_list or [],
                         group_id=group_id,
                         foresight=item_data['foresight'],
                         evidence=item_data['evidence'],

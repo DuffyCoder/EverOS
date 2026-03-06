@@ -1,9 +1,9 @@
 """Conversation metadata resource DTOs.
 
 This module contains DTOs related to conversation metadata CRUD operations:
-- Create (POST /api/v1/memories/conversation-meta)
-- Get (GET /api/v1/memories/conversation-meta)
-- Patch (PATCH /api/v1/memories/conversation-meta)
+- Create (POST /api/v0/memories/conversation-meta)
+- Get (GET /api/v0/memories/conversation-meta)
+- Patch (PATCH /api/v0/memories/conversation-meta)
 """
 
 from __future__ import annotations
@@ -60,6 +60,57 @@ Enum values from MessageSenderRole:
         return self
 
 
+class LlmProviderConfig(BaseModel):
+    """LLM provider configuration
+
+    Defines the provider and model for a specific LLM task.
+    """
+
+    provider: str = Field(
+        ...,
+        description="LLM provider name",
+        examples=["openai", "openrouter", "anthropic"],
+    )
+    model: str = Field(
+        ...,
+        description="Model name",
+        examples=["gpt-4.1-mini", "qwen/qwen3-235b-a22b-2507"],
+    )
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Additional provider-specific configuration",
+        examples=[{"temperature": 0.7, "max_tokens": 1024}],
+    )
+
+
+class LlmCustomSetting(BaseModel):
+    """LLM custom settings for algorithm control
+
+    Allows configuring different LLM providers/models for different tasks.
+    Only applicable to global config (group_id=null).
+
+    Example:
+        {
+            "boundary": {"provider": "openai", "model": "gpt-4.1-mini"},
+            "extraction": {"provider": "openrouter", "model": "qwen/qwen3-235b-a22b-2507"}
+        }
+    """
+
+    boundary: Optional[LlmProviderConfig] = Field(
+        default=None,
+        description="LLM config for boundary detection (fast, cheap model recommended)",
+        examples=[{"provider": "openai", "model": "gpt-4.1-mini"}],
+    )
+    extraction: Optional[LlmProviderConfig] = Field(
+        default=None,
+        description="LLM config for memory extraction (high quality model recommended)",
+        examples=[{"provider": "openrouter", "model": "qwen/qwen3-235b-a22b-2507"}],
+    )
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional task-specific LLM configurations"
+    )
+
+
 # =============================================================================
 # Internal Request (Business Layer)
 # =============================================================================
@@ -86,7 +137,7 @@ class ConversationMetaRequest(BaseModel):
 
 
 # =============================================================================
-# Create DTOs (POST /api/v1/memories/conversation-meta)
+# Create DTOs (POST /api/v0/memories/conversation-meta)
 # =============================================================================
 
 
@@ -94,19 +145,34 @@ class ConversationMetaCreateRequest(BaseModel):
     """
     Create conversation metadata request body
 
-    Used for POST /api/v1/memories/conversation-meta endpoint
+    Used for POST /api/v0/memories/conversation-meta endpoint
+
+    ## Config Levels:
+    - **Global Config** (group_id=null): Sets default settings for a scene.
+      - Required fields: scene, scene_desc, created_at
+      - Optional fields: llm_custom_setting, description, tags, user_details, default_timezone
+      - Cannot set: name (name is only for group config)
+    - **Group Config** (group_id provided): Sets settings for a specific group.
+      - Required fields: name, created_at
+      - Cannot set: scene, scene_desc, llm_custom_setting (inherited from global config)
     """
 
-    scene: str = Field(
-        ...,
-        description="""Scene identifier, enum values from ScenarioType:
+    scene: Optional[str] = Field(
+        default=None,
+        description="""Scene identifier. **Required for global config (group_id=null), 
+not allowed for group config (group_id provided).**
+
+Enum values from ScenarioType:
 - group_chat: work/group chat scenario, suitable for group conversations such as multi-person collaboration and project discussions
 - assistant: assistant scenario, suitable for one-on-one AI assistant conversations""",
         examples=["group_chat"],
     )
-    scene_desc: Dict[str, Any] = Field(
-        ...,
-        description="Scene description object, can include fields like description",
+    scene_desc: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="""Scene description object. **Required for global config (group_id=null), 
+not allowed for group config (group_id provided).**
+
+Can include fields like description, type, etc.""",
         examples=[
             {
                 "description": "Project discussion group chat",
@@ -114,8 +180,27 @@ class ConversationMetaCreateRequest(BaseModel):
             }
         ],
     )
-    name: str = Field(
-        ..., description="Conversation name", examples=["Project Discussion Group"]
+    llm_custom_setting: Optional[LlmCustomSetting] = Field(
+        default=None,
+        description="""LLM custom settings for algorithm control. **Only for global config (group_id=null), 
+not allowed for group config (group_id provided).**
+
+Allows configuring different LLM providers/models for different tasks like boundary detection and memory extraction.""",
+        examples=[
+            {
+                "boundary": {"provider": "openai", "model": "gpt-4.1-mini"},
+                "extraction": {
+                    "provider": "openrouter",
+                    "model": "qwen/qwen3-235b-a22b-2507",
+                },
+            }
+        ],
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="""Group/conversation name. **Required for group config (group_id provided), 
+not allowed for global config (group_id=null).**""",
+        examples=["Project Discussion Group"],
     )
     description: Optional[str] = Field(
         default=None,
@@ -163,13 +248,8 @@ class ConversationMetaCreateRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "With group_id",
+                    "summary": "Group config - name REQUIRED, scene/scene_desc NOT allowed",
                     "value": {
-                        "scene": "group_chat",
-                        "scene_desc": {
-                            "description": "Project discussion group chat",
-                            "type": "project_discussion",
-                        },
                         "name": "Project Discussion Group",
                         "description": "Technical discussion for new feature development",
                         "group_id": "group_123",
@@ -191,13 +271,12 @@ class ConversationMetaCreateRequest(BaseModel):
                     },
                 },
                 {
-                    "summary": "Default config (group_id is null)",
+                    "summary": "Global config - scene/scene_desc REQUIRED, name NOT allowed",
                     "value": {
                         "scene": "group_chat",
                         "scene_desc": {
                             "description": "Default conversation meta config"
                         },
-                        "name": "Default Group Chat Settings",
                         "description": "Default settings for group_chat scene",
                         "group_id": None,
                         "created_at": "2025-01-15T10:00:00+00:00",
@@ -211,7 +290,7 @@ class ConversationMetaCreateRequest(BaseModel):
 
 
 # =============================================================================
-# Get DTOs (GET /api/v1/memories/conversation-meta)
+# Get DTOs (GET /api/v0/memories/conversation-meta)
 # =============================================================================
 
 
@@ -219,7 +298,7 @@ class ConversationMetaGetRequest(BaseModel):
     """
     Get conversation metadata request parameters
 
-    Used for GET /api/v1/memories/conversation-meta endpoint
+    Used for GET /api/v0/memories/conversation-meta endpoint
     """
 
     group_id: Optional[str] = Field(
@@ -235,22 +314,29 @@ class ConversationMetaResponse(BaseModel):
     """
     Conversation metadata response DTO (result data)
 
-    Used for GET /api/v1/memories/conversation-meta response
+    Used for GET /api/v0/memories/conversation-meta response
     """
 
     id: str = Field(..., description="Document ID")
     group_id: Optional[str] = Field(
-        default=None, description="Group ID (null for default config)"
+        default=None, description="Group ID (null for global config)"
     )
-    scene: str = Field(..., description="Scene identifier")
+    scene: Optional[str] = Field(
+        default=None, description="Scene identifier (only for global config)"
+    )
     scene_desc: Optional[Dict[str, Any]] = Field(
-        default=None, description="Scene description"
+        default=None, description="Scene description (only for global config)"
     )
-    name: str = Field(..., description="Conversation name")
-    description: Optional[str] = Field(
-        default=None, description="Conversation description"
+    llm_custom_setting: Optional[LlmCustomSetting] = Field(
+        default=None, description="LLM custom settings (only for global config)"
     )
-    conversation_created_at: str = Field(..., description="Conversation creation time")
+    name: Optional[str] = Field(
+        default=None, description="Group/conversation name (only for group config)"
+    )
+    description: Optional[str] = Field(default=None, description="Description")
+    conversation_created_at: Optional[str] = Field(
+        default=None, description="Conversation creation time"
+    )
     default_timezone: Optional[str] = Field(
         default=None, description="Default timezone"
     )
@@ -259,7 +345,7 @@ class ConversationMetaResponse(BaseModel):
     )
     tags: List[str] = Field(default_factory=list, description="Tags")
     is_default: bool = Field(
-        default=False, description="Whether this is the default config"
+        default=False, description="Whether this is the global (default) config"
     )
     created_at: Optional[str] = Field(default=None, description="Record creation time")
     updated_at: Optional[str] = Field(default=None, description="Record update time")
@@ -295,7 +381,7 @@ class ConversationMetaResponse(BaseModel):
 class GetConversationMetaResponse(BaseApiResponse[ConversationMetaResponse]):
     """Get conversation metadata API response
 
-    Response for GET /api/v1/memories/conversation-meta endpoint.
+    Response for GET /api/v0/memories/conversation-meta endpoint.
     """
 
     result: ConversationMetaResponse = Field(description="Conversation metadata")
@@ -347,7 +433,7 @@ class GetConversationMetaResponse(BaseApiResponse[ConversationMetaResponse]):
 class SaveConversationMetaResponse(BaseApiResponse[ConversationMetaResponse]):
     """Save conversation metadata API response
 
-    Response for POST /api/v1/memories/conversation-meta endpoint.
+    Response for POST /api/v0/memories/conversation-meta endpoint.
     """
 
     result: ConversationMetaResponse = Field(description="Saved conversation metadata")
@@ -372,7 +458,7 @@ class SaveConversationMetaResponse(BaseApiResponse[ConversationMetaResponse]):
 
 
 # =============================================================================
-# Patch DTOs (PATCH /api/v1/memories/conversation-meta)
+# Patch DTOs (PATCH /api/v0/memories/conversation-meta)
 # =============================================================================
 
 
@@ -380,28 +466,48 @@ class ConversationMetaPatchRequest(BaseModel):
     """
     Partial update conversation metadata request body
 
-    Used for PATCH /api/v1/memories/conversation-meta endpoint
+    Used for PATCH /api/v0/memories/conversation-meta endpoint
+
+    ## Config Levels:
+    - **Global Config** (group_id=null): Can update scene_desc, llm_custom_setting, description, tags, etc.
+      Cannot modify 'name' (name is only for group config).
+    - **Group Config** (group_id provided): Can update name, description, tags, etc.
+      Cannot modify 'scene', 'scene_desc', or 'llm_custom_setting' (inherited from global config).
     """
 
     group_id: Optional[str] = Field(
         default=None,
-        description="Group ID to update. When null, updates the default config.",
+        description="Group ID to update. When null, updates the global (default) config.",
         examples=["group_123", None],
     )
     name: Optional[str] = Field(
         default=None,
-        description="New conversation name",
-        examples=["New Conversation Name"],
+        description="""New group/conversation name. **Only allowed for group config (group_id provided).
+Not allowed for global config.**""",
+        examples=["New Group Name"],
     )
     description: Optional[str] = Field(
-        default=None,
-        description="New conversation description",
-        examples=["Updated description"],
+        default=None, description="New description", examples=["Updated description"]
     )
     scene_desc: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="New scene description",
-        examples=[{"description": "Project discussion group chat"}],
+        description="""New scene description. **Only allowed for global config (group_id=null).
+Not allowed for group config (inherited from global config).**""",
+        examples=[{"description": "Updated scene description"}],
+    )
+    llm_custom_setting: Optional[LlmCustomSetting] = Field(
+        default=None,
+        description="""New LLM custom settings. **Only allowed for global config (group_id=null).
+Not allowed for group config (inherited from global config).**""",
+        examples=[
+            {
+                "boundary": {"provider": "openai", "model": "gpt-4.1-mini"},
+                "extraction": {
+                    "provider": "openrouter",
+                    "model": "qwen/qwen3-235b-a22b-2507",
+                },
+            }
+        ],
     )
     tags: Optional[List[str]] = Field(
         default=None, description="New tag list", examples=[["tag1", "tag2"]]
@@ -427,16 +533,20 @@ class ConversationMetaPatchRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "summary": "Update by group_id",
+                    "summary": "Update group config - can update name",
                     "value": {
                         "group_id": "group_123",
-                        "name": "New Conversation Name",
+                        "name": "New Group Name",
                         "tags": ["updated", "tags"],
                     },
                 },
                 {
-                    "summary": "Update default config (group_id is null)",
-                    "value": {"group_id": None, "name": "Updated Default Settings"},
+                    "summary": "Update global config - can update scene_desc, llm_custom_setting",
+                    "value": {
+                        "group_id": None,
+                        "scene_desc": {"description": "Updated scene description"},
+                        "llm_custom_setting": {"temperature": 0.8},
+                    },
                 },
             ]
         }
@@ -474,7 +584,7 @@ class PatchConversationMetaResult(BaseModel):
 class PatchConversationMetaResponse(BaseApiResponse[PatchConversationMetaResult]):
     """Patch conversation metadata API response
 
-    Response for PATCH /api/v1/memories/conversation-meta endpoint.
+    Response for PATCH /api/v0/memories/conversation-meta endpoint.
     """
 
     result: PatchConversationMetaResult = Field(

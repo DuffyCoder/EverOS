@@ -106,11 +106,7 @@ class GroupUserProfileMemoryRawRepository(BaseRepository[GroupUserProfileMemory]
     # ==================== CRUD Methods Based on Composite Key ====================
 
     async def get_by_user_group(
-        self,
-        user_id: str,
-        group_id: str,
-        version_range: Optional[Tuple[Optional[str], Optional[str]]] = None,
-        session: Optional[AsyncClientSession] = None,
+        self, user_id: str, group_id: str, session: Optional[AsyncClientSession] = None
     ) -> Optional[GroupUserProfileMemory]:
         """
         Get group user profile memory by user ID and group ID
@@ -118,8 +114,6 @@ class GroupUserProfileMemoryRawRepository(BaseRepository[GroupUserProfileMemory]
         Args:
             user_id: User ID
             group_id: Group ID
-            version_range: Version range (start, end), closed interval [start, end].
-                          If not provided or None, get the latest version (sorted by version descending)
             session: Optional MongoDB session for transaction support
 
         Returns:
@@ -128,28 +122,14 @@ class GroupUserProfileMemoryRawRepository(BaseRepository[GroupUserProfileMemory]
         try:
             query_filter = {"user_id": user_id, "group_id": group_id}
 
-            # Handle version range query
-            if version_range:
-                start_version, end_version = version_range
-                version_filter = {}
-                if start_version is not None:
-                    version_filter["$gte"] = start_version
-                if end_version is not None:
-                    version_filter["$lte"] = end_version
-                if version_filter:
-                    query_filter["version"] = version_filter
-
-            # Sort by version descending, get the latest version
-            result = await self.model.find_one(
-                query_filter, sort=[("version", -1)], session=session
-            )
+            # Get the latest version (single result)
+            result = await self.model.find_one(query_filter, session=session)
 
             if result:
                 logger.debug(
-                    "✅ Successfully retrieved group user profile by user ID and group ID: user_id=%s, group_id=%s, version=%s",
+                    "✅ Successfully retrieved group user profile by user ID and group ID: user_id=%s, group_id=%s",
                     user_id,
                     group_id,
-                    result.version,
                 )
             else:
                 logger.debug(

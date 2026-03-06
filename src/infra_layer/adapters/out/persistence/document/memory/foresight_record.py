@@ -6,8 +6,8 @@ Unified storage of foresights extracted from episodic memories (personal or grou
 
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from beanie import Indexed
 from core.oxm.mongo.document_base import DocumentBase
+from core.oxm.mongo.document_base_with_soft_delete import DocumentBaseWithSoftDelete
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from core.oxm.mongo.audit_base import AuditBase
@@ -15,7 +15,7 @@ from beanie import PydanticObjectId
 from api_specs.memory_types import ParentType
 
 
-class ForesightRecord(DocumentBase, AuditBase):
+class ForesightRecord(DocumentBaseWithSoftDelete, AuditBase):
     """
     Generic foresight document model
 
@@ -103,6 +103,12 @@ class ForesightRecord(DocumentBase, AuditBase):
         name = "foresight_records"
 
         indexes = [
+            # Soft delete support - soft delete status index
+            IndexModel(
+                [("deleted_at", ASCENDING)],
+                name="idx_deleted_at",
+                sparse=True,  # Only index documents that are deleted
+            ),
             # Single field indexes
             IndexModel([("user_id", ASCENDING)], name="idx_user_id"),
             IndexModel([("group_id", ASCENDING)], name="idx_group_id", sparse=True),

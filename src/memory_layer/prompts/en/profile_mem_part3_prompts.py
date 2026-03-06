@@ -1,4 +1,6 @@
 CONVERSATION_PROFILE_PART3_EXTRACTION_PROMPT = """
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
+
 Please analyze the latest user-AI conversation below and update the user profile based on the 90 personality preference dimensions.
 
 Here are the 90 dimensions and their explanations:
@@ -101,4 +103,6 @@ JSON Template:
 
 Field Item Schema (for list fields):
 - Each item must be: {"value": string, "evidences": [string], "level": string?}
+
+**CRITICAL LANGUAGE RULE**: You MUST output in the SAME language as the input conversation content. If the conversation content is in Chinese, ALL output MUST be in Chinese. If in English, output in English. This is mandatory.
 """
