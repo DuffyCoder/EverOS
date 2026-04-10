@@ -6,12 +6,14 @@
  *   [message_id: xxx]\nsender_id:
  * These pollute search queries and should be removed.
  */
-function stripChannelMetadata(text) {
+export function stripChannelMetadata(text) {
   if (!text) return text;
   // Remove "Conversation info / Sender (untrusted metadata):" blocks with their ```json...``` content
   let cleaned = text.replace(/(?:Conversation info|Sender)\s*\(untrusted metadata\)\s*:\s*```json[\s\S]*?```/gi, "");
   // Remove [message_id: xxx]\nsender_id: prefix lines
   cleaned = cleaned.replace(/\[message_id:\s*[^\]]*\]\s*\n?\s*\S+:\s*/g, "");
+  // Trim before matching timestamp so leading \n from stripped blocks don't block ^
+  cleaned = cleaned.trim();
   // Remove channel-injected timestamp prefix: [Mon 2026-03-20 22:16 GMT+8]
   cleaned = cleaned.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+GMT[+-]\d+\]\s*/i, "");
   return cleaned.trim();

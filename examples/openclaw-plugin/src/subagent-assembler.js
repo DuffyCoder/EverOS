@@ -1,13 +1,13 @@
 /**
  * Context Assembler Module
- * Handles query-aware context assembly from EverMemOS memories
+ * Handles query-aware context assembly from EverOS memories
  */
 
 import { searchMemories } from "./api.js";
 import { buildMemoryPrompt, parseSearchResponse } from "./prompt.js";
 
 /**
- * @typedef {import("./types.js").EverMemOSConfig} EverMemOSConfig
+ * @typedef {import("./types.js").EverOSConfig} EverOSConfig
  * @typedef {import("./types.js").Logger} Logger
  * @typedef {import("./types.js").ParsedMemoryResponse} ParsedMemoryResponse
  */
@@ -18,7 +18,7 @@ import { buildMemoryPrompt, parseSearchResponse } from "./prompt.js";
  */
 export class ContextAssembler {
   /**
-   * @param {EverMemOSConfig} cfg
+   * @param {EverOSConfig} cfg
    * @param {Logger} logger
    */
   constructor(cfg, logger) {
@@ -51,47 +51,16 @@ export class ContextAssembler {
     /** @type {any} */
     const result = await searchMemories(this.cfg, params, this.log);
     /** @type {ParsedMemoryResponse} */
-    const parsed = parseSearchResponse(result) || { episodic: [], traits: [], case: null, skill: null };
+    const parsed = parseSearchResponse(result) || { episodic: [], pending: [] };
 
     // Count total memories (including pending messages)
     const memoryCount =
       (parsed.episodic?.length || 0) +
-      (parsed.pending?.length || 0) +
-      (parsed.traits?.length || 0) +
-      (parsed.case ? 1 : 0) +
-      (parsed.skill ? 1 : 0);
+      (parsed.pending?.length || 0);
 
     const context = buildMemoryPrompt(parsed, { wrapInCodeBlock: true });
 
     return { context, memoryCount };
   }
 
-  /**
-   * Build minimal context for subagents (smaller context window)
-   * @param {string} query - Subagent query
-   * @returns {Promise<string>}
-   */
-  async assembleForSubagent(query) {
-    if (!query || query.length < 3) return "";
-
-    const topK = Math.min(this.cfg.topK, 3);
-
-    /** @type {Object} */
-    const params = {
-      query,
-      user_id: this.cfg.userId,
-      group_id: this.cfg.groupId || undefined,
-      memory_types: this.cfg.memoryTypes,
-      retrieve_method: this.cfg.retrieveMethod,
-      top_k: topK,
-    };
-
-    /** @type {any} */
-    const result = await searchMemories(this.cfg, params, this.log);
-    /** @type {ParsedMemoryResponse} */
-    const parsed = parseSearchResponse(result) || { episodic: [], traits: [], case: null, skill: null };
-
-    // Use no code block for subagents (cleaner format)
-    return buildMemoryPrompt(parsed, { wrapInCodeBlock: false });
-  }
 }

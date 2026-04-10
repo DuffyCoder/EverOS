@@ -1,6 +1,6 @@
 ---
 name: evermind-ai-everos
-version: 1.4.0
+version: 1.5.1
 description: |
   Install and configure EverOS for OpenClaw natural-language memory.
 
@@ -13,7 +13,6 @@ description: |
 author: EverMind
 keywords:
   - everos
-  - evermemos
   - context engine
   - persistent memory
   - openclaw
@@ -127,8 +126,8 @@ If it is not healthy, tell the user plainly:
 If the user asks how to start the backend, give the shortest useful path:
 
 ```bash
-git clone https://github.com/EverMind-AI/EverMemOS.git
-cd EverMemOS
+git clone https://github.com/EverMind-AI/EverOS.git
+cd EverOS
 docker compose up -d
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
@@ -182,7 +181,7 @@ Expected config shape:
           "userId": "everos-user",
           "groupId": "everos-group",
           "topK": 5,
-          "memoryTypes": ["episodic_memory", "profile", "agent_skill", "agent_case"],
+          "memoryTypes": ["episodic_memory"],
           "retrieveMethod": "hybrid"
         }
       }
@@ -197,7 +196,7 @@ Merge-safe patch:
 jq '
   .plugins = (.plugins // {}) |
   .plugins.load = (.plugins.load // {}) |
-  .plugins.load.paths = ((.plugins.load.paths // []) + ["/path/to/evermemos-openclaw-plugin"] | unique) |
+  .plugins.load.paths = ((.plugins.load.paths // []) + ["/path/to/everos-openclaw-plugin"] | unique) |
   .plugins.allow = ((.plugins.allow // []) + ["evermind-ai-everos"] | unique) |
   .plugins.slots = (.plugins.slots // {}) |
   .plugins.slots.memory = "none" |
@@ -210,7 +209,7 @@ jq '
       "userId": "everos-user",
       "groupId": "everos-group",
       "topK": 5,
-      "memoryTypes": ["episodic_memory", "profile", "agent_skill", "agent_case"],
+      "memoryTypes": ["episodic_memory"],
       "retrieveMethod": "hybrid"
     }
   )
@@ -290,7 +289,7 @@ OpenClaw config file:
 
 - Back up `~/.openclaw/openclaw.json`
 - Back up the EverOS backend data directory or database
-- Back up the EverMemOS `.env` and deployment configuration
+- Back up the EverOS `.env` and deployment configuration
 ```
 
 ---

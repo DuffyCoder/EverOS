@@ -2,7 +2,7 @@
 
 通过自然语言对话为 **OpenClaw / 龙虾** 提供持久记忆能力。
 
-这个插件保留当前 OpenClaw 的 `context-engine` 架构，并连接到自托管的 EverOS backend。其后端能力由 [EverMemOS](https://github.com/EverMind-AI/EverMemOS) 提供。
+这个插件保留当前 OpenClaw 的 `context-engine` 架构，并连接到自托管的 EverOS backend。其后端能力由 [EverOS](https://github.com/EverMind-AI/EverOS) 提供。
 
 ## 它能做什么
 
@@ -64,8 +64,8 @@ curl http://localhost:1995/health
 如果你还没有启动 EverOS backend：
 
 ```bash
-git clone https://github.com/EverMind-AI/EverMemOS.git
-cd EverMemOS
+git clone https://github.com/EverMind-AI/EverOS.git
+cd EverOS
 docker compose up -d
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
@@ -111,7 +111,7 @@ uv run python src/run.py
           "userId": "everos-user",
           "groupId": "everos-group",
           "topK": 5,
-          "memoryTypes": ["episodic_memory", "profile", "agent_skill", "agent_case"],
+          "memoryTypes": ["episodic_memory"],
           "retrieveMethod": "hybrid"
         }
       }
@@ -129,7 +129,7 @@ uv run python src/run.py
 | `userId`         | `everos-user`                                                 | 记忆归属的用户标识         |
 | `groupId`        | `everos-group`                                                | 共享记忆命名空间          |
 | `topK`           | `5`                                                           | 最多检索条目数           |
-| `memoryTypes`    | `["episodic_memory", "profile", "agent_skill", "agent_case"]` | 要搜索的记忆类型          |
+| `memoryTypes`    | `["episodic_memory"]` | 要搜索的记忆类型          |
 | `retrieveMethod` | `hybrid`                                                      | 检索模式              |
 
 
@@ -156,12 +156,11 @@ everos-install
 
 - `index.js`：插件入口（注册）
 - `src/engine.js`：ContextEngine 生命周期实现
-- `src/convert.js`：OpenClaw 消息转 EverMemOS 格式
+- `src/convert.js`：OpenClaw 消息转 EverOS 格式
 - `src/api.js`：EverOS backend REST API 客户端
 - `src/messages.js`：消息归一化与轮次收集
 - `src/prompt.js`：记忆搜索结果解析与 prompt 构建
-- `src/subagent-assembler.js`：子 agent 上下文组装
-- `src/subagent-tracker.js`：子 agent 生命周期追踪
+- `src/subagent-assembler.js`：记忆上下文组装
 - `bin/install.js`：安装器与配置引导
 - `openclaw.plugin.json`：插件元数据与配置结构
 

@@ -2,7 +2,7 @@
 
 Persistent memory for **OpenClaw** through normal conversation.
 
-This plugin keeps the current OpenClaw `context-engine` architecture and connects it to a self-hosted EverOS backend powered by [EverMemOS](https://github.com/EverMind-AI/EverMemOS).
+This plugin keeps the current OpenClaw `context-engine` architecture and connects it to a self-hosted EverOS backend powered by [EverOS](https://github.com/EverMind-AI/EverOS).
 
 ## What it does
 
@@ -64,8 +64,8 @@ curl http://localhost:1995/health
 If you have not started the EverOS backend yet:
 
 ```bash
-git clone https://github.com/EverMind-AI/EverMemOS.git
-cd EverMemOS
+git clone https://github.com/EverMind-AI/EverOS.git
+cd EverOS
 docker compose up -d
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
@@ -111,7 +111,7 @@ Expected config shape:
           "userId": "everos-user",
           "groupId": "everos-group",
           "topK": 5,
-          "memoryTypes": ["episodic_memory", "profile", "agent_skill", "agent_case"],
+          "memoryTypes": ["episodic_memory"],
           "retrieveMethod": "hybrid"
         }
       }
@@ -128,7 +128,7 @@ Expected config shape:
 | `userId` | `everos-user` | Memory owner identity |
 | `groupId` | `everos-group` | Shared memory namespace |
 | `topK` | `5` | Max retrieved entries |
-| `memoryTypes` | `["episodic_memory", "profile", "agent_skill", "agent_case"]` | Memory types to search |
+| `memoryTypes` | `["episodic_memory"]` | Memory types to search |
 | `retrieveMethod` | `hybrid` | Retrieval mode |
 
 ## Manual install
@@ -152,12 +152,11 @@ everos-install
 
 - `index.js`: plugin entry point (register)
 - `src/engine.js`: ContextEngine lifecycle hooks
-- `src/convert.js`: OpenClaw message to EverMemOS format conversion
+- `src/convert.js`: OpenClaw message to EverOS format conversion
 - `src/api.js`: EverOS backend REST client
 - `src/messages.js`: message normalization and turn collection
 - `src/prompt.js`: memory search response parsing and prompt building
-- `src/subagent-assembler.js`: subagent context assembly
-- `src/subagent-tracker.js`: subagent lifecycle tracking
+- `src/subagent-assembler.js`: memory context assembly
 - `bin/install.js`: installer and config bootstrap
 - `openclaw.plugin.json`: plugin metadata and config schema
 

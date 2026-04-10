@@ -24,7 +24,7 @@ const DEFAULT_CONFIG = {
   userId: "everos-user",
   groupId: "everos-group",
   topK: 5,
-  memoryTypes: ["episodic_memory", "profile", "agent_skill", "agent_case"],
+  memoryTypes: ["episodic_memory"],
   retrieveMethod: "hybrid",
 };
 
@@ -130,14 +130,14 @@ function ensureStablePluginPath() {
   return { pluginDir: STABLE_PLUGIN_DIR, loadPath: STABLE_PLUGIN_DIR };
 }
 
-function isLegacyPluginPath(entry, currentLoadPath) {
+function isDuplicatePluginPath(entry, currentLoadPath) {
   if (typeof entry !== "string") return false;
   if (path.resolve(entry) === path.resolve(currentLoadPath)) return false;
 
   const normalized = entry.replace(/\\/g, "/");
   return normalized.includes("evermemos-openclaw-plugin") ||
-    normalized.includes("evermind-ai-openclaw-plugin") ||
-    normalized.includes("@evermind-ai/openclaw-plugin");
+    normalized.includes("@evermind-ai/openclaw-plugin") ||
+    normalized.includes(PLUGIN_ID);
 }
 
 function loadConfig() {
@@ -258,8 +258,8 @@ async function install() {
   const { pluginDir, loadPath } = ensureStablePluginPath();
   config.plugins.load.paths = config.plugins.load.paths.filter((entry) => {
     if (path.resolve(entry) === path.resolve(loadPath)) return true;
-    if (isLegacyPluginPath(entry, loadPath)) {
-      warn(`Removing old plugin path: ${entry}`);
+    if (isDuplicatePluginPath(entry, loadPath)) {
+      warn(`Removing duplicate plugin path: ${entry}`);
       return false;
     }
     return true;
@@ -329,7 +329,7 @@ async function install() {
     } else {
       warn(`EverOS backend is not reachable yet (${health.reason || "unknown reason"}).`);
       warn("You can continue, but memory recall/save will not work until the backend is running.");
-      info("Typical start command: cd EverMemOS && uv run python src/run.py");
+      info("Typical start command: cd EverOS && uv run python src/run.py");
     }
 
     const userId = await promptWithDefault("User ID", DEFAULT_CONFIG.userId);

@@ -1,4 +1,5 @@
 import { CONTEXT_BOUNDARY } from "./prompt.js";
+import { stripChannelMetadata } from "./messages.js";
 
 const MAX_CHARS = 20000;
 
@@ -15,7 +16,7 @@ function cap(s) {
 }
 
 /**
- * Convert OpenClaw AgentMessage to EverMemOS message format.
+ * Convert OpenClaw AgentMessage to EverOS message format.
  * Strips injected memory context from user messages to avoid memory pollution.
  * @param {Object} msg - OpenClaw AgentMessage
  * @returns {{ role: string, content: string }}
@@ -25,14 +26,14 @@ export function convertMessage(msg) {
   let role = msg.role;
   let textContent = "";
 
-  // Only user and assistant are accepted by EverMemOS; drop system/unknown roles
+  // Only user and assistant are accepted by EverOS; drop system/unknown roles
   if (role !== "user" && role !== "assistant") {
     return { role: "user", content: "" };
   }
 
   // Handle text content (simple string)
   if (typeof content === "string") {
-    const clean = role === "user" ? cap(stripContext(content)) : cap(content);
+    const clean = role === "user" ? cap(stripChannelMetadata(stripContext(content))) : cap(content);
     return { role, content: clean };
   }
 
@@ -55,7 +56,12 @@ export function convertMessage(msg) {
       }
     }
 
-    const finalText = role === "user" ? cap(stripContext(textContent)) : cap(textContent);
+    // Assistant messages containing only [Tool: ...] tags have no semantic value for memory
+    if (role === "assistant" && /^\s*(\[Tool:\s*[^\]]*\]\s*)+$/.test(textContent)) {
+      return { role, content: "" };
+    }
+
+    const finalText = role === "user" ? cap(stripChannelMetadata(stripContext(textContent))) : cap(textContent);
     return { role, content: finalText || "" };
   }
 

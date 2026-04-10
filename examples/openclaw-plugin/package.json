@@ -1,7 +1,7 @@
 {
   "name": "@evermind-ai/openclaw-plugin",
-  "version": "1.4.0",
-  "description": "EverOS OpenClaw Plugin for OpenClaw 3.8+",
+  "version": "1.5.1",
+  "description": "EverOS OpenClaw Plugin — persistent memory through natural conversation",
   "type": "module",
   "main": "./index.js",
   "bin": {
