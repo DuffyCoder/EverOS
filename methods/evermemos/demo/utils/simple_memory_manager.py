@@ -7,11 +7,8 @@ import re
 import asyncio
 import httpx
 from typing import List, Dict, Any
-from common_utils.datetime_utils import (
-    get_now_with_timezone,
-    get_timezone,
-    to_iso_format,
-)
+from api_specs.memory_types import ScenarioType
+from common_utils.datetime_utils import get_now_with_timezone, to_iso_format
 
 
 def extract_event_time_from_memory(mem: Dict[str, Any]) -> str:
@@ -82,26 +79,27 @@ class SimpleMemoryManager:
         self,
         base_url: str = "http://localhost:1995",
         group_id: str = "default_group",
-        scene: str = "assistant",
+        scene: str = ScenarioType.SOLO.value,
+        user_id: str = "demo_user",
     ):
         """Initialize the manager
 
         Args:
             base_url: API server address (default: localhost:1995)
             group_id: Group ID (default: default_group)
-            scene: Scene type (default: "assistant", options: "assistant" or "companion")
+            scene: Scene type (default: "solo", options: "solo" or "team")
+            user_id: User ID for personal endpoint (default: "demo_user")
         """
         self.base_url = base_url
         self.group_id = group_id
         self.group_name = "Simple Demo Group"
         self.scene = scene
+        self.user_id = user_id
         self.memorize_url = f"{base_url}/api/v1/memories"
         self.retrieve_url = f"{base_url}/api/v1/memories/search"
-        self.conversation_meta_url = f"{base_url}/api/v1/memories/conversation-meta"
+        self.settings_url = f"{base_url}/api/v1/settings"
         self._message_counter = 0
-        self._conversation_meta_saved = (
-            False  # Flag to indicate if conversation-meta is saved
-        )
+        self._settings_initialized = False
 
     async def store(self, content: str, sender: str = "User") -> bool:
         """Store a message
@@ -113,9 +111,9 @@ class SimpleMemoryManager:
         Returns:
             Success status
         """
-        # ========== Save conversation-meta first when storing for the first time ==========
-        if not self._conversation_meta_saved:
-            await self._save_conversation_meta()
+        # ========== Initialize settings first when storing for the first time ==========
+        if not self._settings_initialized:
+            await self._init_settings()
 
         # Generate unique message ID
         self._message_counter += 1
@@ -124,29 +122,32 @@ class SimpleMemoryManager:
         )  # Use project's unified time utility (with timezone)
         message_id = f"msg_{self._message_counter}_{int(now.timestamp() * 1000)}"
 
-        # Build message data (completely consistent with test_v1api_search.py format)
-        message_data = {
+        # Build v1 PersonalAddRequest payload
+        role = "user" if sender.lower() == "user" else "assistant"
+        message_item = {
             "message_id": message_id,
-            "create_time": to_iso_format(
-                now
-            ),  # Use project's unified time formatting (with timezone)
-            "sender": sender,
-            "sender_name": sender,  # Consistent with JSON data format
-            "type": "text",  # Message type
+            "sender_id": self.user_id if role == "user" else sender,
+            "sender_name": sender,
+            "role": role,
+            "timestamp": int(now.timestamp() * 1000),
             "content": content,
-            "group_id": self.group_id,
-            "group_name": self.group_name,
-            "scene": self.scene,  # Use configured scene
+        }
+        payload = {
+            "user_id": self.user_id,
+            "messages": [message_item],
         }
 
         try:
             async with httpx.AsyncClient(timeout=500.0) as client:
-                response = await client.post(self.memorize_url, json=message_data)
+                response = await client.post(self.memorize_url, json=payload)
                 response.raise_for_status()
                 result = response.json()
 
-                if result.get("status") == "ok":
-                    count = result.get("result", {}).get("count", 0)
+                # v1 response: {"data": {"status": "...", "count": N, ...}}
+                data = result.get("data", {})
+                status = data.get("status", "")
+                count = data.get("count", 0)
+                if status:
                     if count > 0:
                         print(
                             f"  ✅ Stored: {content[:40]}... (Extracted {count} memories)"
@@ -162,124 +163,90 @@ class SimpleMemoryManager:
 
         except httpx.ConnectError:
             print(f"  ❌ Cannot connect to API server ({self.base_url})")
-            print(
-                f"     Please start first: uv run python src/run.py"
-            )
+            print(f"     Please start first: uv run python src/run.py")
             return False
         except Exception as e:
             print(f"  ❌ Storage failed: {e}")
             return False
 
-    async def _save_conversation_meta(self) -> bool:
+    async def _init_settings(self) -> bool:
         """
-        Save conversation metadata (called when storing the first message)
+        Initialize global settings via V1 API (called when storing the first message)
 
         Returns:
             Success status
         """
-        if self._conversation_meta_saved:
+        if self._settings_initialized:
             return True
 
-        # Build conversation-meta request data
-        now = get_now_with_timezone()
-        conversation_meta_request = {
-            "version": "1.0.0",
-            "scene": self.scene,
-            "scene_desc": {},
-            "name": self.group_name,
-            "description": f"Simple Demo - {self.scene} scene",
-            "group_id": self.group_id,
-            "created_at": to_iso_format(now),
-            "default_timezone": get_timezone().key,
-            "user_details": {
-                "User": {"full_name": "Demo User", "role": "user", "extra": {}},
-                "Assistant": {
-                    "full_name": "AI Assistant",
-                    "role": "assistant",
-                    "extra": {},
-                },
-            },
-            "tags": ["demo", self.scene],
-        }
+        settings_request = {}
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    self.conversation_meta_url, json=conversation_meta_request
-                )
+                response = await client.put(self.settings_url, json=settings_request)
                 response.raise_for_status()
                 result = response.json()
 
-                if result.get("status") == "ok":
-                    self._conversation_meta_saved = True
-                    print(
-                        f"  ℹ️  Initialized conversation metadata (Scene: {self.scene})"
-                    )
+                if "data" in result:
+                    self._settings_initialized = True
+                    print(f"  ℹ️  Initialized settings (Scene: {self.scene})")
                     return True
                 else:
-                    print(
-                        f"  ⚠️  Failed to save conversation metadata: {result.get('message')}"
-                    )
-                    # Mark as saved even if failed to avoid retrying repeatedly
-                    self._conversation_meta_saved = True
+                    print(f"  ⚠️  Failed to init settings: {result.get('message')}")
+                    self._settings_initialized = True
                     return False
 
         except httpx.ConnectError:
-            print(f"  ⚠️  Cannot connect to API server for conversation metadata")
-            # Mark as saved even if failed to avoid retrying repeatedly
-            self._conversation_meta_saved = True
+            print(f"  ⚠️  Cannot connect to API server for settings init")
+            self._settings_initialized = True
             return False
         except Exception as e:
-            print(f"  ⚠️  Failed to save conversation metadata: {e}")
-            # Mark as saved even if failed to avoid retrying repeatedly
-            self._conversation_meta_saved = True
+            print(f"  ⚠️  Failed to init settings: {e}")
+            self._settings_initialized = True
             return False
 
     async def search(
-        self, query: str, top_k: int = 3, mode: str = "rrf", show_details: bool = True
+        self, query: str, top_k: int = 3, mode: str = "vector", show_details: bool = True
     ) -> List[Dict[str, Any]]:
         """Search memories
 
         Args:
             query: Query text
             top_k: Number of results to return (default: 3)
-            mode: Retrieval mode (default: "rrf")
-                - "rrf": RRF fusion (recommended)
+            mode:
                 - "keyword": Keyword retrieval (BM25)
                 - "vector": Vector retrieval
                 - "hybrid": Keyword + Vector + Rerank
-                - "rrf": Keyword + Vector + RRF fusion
                 - "agentic": LLM-guided multi-round retrieval
             show_details: Whether to show detailed information (default: True)
 
         Returns:
             List of memories
         """
+        # v1 SearchMemoriesRequest: POST with body {query, method, memory_types, top_k, filters}
         payload = {
             "query": query,
+            "method": mode,
+            "memory_types": ["episodic_memory"],
             "top_k": top_k,
-            "memory_types": "episodic_memory",
-            "retrieve_method": mode,
-            "group_id": self.group_id,
+            "filters": {"user_id": self.user_id},
         }
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(self.retrieve_url, params=payload)
+                response = await client.post(self.retrieve_url, json=payload)
                 response.raise_for_status()
                 result = response.json()
 
-                if result.get("status") == "ok":
-                    # memories is grouped: [{"group_id": [Memory, ...]}, ...]
-                    raw_memories = result.get("result", {}).get("memories", [])
-                    metadata = result.get("result", {}).get("metadata", {})
-                    latency = metadata.get("total_latency_ms", 0)
-                    
-                    # Flatten grouped memories to flat list
+                # v1 response: {"data": {"episodes": [...], "profiles": [...], "raw_messages": [...], "agent_memory": ...}}
+                data = result.get("data", {})
+                if data:
+                    # Aggregate across memory_type buckets (we only requested episodic_memory here)
                     memories = []
-                    for group_dict in raw_memories:
-                        for group_id, mem_list in group_dict.items():
-                            memories.extend(mem_list)
+                    for key in ("episodes", "profiles", "raw_messages"):
+                        memories.extend(data.get(key) or [])
+                    metadata = data.get("metadata", {}) or {}
+                    latency = metadata.get("total_latency_ms", 0)
 
                     if show_details:
                         print(
