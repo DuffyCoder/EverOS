@@ -195,6 +195,92 @@ async def test_openclaw_search_uses_bridge_and_attaches_source_sessions(
     assert result.retrieval_metadata.get("formatted_context")
 
 
+# --------------------- adapter.search via stub bridge (search_then_get)
+@pytest.mark.asyncio
+async def test_openclaw_search_then_get_replaces_snippet_via_get(
+    tmp_path, monkeypatch
+):
+    """P2-1: retrieval_route='search_then_get' must call bridge twice per hit
+    (search returns a coarse locator, get pulls a narrower snippet) and the
+    narrower snippet must land in the final SearchResult.results[*].content.
+    """
+    adapter = OpenClawAdapter(
+        {
+            "adapter": "openclaw",
+            "dataset_name": "locomo",
+            "llm": {"provider": "openai", "model": "gpt-4o-mini"},
+            "openclaw": {
+                "retrieval_route": "search_then_get",
+                "backend_mode": "hybrid",
+            },
+            "search": {"top_k": 5, "max_inflight_queries_per_conversation": 1},
+        },
+        output_dir=tmp_path,
+    )
+
+    calls = []
+
+    async def fake_arun_bridge(bridge_script, payload, timeout=600.0):
+        calls.append(payload["command"])
+        if payload["command"] == "search":
+            return {
+                "ok": True,
+                "command": "search",
+                "hits": [
+                    {
+                        "score": 0.8,
+                        "snippet": "COARSE: long session dump that answer doesn't need",
+                        "artifact_locator": {
+                            "kind": "memory_file_range",
+                            "path_rel": "memory/session-S4-2023-06-09.md",
+                            "line_start": 10,
+                            "line_end": 40,
+                        },
+                        "metadata": {},
+                    }
+                ],
+            }
+        if payload["command"] == "get":
+            return {
+                "ok": True,
+                "command": "get",
+                "artifact_locator": payload["artifact_locator"],
+                "snippet": "NARROW: just the line the question was about",
+            }
+        raise AssertionError(f"unexpected command: {payload['command']}")
+
+    monkeypatch.setattr(
+        "evaluation.src.adapters.openclaw_adapter.arun_bridge",
+        fake_arun_bridge,
+    )
+
+    index = {
+        "type": "openclaw_sandboxes",
+        "conversations": {
+            "c0": {
+                "conversation_id": "c0",
+                "workspace_dir": str(tmp_path / "c0"),
+                "resolved_config_path": str(tmp_path / "c0" / "openclaw.json"),
+                "native_store_dir": str(tmp_path / "c0" / "native_store"),
+                "home_dir": str(tmp_path / "c0" / "home"),
+                "cwd_dir": str(tmp_path / "c0" / "cwd"),
+                "backend_mode": "hybrid",
+                "retrieval_route": "search_then_get",
+            }
+        },
+    }
+
+    result = await adapter.search("q", "c0", index, question_id="q1")
+    # Bridge sequence: search then get
+    assert calls == ["search", "get"]
+    # Narrower snippet replaced the coarse one
+    assert result.results[0]["content"].startswith("NARROW:")
+    # Source session still projected from the path
+    assert result.results[0]["metadata"]["source_sessions"] == ["S4"]
+    # Route echoed in retrieval_metadata for diagnostics
+    assert result.retrieval_metadata["retrieval_route"] == "search_then_get"
+
+
 # ------------------------------------------------ adapter.answer mocks LLM
 @pytest.mark.asyncio
 async def test_openclaw_answer_uses_shared_prompt_and_llm(tmp_path, monkeypatch):

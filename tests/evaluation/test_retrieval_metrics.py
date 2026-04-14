@@ -47,6 +47,45 @@ def test_retrieval_metrics_use_session_level_projection():
     assert metrics["evidence_recall_at_k"] == 1.0  # 1/1 gold session covered
 
 
+def test_ndcg_at_k_nontrivial_when_not_all_gold_covered():
+    """P2-1: ndcg must penalize late discovery + missing gold.
+
+    Gold = {S0, S1, S2}; at k=3 we retrieve S0 (rank 1, new), S3 (rank 2,
+    unrelated), S1 (rank 3, new). Ideal DCG covers 3 gold at ranks 1-3.
+
+    Actual DCG = 1/log2(2) + 0 + 1/log2(4) = 1.0 + 0.5 = 1.5
+    Ideal  DCG = 1/log2(2) + 1/log2(3) + 1/log2(4)
+               = 1.0 + 0.6309 + 0.5 = 2.1309
+    NDCG@3 = 1.5 / 2.1309 ~= 0.7039
+    """
+    import math
+    qa = QAPair(
+        question_id="q_ndcg",
+        question="",
+        answer="",
+        evidence=["D0:0", "D1:0", "D2:0"],
+        metadata={"conversation_id": "c0"},
+    )
+    sr = SearchResult(
+        query="",
+        conversation_id="c0",
+        results=[
+            {"metadata": {"source_sessions": ["S0"]}},
+            {"metadata": {"source_sessions": ["S3"]}},
+            {"metadata": {"source_sessions": ["S1"]}},
+        ],
+        retrieval_metadata={},
+    )
+    metrics = evaluate_retrieval_for_question(qa, sr, k=3)
+
+    actual_dcg = 1.0 / math.log2(2) + 0.0 + 1.0 / math.log2(4)
+    ideal_dcg = sum(1.0 / math.log2(i + 1) for i in range(1, 4))
+    expected = actual_dcg / ideal_dcg
+
+    assert abs(metrics["ndcg_at_k"] - expected) < 1e-9
+    assert 0.6 < metrics["ndcg_at_k"] < 0.75  # also a loose sanity window
+
+
 def test_retrieval_metrics_zero_when_no_match():
     qa = QAPair(
         question_id="q2",
