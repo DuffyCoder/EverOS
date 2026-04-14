@@ -42,17 +42,33 @@ function resolveLauncher() {
 }
 
 function envForSandbox(input) {
-  const env = { ...process.env };
+  // Minimal env - mirrors v0.1/v0.2 isolation. Inheriting the full parent
+  // env would leak OPENAI_API_KEY etc into OpenClaw's auto-provider
+  // selection, which we explicitly do NOT want: the resolved config file
+  // already carries the sophnet credentials for embedding, and the bench
+  // LLM key is for our own post-retrieval answer prompt, not for OpenClaw's
+  // internal flush agent.
+  const env = {
+    PATH: process.env.PATH || "",
+    HOME: input.home_dir || input.workspace_dir || "",
+    NODE_OPTIONS: "",
+    NPM_CONFIG_USERCONFIG: "/dev/null",
+    NPM_CONFIG_GLOBALCONFIG: "/dev/null",
+  };
   if (input.config_path) env.OPENCLAW_CONFIG_PATH = input.config_path;
   if (input.state_dir) env.OPENCLAW_STATE_DIR = input.state_dir;
-  if (input.workspace_dir) env.HOME = input.workspace_dir;
   return env;
 }
 
-function runLauncher(launcher, args, env) {
+function cwdForSandbox(input) {
+  return input.cwd_dir || input.workspace_dir || undefined;
+}
+
+function runLauncher(launcher, args, env, cwd) {
   return new Promise((resolve, reject) => {
     const proc = spawn("node", [launcher, ...args], {
       env,
+      cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -95,10 +111,12 @@ async function handleIndex(input, launcher) {
     };
   }
   const env = envForSandbox(input);
+  const cwd = cwdForSandbox(input);
   const { code, stdout, stderr } = await runLauncher(
     launcher,
     ["memory", "index", "--force"],
-    env
+    env,
+    cwd
   );
   if (code !== 0) {
     return { ok: false, command: "index", error: stderr || stdout || `exit ${code}` };
@@ -121,15 +139,49 @@ async function handleFlush(input, launcher) {
 }
 
 async function handleStatus(input, launcher) {
-  // OpenClaw CLI has no status subcommand; report settled=true if the
-  // workspace exists.
+  if (!launcher) {
+    return {
+      ok: true,
+      command: "status",
+      settled: true,
+      flush_epoch: 0,
+      index_epoch: 0,
+      active_artifacts: [],
+    };
+  }
+  const env = envForSandbox(input);
+  const cwd = cwdForSandbox(input);
+  const { code, stdout, stderr } = await runLauncher(
+    launcher,
+    ["memory", "status", "--json"],
+    env,
+    cwd
+  );
+  if (code !== 0) {
+    return { ok: false, command: "status", error: stderr || stdout || `exit ${code}` };
+  }
+  const parsed = extractJsonTail(stdout);
+  if (!parsed) {
+    return { ok: false, command: "status", error: "stdout not JSON" };
+  }
+  // OpenClaw's `memory status --json` returns an array:
+  //   [{ agentId: "main", status: { backend, files, chunks, dirty, dbPath, ... }}]
+  // Map to our BridgeResponse shape with a best-effort `settled` flag.
+  const agentStatus = Array.isArray(parsed) ? (parsed[0] || {}).status : parsed.status;
+  const s = agentStatus || {};
+  const settled = s.dirty === false;
   return {
     ok: true,
     command: "status",
-    settled: true,
-    flush_epoch: 0,
-    index_epoch: 0,
+    settled,
+    files: Number(s.files || 0),
+    chunks: Number(s.chunks || 0),
+    backend: s.backend || null,
+    provider: s.provider || null,
+    flush_epoch: Number(s.lastFlushEpoch || 0),
+    index_epoch: Number(s.lastIndexEpoch || 0),
     active_artifacts: [],
+    native: true,
   };
 }
 
@@ -138,6 +190,7 @@ async function handleSearch(input, launcher) {
     return { ok: true, command: "search", hits: [] };
   }
   const env = envForSandbox(input);
+  const cwd = cwdForSandbox(input);
   const args = [
     "memory",
     "search",
@@ -147,7 +200,7 @@ async function handleSearch(input, launcher) {
     String(input.top_k ?? 30),
     "--json",
   ];
-  const { code, stdout, stderr } = await runLauncher(launcher, args, env);
+  const { code, stdout, stderr } = await runLauncher(launcher, args, env, cwd);
   if (code !== 0) {
     return { ok: false, command: "search", error: stderr || stdout || `exit ${code}` };
   }

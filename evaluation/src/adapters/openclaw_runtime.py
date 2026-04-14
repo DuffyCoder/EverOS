@@ -40,6 +40,18 @@ def build_sandbox_paths(
 ) -> dict[str, str]:
     """Construct the filesystem layout for a single conversation sandbox.
 
+    Layout mirrors OpenClaw's native workspace:
+
+        <base>/                    = workspace_dir (OpenClaw workspace root)
+        <base>/memory/             = where OpenClaw FTS scans *.md files
+        <base>/native_store/       = OPENCLAW_STATE_DIR (sqlite index lives here)
+        <base>/native_store/memory/= required by OpenClaw before index runs
+        <base>/home/               = HOME (npm config isolation)
+        <base>/empty-cwd/          = cwd for subprocess invocation
+        <base>/metrics/            = adapter-level lifecycle diagnostics
+        <base>/events.jsonl        = per-stage trace log
+        <base>/openclaw.json       = OpenClaw-schema resolved config
+
     Layout is deterministic so build_lazy_index() in Task 4 can rebuild the
     handle without re-running ingest.
     """
@@ -54,9 +66,31 @@ def build_sandbox_paths(
     return {
         "base_dir": str(base),
         "workspace_dir": str(base),
+        "memory_dir": str(base / "memory"),
         "native_store_dir": str(base / "native_store"),
+        "home_dir": str(base / "home"),
+        "cwd_dir": str(base / "empty-cwd"),
         "metrics_dir": str(base / "metrics"),
         "events_path": str(base / "events.jsonl"),
+        "config_path": str(base / "openclaw.json"),
+    }
+
+
+def isolated_env_for_sandbox(handle: dict) -> dict:
+    """Minimal env for bridge subprocess.
+
+    Matches v0.1's _isolated_env: drops the parent's API keys so OpenClaw's
+    auto-provider selection does not misfire based on a leaked OPENAI_API_KEY.
+    Sophnet remote auth travels inside the resolved config file, not via env.
+    """
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": handle.get("home_dir", ""),
+        "OPENCLAW_CONFIG_PATH": handle.get("resolved_config_path", ""),
+        "OPENCLAW_STATE_DIR": handle.get("native_store_dir", ""),
+        "NODE_OPTIONS": "",
+        "NPM_CONFIG_USERCONFIG": "/dev/null",
+        "NPM_CONFIG_GLOBALCONFIG": "/dev/null",
     }
 
 

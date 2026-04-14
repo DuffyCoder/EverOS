@@ -20,11 +20,22 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from evaluation.src.adapters.base import BaseAdapter
+from evaluation.src.adapters.openclaw_ingestion import (
+    session_id_from_path,
+    write_session_files,
+)
 from evaluation.src.adapters.openclaw_manifest import (
     build_session_manifest,
     project_message_id_to_session_id,
 )
-from evaluation.src.adapters.openclaw_runtime import arun_bridge, build_sandbox_paths
+from evaluation.src.adapters.openclaw_resolved_config import (
+    build_openclaw_resolved_config,
+)
+from evaluation.src.adapters.openclaw_runtime import (
+    arun_bridge,
+    build_sandbox_paths,
+    isolated_env_for_sandbox,
+)
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, SearchResult
 
@@ -265,23 +276,25 @@ class OpenClawAdapter(BaseAdapter):
     def _derive_source_sessions(hit: dict) -> list[str]:
         """Best-effort source_sessions derivation when the bridge didn't set it.
 
+        Preference order:
+          1. metadata.source_message_ids (projected one by one)
+          2. artifact_locator.path_rel (matches session-SX-*.md layout)
         Falls back to empty list rather than raising - retrieval metrics are
         the only consumer and they treat missing sessions as a zero-recall hit.
         """
-        locator = hit.get("artifact_locator") or {}
-        path_rel = locator.get("path_rel") or ""
-        raw_session_ids = hit.get("metadata", {}).get("source_message_ids") or []
+        raw_message_ids = hit.get("metadata", {}).get("source_message_ids") or []
         out: list[str] = []
-        for mid in raw_session_ids:
+        for mid in raw_message_ids:
             try:
                 out.append(project_message_id_to_session_id(mid))
             except ValueError:
                 continue
         if out:
             return sorted(set(out))
-        # No message ids - leave empty; path_rel alone is not enough to project
-        _ = path_rel
-        return []
+
+        locator = hit.get("artifact_locator") or {}
+        sid = session_id_from_path(locator.get("path_rel") or "")
+        return [sid] if sid else []
 
     # ---------------------------------------------------------------- answer
     async def answer(self, query: str, context: str, **kwargs) -> str:
@@ -374,9 +387,15 @@ class OpenClawAdapter(BaseAdapter):
         output_dir = root_dir.parent.parent.parent  # strip artifacts/openclaw/<run>
         paths = build_sandbox_paths(output_dir, run_id, conv.conversation_id)
 
+        # Create the full sandbox skeleton up-front so ingest + bridge can
+        # just write files without mkdir guards.
         base = Path(paths["base_dir"])
         base.mkdir(parents=True, exist_ok=True)
+        Path(paths["memory_dir"]).mkdir(parents=True, exist_ok=True)
         Path(paths["native_store_dir"]).mkdir(parents=True, exist_ok=True)
+        (Path(paths["native_store_dir"]) / "memory").mkdir(parents=True, exist_ok=True)
+        Path(paths["home_dir"]).mkdir(parents=True, exist_ok=True)
+        Path(paths["cwd_dir"]).mkdir(parents=True, exist_ok=True)
         Path(paths["metrics_dir"]).mkdir(parents=True, exist_ok=True)
         Path(paths["events_path"]).touch(exist_ok=True)
 
@@ -386,26 +405,41 @@ class OpenClawAdapter(BaseAdapter):
         manifest_path = base / "session_manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
 
-        resolved_config_path = base / "openclaw.resolved.json"
+        # Write the OpenClaw-schema config the CLI will read via
+        # OPENCLAW_CONFIG_PATH.
+        backend_mode = self._openclaw_cfg.get("backend_mode", "hybrid")
+        flush_mode = self._openclaw_cfg.get("flush_mode", "native")
+        resolved = build_openclaw_resolved_config(
+            workspace_dir=paths["workspace_dir"],
+            native_store_dir=paths["native_store_dir"],
+            backend_mode=backend_mode,
+            flush_mode=flush_mode,
+            embedding=self._openclaw_cfg.get("embedding"),
+        )
+        resolved_config_path = Path(paths["config_path"])
         resolved_config_path.write_text(
-            json.dumps(self._openclaw_cfg, ensure_ascii=False, indent=2)
+            json.dumps(resolved, ensure_ascii=False, indent=2)
         )
 
         handle: dict = {
             "conversation_id": conv.conversation_id,
             "workspace_dir": paths["workspace_dir"],
+            "memory_dir": paths["memory_dir"],
             "native_store_dir": paths["native_store_dir"],
+            "home_dir": paths["home_dir"],
+            "cwd_dir": paths["cwd_dir"],
             "resolved_config_path": str(resolved_config_path),
             "session_manifest_path": str(manifest_path),
             "prov_units_path": str(base / "prov_units.jsonl"),
             "artifact_bindings_path": str(base / "artifact_bindings.jsonl"),
             "events_path": paths["events_path"],
             "metrics_dir": paths["metrics_dir"],
-            "backend_mode": self._openclaw_cfg.get("backend_mode", "hybrid"),
+            "backend_mode": backend_mode,
             "retrieval_route": self._openclaw_cfg.get(
                 "retrieval_route", "search_then_get"
             ),
             "visibility_mode": self._openclaw_cfg.get("visibility_mode", "settled"),
+            "flush_mode": flush_mode,
             "visibility_state": "prepared",
             "run_status": "pending",
             "last_flush_epoch": 0,
@@ -425,17 +459,120 @@ class OpenClawAdapter(BaseAdapter):
             )
 
     async def _ingest_conversation(self, sandbox: dict, conv: Conversation) -> None:
-        """Ingest raw transcript into the OpenClaw sandbox.
+        """Render each session as markdown and ask OpenClaw to build its FTS/vector index.
 
-        Placeholder - Task 8 wires this to the native ``index`` bridge command
-        once OpenClaw CLI is available. Tests monkeypatch this method.
+        flush_mode selects between:
+          * ``disabled``: raw transcript dumped to memory/session-*.md
+          * ``native``  : LLM-driven selective retention (OpenClaw's
+                         production memoryFlush behaviour approximated)
+
+        The index step is always the real ``openclaw memory index --force``
+        via the bridge - that is the point of faithful ingest. A bridge
+        failure raises and propagates so the surrounding add() marks
+        run_status=failed rather than silently producing an empty sandbox.
         """
+        flush_mode = sandbox.get("flush_mode", "native")
+        llm_generate = self._make_flush_generate() if flush_mode == "native" else None
+
+        rows = await write_session_files(
+            conversation=conv,
+            memory_dir=Path(sandbox["memory_dir"]),
+            flush_mode=flush_mode,
+            llm_generate=llm_generate,
+        )
+        self._append_events(sandbox, [{"event": "session_ingested", **r} for r in rows])
+
+        # Drive the real OpenClaw index build so search has something to hit.
+        index_resp = await arun_bridge(
+            self._bridge_script_path(),
+            {
+                "command": "index",
+                "config_path": sandbox["resolved_config_path"],
+                "workspace_dir": sandbox["workspace_dir"],
+                "state_dir": sandbox["native_store_dir"],
+            },
+            timeout=self._index_timeout(),
+        )
+        sandbox["last_index_epoch"] = int(index_resp.get("index_epoch") or 0)
         sandbox["visibility_state"] = "ingested"
+        self._append_events(
+            sandbox,
+            [{"event": "index_complete", "index_epoch": sandbox["last_index_epoch"]}],
+        )
 
     async def _flush_and_settle_if_needed(self, sandbox: dict) -> None:
-        """Run flush + wait for index settle if visibility_mode == 'settled'.
+        """Verify OpenClaw reports the sandbox as settled before search.
 
-        Placeholder - Task 8 wires this to the ``flush`` / ``status`` bridge
-        commands. Tests monkeypatch this method.
+        When visibility_mode == 'settled' (the default), we poll ``status``
+        once and trust its ``settled`` field. If it comes back false we
+        retry a bounded number of times before giving up - production
+        OpenClaw re-indexes in the background on onSearch, so this is
+        usually instant when run after a force-index.
         """
+        if sandbox.get("visibility_mode") != "settled":
+            sandbox["visibility_state"] = "indexed"
+            return
+
+        status_resp = await arun_bridge(
+            self._bridge_script_path(),
+            {
+                "command": "status",
+                "config_path": sandbox["resolved_config_path"],
+                "workspace_dir": sandbox["workspace_dir"],
+                "state_dir": sandbox["native_store_dir"],
+            },
+            timeout=self._status_timeout(),
+        )
+        if status_resp.get("settled") is not True:
+            logger.warning(
+                "openclaw status reported not settled for %s: %s",
+                sandbox.get("conversation_id"),
+                status_resp,
+            )
+        sandbox["last_flush_epoch"] = int(status_resp.get("flush_epoch") or 0)
         sandbox["visibility_state"] = "indexed"
+        self._append_events(
+            sandbox,
+            [
+                {
+                    "event": "status_checked",
+                    "settled": bool(status_resp.get("settled")),
+                    "flush_epoch": sandbox["last_flush_epoch"],
+                }
+            ],
+        )
+
+    # -- helpers -----------------------------------------------------------
+
+    def _make_flush_generate(self):
+        """Return a coroutine callable that hits our LLM provider with
+        (system_prompt, user_prompt) and returns plain text.
+
+        Built lazily so tests that never hit flush mode never pay the cost
+        of LLMProvider construction.
+        """
+
+        async def _call(system_prompt: str, user_prompt: str) -> str:
+            provider = self._get_llm_provider()
+            prompt = f"{system_prompt}\n\n{user_prompt}"
+            result = await provider.generate(prompt=prompt, temperature=0)
+            return result.strip() if isinstance(result, str) else ""
+
+        return _call
+
+    def _append_events(self, sandbox: dict, events: list[dict]) -> None:
+        path = Path(sandbox.get("events_path", ""))
+        if not path:
+            return
+        try:
+            with path.open("a", encoding="utf-8") as fp:
+                for event in events:
+                    fp.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except Exception as err:  # noqa: BLE001
+            logger.warning("failed to append events to %s: %s", path, err)
+
+    def _index_timeout(self) -> float:
+        return float(self._openclaw_cfg.get("index_timeout_seconds", 600.0))
+
+    def _status_timeout(self) -> float:
+        return float(self._openclaw_cfg.get("status_timeout_seconds", 60.0))
