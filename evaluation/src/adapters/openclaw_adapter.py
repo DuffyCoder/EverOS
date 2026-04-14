@@ -606,11 +606,15 @@ class OpenClawAdapter(BaseAdapter):
         """Return a coroutine callable that hits our LLM provider with
         (system_prompt, user_prompt) and returns plain text.
 
-        Includes retry-with-backoff because Sophnet (and OpenAI-compat
-        endpoints in general) returns transient 500s under load. Failing
-        an entire LoCoMo run because one out of several thousand flush
-        calls hit a 500 is wasteful; cap the retries so a real outage
-        still surfaces.
+        Behavior on errors:
+          * Up to ``flush_max_retries`` attempts with exponential backoff.
+            Default 6 attempts at 3s base => 3/6/12/24/48/96s, ~3min total.
+          * On final exhaustion we DO NOT raise; instead we return "" so
+            the caller's fallback (render_session_transcript) writes the
+            raw session into the memory file. A single LLM outage during a
+            multi-hour benchmark run should not lose all completed work.
+            The session row in events.jsonl marks ``flush_fallback=true``
+            so post-hoc analysis can filter affected sessions.
         """
         max_retries = int(self._openclaw_cfg.get("flush_max_retries", 6))
         base_delay = float(self._openclaw_cfg.get("flush_retry_base_seconds", 3.0))
@@ -633,9 +637,14 @@ class OpenClawAdapter(BaseAdapter):
                         attempt + 1, max_retries, err, delay,
                     )
                     await asyncio.sleep(delay)
-            raise RuntimeError(
-                f"flush LLM exhausted {max_retries} retries: {last_err}"
+            logger.error(
+                "flush LLM exhausted %d retries (%s); session falls back to raw transcript",
+                max_retries, last_err,
             )
+            self._flush_fallback_count = (
+                getattr(self, "_flush_fallback_count", 0) + 1
+            )
+            return ""
 
         return _call
 
