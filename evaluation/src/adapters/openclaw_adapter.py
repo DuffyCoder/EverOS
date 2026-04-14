@@ -531,6 +531,7 @@ class OpenClawAdapter(BaseAdapter):
             flush_mode=flush_mode,
             llm_generate=llm_generate,
             flush_plan=flush_plan,
+            honor_silent_token=bool(self._openclaw_cfg.get("honor_silent_token", False)),
         )
         self._append_events(sandbox, [{"event": "session_ingested", **r} for r in rows])
 

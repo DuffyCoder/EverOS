@@ -125,19 +125,35 @@ async def render_flushed_session_markdown(
     messages: list[Message],
     llm_generate: Callable[[str, str], Awaitable[str]],
     flush_plan: Optional[dict] = None,
+    honor_silent_token: bool = False,
 ) -> tuple[str, bool]:
     """shared_llm-mode renderer. Uses the framework LLM to distil bullets.
 
     When ``flush_plan`` is provided (fetched from OpenClaw via the
     ``build_flush_plan`` bridge command), the system + user prompt come
     from OpenClaw's own ``buildMemoryFlushPlan`` output so the distil
-    behaviour matches upstream. The framework LLM still executes the
-    prompt (Option A scope: prompt is native, executor is shared).
+    behaviour matches upstream on the PROMPT axis. The framework LLM
+    still executes the prompt (Option A scope).
 
-    Returns (markdown_body, silent). When ``silent`` is True the flush
-    agent replied with its NO_REPLY sentinel and there is nothing to
-    retain for this session; callers should still write an empty file so
-    downstream session-level projections stay consistent.
+    ``honor_silent_token`` controls what happens when the LLM returns the
+    NO_REPLY sentinel alone:
+      * False (default, and what benchmarks should use): re-prompt with
+        an instruction forbidding silent-only output; if that also comes
+        back silent, fall back to the raw session transcript so OpenClaw
+        still has something to index.
+      * True: match OpenClaw production - write a stub comment only.
+        This is mainly useful when emulating an agent loop where other
+        tool calls already wrote memories during the session.
+
+    Why the override: OpenClaw's native prompt literally says
+    "NO_REPLY is usually correct" because in production the flush agent
+    has ALREADY written memory via tool calls during the conversation.
+    In a batch benchmark ingest there has been no prior tool use, so the
+    executor takes the hint literally and returns silent, leaving the
+    sandbox with zero content and tanking retrieval. The override keeps
+    the native prompt text intact while preserving bench usefulness.
+
+    Returns ``(markdown_body, silent)``.
     """
     plan = flush_plan or {}
     system_prompt = plan.get("system_prompt") or _FALLBACK_FLUSH_SYSTEM_PROMPT
@@ -152,21 +168,28 @@ async def render_flushed_session_markdown(
         message_count=len(messages),
         transcript=render_session_transcript(messages),
     )
-    # OpenClaw's plan prompt trails instructions; we prepend the session
-    # context so the LLM has something concrete to distil from.
     user_prompt = context_block + "\n" + plan_user_prompt
 
     distilled = (await llm_generate(system_prompt, user_prompt)).strip()
     if distilled.startswith(silent_token):
-        # Honour upstream semantics: nothing worth retaining. We still
-        # leave a stub markdown so the session-bucketed filename stays
-        # present for source_sessions projection.
-        body = (
-            f"# {session_id}\n\n"
-            f"<!-- openclaw flush returned {silent_token}: "
-            f"no durable memory for this session -->\n"
+        if honor_silent_token:
+            body = (
+                f"# {session_id}\n\n"
+                f"<!-- openclaw flush returned {silent_token}: "
+                f"no durable memory for this session -->\n"
+            )
+            return body, True
+
+        # Benchmark mode: silent is a prompt artefact. Retry once with a
+        # stricter instruction, and if still silent fall back to raw.
+        retry_system = (
+            system_prompt
+            + f"\n\nBenchmark-mode override: do NOT return only "
+            f"{silent_token}; always produce markdown memory content."
         )
-        return body, True
+        distilled = (await llm_generate(retry_system, user_prompt)).strip()
+        if distilled.startswith(silent_token) or not distilled:
+            distilled = render_session_transcript(messages)
 
     if not distilled:
         distilled = render_session_transcript(messages)
@@ -179,6 +202,7 @@ async def write_session_files(
     flush_mode: str,
     llm_generate: Optional[Callable[[str, str], Awaitable[str]]] = None,
     flush_plan: Optional[dict] = None,
+    honor_silent_token: bool = False,
 ) -> list[dict]:
     """Write one markdown file per session and return metadata rows.
 
@@ -208,6 +232,7 @@ async def write_session_files(
                 raise ValueError("shared_llm flush requires llm_generate callable")
             body, silent = await render_flushed_session_markdown(
                 sid, messages, llm_generate, flush_plan=flush_plan,
+                honor_silent_token=honor_silent_token,
             )
         elif flush_mode == "disabled":
             body = render_raw_session_markdown(sid, messages)

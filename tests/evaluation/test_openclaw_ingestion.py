@@ -136,9 +136,8 @@ async def test_shared_llm_uses_native_plan_when_provided(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_shared_llm_honors_silent_token(tmp_path):
-    """If the LLM replies with the silent sentinel, the markdown stub keeps
-    the session-level filename intact but body is empty + flagged silent.
+async def test_shared_llm_silent_token_honored_when_flag_on(tmp_path):
+    """honor_silent_token=True writes the stub-with-comment and flags silent.
     Matches OpenClaw's 'nothing to retain this session' semantics."""
     from evaluation.src.adapters.openclaw_ingestion import (
         render_flushed_session_markdown,
@@ -154,11 +153,45 @@ async def test_shared_llm_honors_silent_token(tmp_path):
         buckets["S0"],
         silent_llm,
         flush_plan={"silent_token": "NO_REPLY"},
+        honor_silent_token=True,
     )
     assert silent is True
     assert body.startswith("# S0")
     assert "NO_REPLY" in body
-    assert "durable" in body  # comment mentions no durable memory
+    assert "durable" in body
+
+
+@pytest.mark.asyncio
+async def test_shared_llm_retries_then_falls_back_when_silent_default(tmp_path):
+    """Default (benchmark) behaviour: a silent-only response is retried with
+    an override, and if still silent we fall back to the raw transcript so
+    OpenClaw has content to index. silent=False so downstream metrics still
+    include the session."""
+    from evaluation.src.adapters.openclaw_ingestion import (
+        render_flushed_session_markdown,
+    )
+
+    calls = []
+
+    async def silent_llm(system, user):
+        calls.append(system)
+        return "NO_REPLY"
+
+    conv = _conv()
+    buckets = bucket_conversation_by_session(conv)
+    body, silent = await render_flushed_session_markdown(
+        "S0",
+        buckets["S0"],
+        silent_llm,
+        flush_plan={"silent_token": "NO_REPLY"},
+        # honor_silent_token defaults to False
+    )
+    assert silent is False
+    assert len(calls) == 2, "must retry once with the override"
+    assert "override" in calls[1].lower() or "do not" in calls[1].lower()
+    # Fallback body contains the raw transcript lines since both tries
+    # were silent.
+    assert "hi there" in body
 
 
 @pytest.mark.asyncio
