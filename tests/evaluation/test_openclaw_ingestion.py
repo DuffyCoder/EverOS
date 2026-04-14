@@ -97,6 +97,71 @@ async def test_write_session_files_disabled_mode(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_shared_llm_uses_native_plan_when_provided(tmp_path):
+    """Option A: when a flush_plan (system_prompt/prompt/silent_token) is
+    supplied, render_flushed_session_markdown must use THOSE prompts, not
+    the in-process fallback template."""
+    from evaluation.src.adapters.openclaw_ingestion import (
+        render_flushed_session_markdown,
+    )
+
+    captured = {}
+
+    async def fake_llm(system, user):
+        captured["system"] = system
+        captured["user"] = user
+        return "- distilled bullet 1\n- distilled bullet 2"
+
+    plan = {
+        "native": True,
+        "system_prompt": "NATIVE SYSTEM PROMPT FROM OPENCLAW",
+        "prompt": "NATIVE USER PROMPT FROM OPENCLAW",
+        "silent_token": "NO_REPLY",
+        "relative_path": "memory/2023-06-09.md",
+    }
+    conv = _conv()
+    buckets = bucket_conversation_by_session(conv)
+    body, silent = await render_flushed_session_markdown(
+        "S0", buckets["S0"], fake_llm, flush_plan=plan,
+    )
+    assert silent is False
+    assert "distilled bullet 1" in body
+    # Plan's system prompt must flow to the LLM verbatim.
+    assert captured["system"] == "NATIVE SYSTEM PROMPT FROM OPENCLAW"
+    # Plan's user prompt appears at the tail of our composed user message
+    # (after the session-context block).
+    assert captured["user"].rstrip().endswith("NATIVE USER PROMPT FROM OPENCLAW")
+    # Session context block was prepended so the LLM has something to distil.
+    assert "hi there" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_shared_llm_honors_silent_token(tmp_path):
+    """If the LLM replies with the silent sentinel, the markdown stub keeps
+    the session-level filename intact but body is empty + flagged silent.
+    Matches OpenClaw's 'nothing to retain this session' semantics."""
+    from evaluation.src.adapters.openclaw_ingestion import (
+        render_flushed_session_markdown,
+    )
+
+    async def silent_llm(system, user):
+        return "NO_REPLY"
+
+    conv = _conv()
+    buckets = bucket_conversation_by_session(conv)
+    body, silent = await render_flushed_session_markdown(
+        "S0",
+        buckets["S0"],
+        silent_llm,
+        flush_plan={"silent_token": "NO_REPLY"},
+    )
+    assert silent is True
+    assert body.startswith("# S0")
+    assert "NO_REPLY" in body
+    assert "durable" in body  # comment mentions no durable memory
+
+
+@pytest.mark.asyncio
 async def test_write_session_files_shared_llm_mode_uses_llm(tmp_path):
     conv = _conv()
     memory_dir = tmp_path / "memory"

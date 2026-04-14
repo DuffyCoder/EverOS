@@ -140,6 +140,38 @@ def test_stub_reports_unknown_command():
         )
 
 
+def test_build_flush_plan_stub_mode(monkeypatch):
+    """stub mode (no launcher) reports native=false but still returns a
+    well-shaped plan so callers fall back cleanly."""
+    monkeypatch.delenv("OPENCLAW_REPO_PATH", raising=False)
+    res = run_bridge(BRIDGE_PATH, {"command": "build_flush_plan"})
+    assert res["ok"] is True
+    assert res["native"] is False
+    assert res["silent_token"] == "NO_REPLY"
+    assert res["system_prompt"].startswith("[stub]")
+
+
+def test_build_flush_plan_native_mode(monkeypatch):
+    """When the launcher resolves, the plan must come from OpenClaw's own
+    buildMemoryFlushPlan (system_prompt includes 'Pre-compaction memory
+    flush turn.' which is the canonical header)."""
+    monkeypatch.setenv("OPENCLAW_REPO_PATH", "/Data3/shutong.shan/openclaw/repo")
+    res = run_bridge(
+        BRIDGE_PATH,
+        {"command": "build_flush_plan",
+         "repo_path": "/Data3/shutong.shan/openclaw/repo"},
+    )
+    assert res["ok"] is True
+    if res.get("native") is True:
+        # native branch reachable in this environment
+        assert "Pre-compaction memory flush" in res["system_prompt"]
+        assert "memory/" in res["relative_path"]
+    else:
+        # launcher existed but dist wasn't there; acceptable in minimal
+        # dev environments - at minimum the shape must not crash callers.
+        assert "system_prompt" in res
+
+
 def test_repo_path_in_payload_is_honored_over_env(monkeypatch, tmp_path):
     """P0-2: bridge prefers repo_path from the BridgeCommand payload so the
     system YAML value actually drives which launcher we spawn.

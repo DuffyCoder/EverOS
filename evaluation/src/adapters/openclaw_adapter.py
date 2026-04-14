@@ -507,11 +507,30 @@ class OpenClawAdapter(BaseAdapter):
         flush_mode = sandbox.get("flush_mode", "shared_llm")
         llm_generate = self._make_flush_generate() if flush_mode == "shared_llm" else None
 
+        flush_plan: Optional[dict] = None
+        if flush_mode == "shared_llm":
+            flush_plan = await self._fetch_native_flush_plan(sandbox)
+            sandbox["flush_plan_native"] = bool(flush_plan and flush_plan.get("native"))
+            self._append_events(
+                sandbox,
+                [
+                    {
+                        "event": "flush_plan_resolved",
+                        "native": bool(flush_plan and flush_plan.get("native")),
+                        "relative_path": (flush_plan or {}).get("relative_path"),
+                        "soft_threshold_tokens": (flush_plan or {}).get(
+                            "soft_threshold_tokens"
+                        ),
+                    }
+                ],
+            )
+
         rows = await write_session_files(
             conversation=conv,
             memory_dir=Path(sandbox["memory_dir"]),
             flush_mode=flush_mode,
             llm_generate=llm_generate,
+            flush_plan=flush_plan,
         )
         self._append_events(sandbox, [{"event": "session_ingested", **r} for r in rows])
 
@@ -614,3 +633,45 @@ class OpenClawAdapter(BaseAdapter):
 
     def _status_timeout(self) -> float:
         return float(self._openclaw_cfg.get("status_timeout_seconds", 60.0))
+
+    async def _fetch_native_flush_plan(self, sandbox: dict) -> Optional[dict]:
+        """Call the bridge's build_flush_plan to get OpenClaw's own flush
+        plan (system_prompt / prompt / silent_token).
+
+        NOTE: the bridge payload deliberately OMITS config_path for this
+        command. Our runtime openclaw.json sets memoryFlush.enabled=false
+        (so OpenClaw doesn't re-flush during search), but OpenClaw's
+        ``buildMemoryFlushPlan`` returns null when that flag is off. We
+        want the prompt text, not the runtime behaviour, so we ask the
+        bridge to build the plan from OpenClaw defaults instead.
+
+        Non-fatal: if the bridge cannot produce a plan (stub mode, missing
+        dist, upstream error) we return None and the caller falls back to
+        the in-process template. The event log records which branch we
+        took.
+        """
+        base = self._bridge_base_payload(sandbox)
+        plan_payload = {
+            **base,
+            "config_path": "",  # force OpenClaw defaults, not our runtime cfg
+            "command": "build_flush_plan",
+        }
+        try:
+            resp = await arun_bridge(
+                self._bridge_script_path(),
+                plan_payload,
+                timeout=self._status_timeout(),
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning("build_flush_plan failed, falling back: %s", err)
+            return None
+        if not resp.get("ok") or resp.get("disabled") or not resp.get("system_prompt"):
+            return None
+        return {
+            "native": bool(resp.get("native")),
+            "system_prompt": resp["system_prompt"],
+            "prompt": resp["prompt"],
+            "silent_token": resp.get("silent_token") or "NO_REPLY",
+            "relative_path": resp.get("relative_path"),
+            "soft_threshold_tokens": resp.get("soft_threshold_tokens"),
+        }

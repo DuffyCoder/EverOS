@@ -16,6 +16,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function respond(obj) {
   process.stdout.write(JSON.stringify(obj));
@@ -235,6 +236,95 @@ async function handleSearch(input, launcher) {
   return { ok: true, command: "search", hits };
 }
 
+async function handleBuildFlushPlan(input, launcher) {
+  // Returns OpenClaw's native memory-flush plan (the canonical system/user
+  // prompt that the production agent-runner would send when flushing
+  // memory pre-compaction). Executor is still the framework's LLM per the
+  // scope of Option A; only the plan/prompt side is native.
+  if (!launcher) {
+    // Stub path: mirror the real response shape with an obvious sentinel
+    // so callers can tell they're not hitting upstream.
+    return {
+      ok: true,
+      command: "build_flush_plan",
+      native: false,
+      silent_token: "NO_REPLY",
+      relative_path: "memory/stub-date.md",
+      soft_threshold_tokens: 4000,
+      system_prompt: "[stub] shared_llm placeholder system prompt.",
+      prompt: "[stub] shared_llm placeholder user prompt.",
+    };
+  }
+
+  // Dynamic import from the launcher's dist. We resolve relative to the
+  // launcher path so a different OPENCLAW_REPO_PATH works out of the box.
+  const repoRoot = path.dirname(launcher);
+  const distIndex = path.join(
+    repoRoot,
+    "dist",
+    "extensions",
+    "memory-core",
+    "index.js",
+  );
+  if (!existsSync(distIndex)) {
+    return {
+      ok: false,
+      command: "build_flush_plan",
+      error: `memory-core dist not found at ${distIndex}`,
+    };
+  }
+
+  let mod;
+  try {
+    mod = await import(pathToFileURL(distIndex).href);
+  } catch (err) {
+    return {
+      ok: false,
+      command: "build_flush_plan",
+      error: `failed to import memory-core: ${err.message}`,
+    };
+  }
+
+  let cfg;
+  if (input.config_path && existsSync(input.config_path)) {
+    try {
+      cfg = JSON.parse(readFileSync(input.config_path, "utf8"));
+    } catch (err) {
+      return {
+        ok: false,
+        command: "build_flush_plan",
+        error: `bad config at ${input.config_path}: ${err.message}`,
+      };
+    }
+  }
+
+  const nowMs = Number.isFinite(input.now_ms) ? input.now_ms : Date.now();
+  const plan = mod.buildMemoryFlushPlan({ cfg, nowMs });
+  if (!plan) {
+    return {
+      ok: true,
+      command: "build_flush_plan",
+      native: true,
+      disabled: true,
+      silent_token: "NO_REPLY",
+      relative_path: null,
+      soft_threshold_tokens: mod.DEFAULT_MEMORY_FLUSH_SOFT_TOKENS ?? 4000,
+      system_prompt: null,
+      prompt: null,
+    };
+  }
+  return {
+    ok: true,
+    command: "build_flush_plan",
+    native: true,
+    silent_token: "NO_REPLY",
+    relative_path: plan.relativePath,
+    soft_threshold_tokens: plan.softThresholdTokens,
+    system_prompt: plan.systemPrompt,
+    prompt: plan.prompt,
+  };
+}
+
 async function handleGet(input) {
   // OpenClaw has no get command; read the markdown file range directly.
   const locator = input.artifact_locator || {};
@@ -288,6 +378,9 @@ const command = input.command;
         break;
       case "get":
         resp = await handleGet(input);
+        break;
+      case "build_flush_plan":
+        resp = await handleBuildFlushPlan(input, launcher);
         break;
       default:
         return fail(`unknown command: ${command}`, command);

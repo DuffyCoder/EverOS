@@ -38,32 +38,27 @@ from evaluation.src.core.data_models import Conversation, Message
 
 logger = logging.getLogger(__name__)
 
-# Modelled on extensions/memory-core/src/flush-plan.ts. The original prompt
-# instructs the agent to save memories to memory/YYYY-MM-DD.md before the
-# context is compacted. We mirror the intent - retain decisions / facts /
-# contradictions, drop greetings - and ask for a well-formed markdown body
-# so OpenClaw's FTS has something to chunk on.
-_NATIVE_FLUSH_SYSTEM_PROMPT = (
+# Fallback prompts used only when a native OpenClaw flush plan is not
+# available (stub mode / bridge unreachable). In the happy path the plan
+# is fetched via ``build_flush_plan`` from OpenClaw's own memory-core and
+# passed in as ``flush_plan`` - see openclaw_adapter._ingest_conversation.
+_FALLBACK_FLUSH_SYSTEM_PROMPT = (
     "You are OpenClaw's memory compaction agent. Distill the SESSION TRANSCRIPT "
     "into retention-worthy memories before the conversation context is compacted.\n"
     "\n"
-    "Keep:\n"
-    "- Concrete facts, decisions, opinions, relationships, promises.\n"
-    "- Dates, durations, numbers, names, places.\n"
-    "- Preferences and constraints that might matter later.\n"
-    "- Contradictions (flag them explicitly).\n"
+    "Keep concrete facts, decisions, preferences, dates, numbers, names, places, "
+    "and any contradictions. Drop greetings, filler, and repeated content.\n"
     "\n"
-    "Drop:\n"
-    "- Greetings, filler, rhetorical questions.\n"
-    "- Repeated information already stated verbatim earlier.\n"
-    "\n"
-    "Output format: a single markdown body, no preface or epilogue. Use short "
-    "bullet points under a second-level heading derived from the session "
-    "label. Each bullet is a standalone statement that will still be "
-    "interpretable months later."
+    "Output: a single markdown body, short bullet points, no preface or epilogue."
 )
 
-_NATIVE_FLUSH_USER_TEMPLATE = (
+_FALLBACK_FLUSH_USER_PROMPT = (
+    "Produce the distilled memories for this session now; output markdown only."
+)
+
+_DEFAULT_SILENT_TOKEN = "NO_REPLY"
+
+_SESSION_CONTEXT_TEMPLATE = (
     "## Session metadata\n"
     "- session_id: {session_id}\n"
     "- date: {session_date}\n"
@@ -72,8 +67,6 @@ _NATIVE_FLUSH_USER_TEMPLATE = (
     "\n"
     "## Session transcript\n"
     "{transcript}\n"
-    "\n"
-    "Produce the distilled memories now."
 )
 
 
@@ -131,23 +124,53 @@ async def render_flushed_session_markdown(
     session_id: str,
     messages: list[Message],
     llm_generate: Callable[[str, str], Awaitable[str]],
-) -> str:
+    flush_plan: Optional[dict] = None,
+) -> tuple[str, bool]:
     """shared_llm-mode renderer. Uses the framework LLM to distil bullets.
 
-    llm_generate(system_prompt, user_prompt) is an awaitable that must return
-    a markdown body. Callers pass their adapter's LLM provider in.
+    When ``flush_plan`` is provided (fetched from OpenClaw via the
+    ``build_flush_plan`` bridge command), the system + user prompt come
+    from OpenClaw's own ``buildMemoryFlushPlan`` output so the distil
+    behaviour matches upstream. The framework LLM still executes the
+    prompt (Option A scope: prompt is native, executor is shared).
+
+    Returns (markdown_body, silent). When ``silent`` is True the flush
+    agent replied with its NO_REPLY sentinel and there is nothing to
+    retain for this session; callers should still write an empty file so
+    downstream session-level projections stay consistent.
     """
+    plan = flush_plan or {}
+    system_prompt = plan.get("system_prompt") or _FALLBACK_FLUSH_SYSTEM_PROMPT
+    plan_user_prompt = plan.get("prompt") or _FALLBACK_FLUSH_USER_PROMPT
+    silent_token = plan.get("silent_token") or _DEFAULT_SILENT_TOKEN
+
     speakers = sorted({m.speaker_name for m in messages})
-    user_prompt = _NATIVE_FLUSH_USER_TEMPLATE.format(
+    context_block = _SESSION_CONTEXT_TEMPLATE.format(
         session_id=session_id,
         session_date=session_date(messages),
         speakers=", ".join(speakers) or "(unknown)",
         message_count=len(messages),
         transcript=render_session_transcript(messages),
     )
-    distilled = await llm_generate(_NATIVE_FLUSH_SYSTEM_PROMPT, user_prompt)
-    distilled = distilled.strip() or render_session_transcript(messages)
-    return f"# {session_id}\n\n" + distilled + "\n"
+    # OpenClaw's plan prompt trails instructions; we prepend the session
+    # context so the LLM has something concrete to distil from.
+    user_prompt = context_block + "\n" + plan_user_prompt
+
+    distilled = (await llm_generate(system_prompt, user_prompt)).strip()
+    if distilled.startswith(silent_token):
+        # Honour upstream semantics: nothing worth retaining. We still
+        # leave a stub markdown so the session-bucketed filename stays
+        # present for source_sessions projection.
+        body = (
+            f"# {session_id}\n\n"
+            f"<!-- openclaw flush returned {silent_token}: "
+            f"no durable memory for this session -->\n"
+        )
+        return body, True
+
+    if not distilled:
+        distilled = render_session_transcript(messages)
+    return f"# {session_id}\n\n" + distilled + "\n", False
 
 
 async def write_session_files(
@@ -155,11 +178,17 @@ async def write_session_files(
     memory_dir: Path,
     flush_mode: str,
     llm_generate: Optional[Callable[[str, str], Awaitable[str]]] = None,
+    flush_plan: Optional[dict] = None,
 ) -> list[dict]:
     """Write one markdown file per session and return metadata rows.
 
-    Returned rows (suitable for events.jsonl) contain session_id, path_rel,
-    message_count, flush_mode.
+    ``flush_plan`` (when provided) is the OpenClaw native plan returned by
+    ``build_flush_plan`` bridge command - system_prompt / prompt /
+    silent_token. It is only consulted for ``shared_llm`` mode.
+
+    Returned rows contain session_id / path_rel / message_count / flush_mode
+    plus ``silent`` (True when OpenClaw's flush agent replied with its
+    NO_REPLY sentinel for this session).
     """
     buckets = bucket_conversation_by_session(conversation)
     if not buckets:
@@ -172,11 +201,14 @@ async def write_session_files(
         filename = session_markdown_filename(sid, date_str)
         rel = f"memory/{filename}"
         abs_path = memory_dir / filename
+        silent = False
 
         if flush_mode == "shared_llm":
             if llm_generate is None:
                 raise ValueError("shared_llm flush requires llm_generate callable")
-            body = await render_flushed_session_markdown(sid, messages, llm_generate)
+            body, silent = await render_flushed_session_markdown(
+                sid, messages, llm_generate, flush_plan=flush_plan,
+            )
         elif flush_mode == "disabled":
             body = render_raw_session_markdown(sid, messages)
         else:
@@ -190,14 +222,16 @@ async def write_session_files(
                 "date": date_str,
                 "message_count": len(messages),
                 "flush_mode": flush_mode,
+                "silent": silent,
             }
         )
         logger.debug(
-            "ingested session %s -> %s (flush_mode=%s, bytes=%d)",
+            "ingested session %s -> %s (flush_mode=%s, bytes=%d, silent=%s)",
             sid,
             rel,
             flush_mode,
             len(body.encode("utf-8")),
+            silent,
         )
     return rows
 
