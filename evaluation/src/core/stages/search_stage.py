@@ -82,6 +82,15 @@ async def run_search_stage(
     print(f"Search concurrency: {num_workers} workers")
 
     recorder = latency_recorder or NULL_RECORDER
+    # Map harness-level retry_policy → local max_retries cap. Adapters
+    # that have their own internal retry loops also read ctx.retry_policy
+    # (Phase 2 contract) and should skip those loops in strict mode.
+    _max_retries_for_policy = {
+        "strict_no_retry": 1,
+        "retry_once": 2,
+        "realistic": 3,
+    }
+    max_retries = _max_retries_for_policy.get(recorder.retry_policy, 3)
     
     # Create fine-grained progress bar (track by questions)
     total_questions = len(qa_pairs)
@@ -102,13 +111,31 @@ async def run_search_stage(
             # Search with timeout and retry (similar to answer_stage.py).
             # Every attempt is recorded to the LatencyRecorder so Layer-1
             # views can break wall_ms down into per-attempt durations.
-            max_retries = 3
+            # max_retries comes from retry_policy (set above at stage
+            # init); strict_no_retry → 1 attempt total, no retries.
             timeout_seconds = 300.0  # Increased from 120s for complex agentic retrieval
             result = None
 
             async with recorder.measure("search", qa.question_id) as ctx:
                 retry_wait_seconds = 2.0
                 for attempt in range(max_retries):
+                    # Bail before launching a retry if the harness-level
+                    # deadline has already elapsed; record_fallback() so
+                    # the sample is excluded from ``clean`` stats.
+                    if attempt > 0 and ctx.deadline_exceeded():
+                        tqdm.write(
+                            f"  ⏹️  Search deadline exceeded before attempt {attempt + 1}; "
+                            f"stopping retries for {conv_id}."
+                        )
+                        ctx.record_fallback()
+                        from evaluation.src.core.data_models import SearchResult
+                        result = SearchResult(
+                            query=qa.question,
+                            conversation_id=conv_id,
+                            results=[],
+                            retrieval_metadata={"error": "deadline exceeded"},
+                        )
+                        break
                     t_attempt = _time.perf_counter()
                     try:
                         result = await asyncio.wait_for(

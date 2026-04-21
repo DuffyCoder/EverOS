@@ -103,6 +103,23 @@ class BenchmarkContext:
         self._attempts: List[AttemptRecord] = []
         self._subphases: Dict[str, float] = {}
         self._fallback = False
+        # Set by LatencyRecorder.measure() when the context enters so
+        # deadline_exceeded() can report against a known t0. Stages
+        # check this between retry attempts.
+        self._t0: Optional[float] = None
+
+    def deadline_exceeded(self) -> bool:
+        """True if deadline_ms is set and already elapsed.
+
+        Stages check this between retry attempts to avoid launching a
+        retry that would exceed the harness-enforced per-call budget.
+        When the deadline fires, callers should record_fallback() and
+        stop retrying.
+        """
+        if self.deadline_ms is None or self._t0 is None:
+            return False
+        elapsed_ms = (time.perf_counter() - self._t0) * 1000.0
+        return elapsed_ms >= self.deadline_ms
 
     def record_attempt(
         self,
@@ -168,6 +185,7 @@ class LatencyRecorder:
             deadline_ms=self.deadline_ms,
         )
         t0 = time.perf_counter()
+        ctx._t0 = t0
         failed = False
         try:
             yield ctx

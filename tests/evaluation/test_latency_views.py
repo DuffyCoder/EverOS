@@ -250,6 +250,58 @@ def test_records_to_jsonl_roundtrippable_shape():
     ]
 
 
+def test_deadline_exceeded_reports_false_before_deadline():
+    """ctx.deadline_exceeded() is False when deadline_ms is None or
+    when the deadline hasn't been reached. Used by stages to decide
+    whether to launch another retry attempt."""
+    recorder = LatencyRecorder(deadline_ms=10_000)  # 10s budget
+
+    async def run():
+        async with recorder.measure("search", "q") as ctx:
+            assert ctx.deadline_exceeded() is False
+
+    asyncio.run(run())
+
+
+def test_deadline_exceeded_reports_true_after_deadline():
+    """ctx.deadline_exceeded() flips True once measure() has been
+    inside the context for longer than deadline_ms."""
+    recorder = LatencyRecorder(deadline_ms=50.0)  # 50ms budget
+
+    async def run():
+        async with recorder.measure("search", "q") as ctx:
+            assert not ctx.deadline_exceeded()
+            await asyncio.sleep(0.06)  # 60ms > 50ms
+            assert ctx.deadline_exceeded()
+
+    asyncio.run(run())
+
+
+def test_deadline_exceeded_is_false_when_deadline_none():
+    """With deadline_ms=None (default), deadline_exceeded never fires."""
+    recorder = LatencyRecorder()  # no deadline
+
+    async def run():
+        async with recorder.measure("search", "q") as ctx:
+            await asyncio.sleep(0.02)
+            assert ctx.deadline_exceeded() is False
+
+    asyncio.run(run())
+
+
+def test_retry_policy_propagates_to_context():
+    """LatencyRecorder.retry_policy reaches the BenchmarkContext so
+    adapters reading ctx.retry_policy behave consistently with the
+    pipeline-level flag."""
+    recorder = LatencyRecorder(retry_policy="strict_no_retry")
+
+    async def run():
+        async with recorder.measure("answer", "q") as ctx:
+            assert ctx.retry_policy == "strict_no_retry"
+
+    asyncio.run(run())
+
+
 def test_bool_excluded_from_percentiles():
     """bool <: int in Python; a mis-typed duration must not slip in."""
     records = [

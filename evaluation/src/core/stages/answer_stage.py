@@ -195,6 +195,13 @@ async def run_answer_stage(
     start_time = time.time()
 
     recorder = latency_recorder or NULL_RECORDER
+    # Mirror search_stage retry_policy → max_retries mapping.
+    _max_retries_for_policy = {
+        "strict_no_retry": 1,
+        "retry_once": 2,
+        "realistic": 3,
+    }
+    answer_max_retries = _max_retries_for_policy.get(recorder.retry_policy, 3)
     
     # Use tqdm progress bar
     pbar = tqdm(
@@ -238,12 +245,27 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 # Every attempt is recorded to the LatencyRecorder so
                 # Layer-1 four-view aggregation can distinguish clean
                 # first-hit latency from retry-inflated wall time.
-                max_retries = 3
+                # max_retries is set by the pipeline's retry_policy; the
+                # strict_no_retry value of 1 disables retries entirely.
+                max_retries = answer_max_retries
                 timeout_seconds = 120.0  # 2 minutes timeout per attempt
                 retry_wait_seconds = 2.0
 
                 async with recorder.measure("answer", qa.question_id) as ctx:
                     for attempt in range(max_retries):
+                        # Skip retries once the harness-level deadline
+                        # elapsed so one adapter call can't burn all
+                        # of another sample's budget. fallback=true
+                        # excludes the sample from clean stats.
+                        if attempt > 0 and ctx.deadline_exceeded():
+                            tqdm.write(
+                                f"  ⏹️  Answer deadline exceeded before attempt {attempt + 1}; "
+                                f"stopping retries for {qa.question_id}."
+                            )
+                            ctx.record_fallback()
+                            answer = "Error: deadline exceeded before retry"
+                            failed += 1
+                            break
                         t_start = time.perf_counter()
                         try:
                             answer = await asyncio.wait_for(
