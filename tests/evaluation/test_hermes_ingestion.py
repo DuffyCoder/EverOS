@@ -1,4 +1,4 @@
-"""Tests for hermes_ingestion turn-pair iterator."""
+"""Tests for evaluation.src.adapters.hermes.ingestion turn-pair iterator."""
 from __future__ import annotations
 
 from evaluation.src.core.data_models import Conversation, Message
@@ -9,7 +9,7 @@ def _msg(speaker_id: str, content: str) -> Message:
 
 
 def test_two_speaker_even_pairs_in_order():
-    from evaluation.src.adapters.hermes_ingestion import iter_turn_pairs
+    from evaluation.src.adapters.hermes.ingestion import iter_turn_pairs
 
     conv = Conversation(
         conversation_id="c1",
@@ -26,7 +26,7 @@ def test_two_speaker_even_pairs_in_order():
 
 
 def test_odd_trailing_turn_is_paired_with_empty_string():
-    from evaluation.src.adapters.hermes_ingestion import iter_turn_pairs
+    from evaluation.src.adapters.hermes.ingestion import iter_turn_pairs
 
     conv = Conversation(
         conversation_id="c1",
@@ -42,7 +42,7 @@ def test_odd_trailing_turn_is_paired_with_empty_string():
 
 
 def test_three_speaker_round_robin_warns(caplog):
-    from evaluation.src.adapters.hermes_ingestion import iter_turn_pairs
+    from evaluation.src.adapters.hermes.ingestion import iter_turn_pairs
 
     conv = Conversation(
         conversation_id="c1",
@@ -62,7 +62,7 @@ def test_three_speaker_round_robin_warns(caplog):
 
 
 def test_empty_conversation_yields_no_pairs():
-    from evaluation.src.adapters.hermes_ingestion import iter_turn_pairs
+    from evaluation.src.adapters.hermes.ingestion import iter_turn_pairs
 
     conv = Conversation(conversation_id="c1", messages=[])
     assert list(iter_turn_pairs(conv)) == []

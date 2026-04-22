@@ -1,4 +1,4 @@
-"""Tests for hermes_runtime module."""
+"""Tests for evaluation.src.adapters.hermes.runtime."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,7 @@ import pytest
 
 
 def test_ensure_hermes_importable_prepends_repo_to_syspath(tmp_path):
-    from evaluation.src.adapters.hermes_runtime import ensure_hermes_importable
+    from evaluation.src.adapters.hermes.runtime import ensure_hermes_importable
 
     fake_repo = tmp_path / "hermes"
     fake_repo.mkdir()
@@ -28,7 +28,7 @@ def test_ensure_hermes_importable_prepends_repo_to_syspath(tmp_path):
 
 
 def test_ensure_hermes_importable_idempotent(tmp_path):
-    from evaluation.src.adapters.hermes_runtime import ensure_hermes_importable
+    from evaluation.src.adapters.hermes.runtime import ensure_hermes_importable
 
     fake_repo = tmp_path / "hermes"
     fake_repo.mkdir()
@@ -45,7 +45,7 @@ def test_ensure_hermes_importable_idempotent(tmp_path):
 
 
 def test_ensure_hermes_importable_rejects_missing_repo(tmp_path):
-    from evaluation.src.adapters.hermes_runtime import ensure_hermes_importable
+    from evaluation.src.adapters.hermes.runtime import ensure_hermes_importable
 
     with pytest.raises(ValueError, match="repo_path"):
         ensure_hermes_importable("")
@@ -55,7 +55,7 @@ def test_ensure_hermes_importable_rejects_missing_repo(tmp_path):
 
 
 def test_hermes_home_env_sets_and_restores(tmp_path, monkeypatch):
-    from evaluation.src.adapters.hermes_runtime import hermes_home_env
+    from evaluation.src.adapters.hermes.runtime import hermes_home_env
 
     monkeypatch.setenv("HERMES_HOME", "/old")
     with hermes_home_env(str(tmp_path)):
@@ -64,7 +64,7 @@ def test_hermes_home_env_sets_and_restores(tmp_path, monkeypatch):
 
 
 def test_hermes_home_env_restores_when_unset_before(tmp_path, monkeypatch):
-    from evaluation.src.adapters.hermes_runtime import hermes_home_env
+    from evaluation.src.adapters.hermes.runtime import hermes_home_env
 
     monkeypatch.delenv("HERMES_HOME", raising=False)
     with hermes_home_env(str(tmp_path)):
@@ -73,7 +73,7 @@ def test_hermes_home_env_restores_when_unset_before(tmp_path, monkeypatch):
 
 
 def test_hermes_executor_runs_callables():
-    from evaluation.src.adapters.hermes_runtime import HermesExecutor
+    from evaluation.src.adapters.hermes.runtime import HermesExecutor
 
     executor = HermesExecutor()
 
@@ -88,7 +88,7 @@ def test_hermes_executor_runs_callables():
 
 
 def test_hermes_executor_propagates_exceptions():
-    from evaluation.src.adapters.hermes_runtime import HermesExecutor
+    from evaluation.src.adapters.hermes.runtime import HermesExecutor
 
     executor = HermesExecutor()
 

@@ -19,7 +19,7 @@ from typing import Any, List, Optional
 import yaml
 
 from evaluation.src.adapters.base import BaseAdapter
-from evaluation.src.adapters.hermes_runtime import (
+from evaluation.src.adapters.hermes.runtime import (
     HermesExecutor,
     ensure_hermes_importable,
     get_hermes_executor,
@@ -234,7 +234,7 @@ class HermesAdapter(BaseAdapter):
         await self._executor.run(_shut)
 
     async def _ingest_conversation(self, provider, conv: Conversation, sandbox_dir: Path) -> int:
-        from evaluation.src.adapters.hermes_ingestion import iter_turn_pairs
+        from evaluation.src.adapters.hermes.ingestion import iter_turn_pairs
 
         turns = 0
         if self._ingest_strategy in ("sync_per_turn", "both"):
