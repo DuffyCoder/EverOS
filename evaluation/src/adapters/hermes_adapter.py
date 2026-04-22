@@ -289,4 +289,63 @@ class HermesAdapter(BaseAdapter):
         }
 
     async def search(self, query: str, conversation_id: str, index: Any, **kwargs) -> SearchResult:
-        raise NotImplementedError("Task 7 implements search()")
+        conv_entry = index["conversations"].get(conversation_id)
+        if conv_entry is None:
+            raise KeyError(f"no hermes sandbox for conversation {conversation_id}")
+        sandbox_dir = Path(conv_entry["hermes_home"])
+
+        provider = _load_memory_provider(self._plugin_name)
+        if provider is None or not provider.is_available():
+            raise RuntimeError(f"hermes plugin '{self._plugin_name}' unavailable")
+
+        t0 = time.perf_counter()
+
+        def _init():
+            with hermes_home_env(str(sandbox_dir)):
+                provider.initialize(
+                    session_id=conversation_id,
+                    hermes_home=str(sandbox_dir),
+                    platform="cli",
+                    agent_context="primary",
+                )
+
+        def _prefetch():
+            with hermes_home_env(str(sandbox_dir)):
+                return provider.prefetch(query, session_id=conversation_id)
+
+        def _shut():
+            with hermes_home_env(str(sandbox_dir)):
+                try:
+                    provider.shutdown()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("hermes search shutdown failed: %s", exc)
+
+        await self._executor.run(_init)
+        try:
+            context = await self._executor.run(_prefetch)
+        finally:
+            await self._executor.run(_shut)
+
+        retrieval_latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        results = []
+        if context and context.strip():
+            results.append({
+                "content": context,
+                "score": 1.0,
+                "metadata": {"source": "prefetch"},
+            })
+
+        return SearchResult(
+            query=query,
+            conversation_id=conversation_id,
+            results=results,
+            retrieval_metadata={
+                "system": "hermes",
+                "plugin": self._plugin_name,
+                "strategy": self._ingest_strategy,
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "formatted_context": context or "",
+                "conversation_id": conversation_id,
+            },
+        )

@@ -189,3 +189,48 @@ def test_build_lazy_index_rehydrates_from_handle(tmp_path, stub_provider):
     assert index["type"] == "hermes_sandboxes"
     assert set(index["conversations"]) == {"c1", "c2"}
     assert all(h["run_status"] == "ready" for h in index["conversations"].values())
+
+
+def test_search_returns_prefetch_context(tmp_path, stub_provider):
+    from evaluation.src.adapters.hermes_adapter import HermesAdapter
+
+    adapter = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    index = asyncio.run(adapter.add(
+        conversations=[_make_conv("c1")],
+        output_dir=tmp_path,
+    ))
+
+    stub_provider.prefetch_result = "RECALLED: the memory was here"
+    result = asyncio.run(adapter.search(
+        query="what happened?",
+        conversation_id="c1",
+        index=index,
+    ))
+
+    assert result.query == "what happened?"
+    assert result.conversation_id == "c1"
+    assert len(result.results) == 1
+    assert result.results[0]["content"] == "RECALLED: the memory was here"
+    assert "retrieval_latency_ms" in result.retrieval_metadata
+    assert result.retrieval_metadata["plugin"] == "stub"
+    assert result.retrieval_metadata["strategy"] == "sync_per_turn"
+
+    # session_id contract: prefetch sees conv1, never anything else
+    prefetch_calls = [c for c in stub_provider.calls if c[0] == "prefetch"]
+    assert prefetch_calls and all(c[1] == "c1" for c in prefetch_calls)
+
+
+def test_search_empty_context_yields_empty_results(tmp_path, stub_provider):
+    from evaluation.src.adapters.hermes_adapter import HermesAdapter
+
+    adapter = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    index = asyncio.run(adapter.add(
+        conversations=[_make_conv("c1")],
+        output_dir=tmp_path,
+    ))
+    stub_provider.prefetch_result = ""
+
+    result = asyncio.run(adapter.search(
+        query="anything?", conversation_id="c1", index=index,
+    ))
+    assert result.results == []
