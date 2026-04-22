@@ -212,6 +212,7 @@ docs/api_docs/profile_extraction_fields.md
 !.claude/rules/
 !.claude/setup.sh
 !.claude/ROUTINE_PROMPT.md
+!.claude/FIRST_RUN_CHECKLIST.md
 .cursor/*
 
 #tmp_data

@@ -31,9 +31,9 @@ python -c "from evaluation.src.adapters.registry import list_adapters; assert '<
 : "${LLM_API_KEY:?LLM_API_KEY (OpenRouter key sk-or-v1-...) is required}"
 : "${LLM_BASE_URL:=https://openrouter.ai/api/v1}"
 
-# 5. LoCoMo data is present
-test -f evaluation/data/locomo10.json || {
-  echo "LoCoMo data missing — run the data-download script"
+# 5. LoCoMo data is present (path must match .claude/setup.sh)
+test -f evaluation/data/locomo/locomo10.json || {
+  echo "LoCoMo data missing at evaluation/data/locomo/locomo10.json — run setup.sh first"
   exit 1
 }
 ```
@@ -155,9 +155,13 @@ for START in $(seq 0 "$BATCH_SIZE" $((NCONVS - 1))); do
   BATCH_DIR="$FULL_BASE/batch-$BATCH_IDX-convs-$START-$((END - 1))"
   echo "=== Batch $BATCH_IDX: convs [$START, $END) → $BATCH_DIR ==="
 
-  # Restart candidate stack to free transient memory between batches
-  if [ -d /tmp/candidate/<name> ]; then
-    docker compose -p auto-bench-<name> -f /tmp/candidate/<name>/docker-compose.yaml restart
+  # Restart candidate stack to free transient memory between batches.
+  # Guard on the compose FILE existing (not just the candidate dir) — SDK-only
+  # candidates are cloned to /tmp/candidate/<name>/ without a compose file and
+  # must skip this step.
+  CANDIDATE_COMPOSE="/tmp/candidate/<name>/docker-compose.yaml"
+  if [ -f "$CANDIDATE_COMPOSE" ]; then
+    docker compose -p auto-bench-<name> -f "$CANDIDATE_COMPOSE" restart
     sleep 20  # let the stack settle
   fi
 
@@ -275,12 +279,17 @@ Do NOT overwrite the file blindly — read it, update the single entry, write it
 This is CRITICAL. Without teardown, the next routine run will OOM on startup.
 
 ```bash
-# Stop candidate stack
-if [ -d /tmp/candidate/<name> ]; then
-  docker compose -p auto-bench-<name> -f /tmp/candidate/<name>/docker-compose.yaml down -v
+# Stop candidate stack — guard on the compose FILE, not the candidate dir.
+# SDK-only candidates have a /tmp/candidate/<name>/ clone but no compose file,
+# so this step must be a no-op for them.
+CANDIDATE_COMPOSE="/tmp/candidate/<name>/docker-compose.yaml"
+if [ -f "$CANDIDATE_COMPOSE" ]; then
+  docker compose -p auto-bench-<name> -f "$CANDIDATE_COMPOSE" down -v
 fi
 
-# Clean any orphaned candidate volumes (project-scoped only)
+# Clean any orphaned candidate volumes (project-scoped only).
+# Safe for SDK-only candidates: if no stack was ever started, the filter
+# returns no volumes and xargs -r is a no-op.
 docker volume ls --filter "label=com.docker.compose.project=auto-bench-<name>" -q | xargs -r docker volume rm
 
 # If EverOS stack was stopped earlier and the next step needs it, restart here.
