@@ -1,0 +1,29 @@
+adapter: "hermes"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+
+hermes:
+  repo_path: "${HERMES_REPO_PATH}"
+  plugin: "holographic"
+  ingest_strategy: "session_end"
+  plugin_config:
+    auto_extract: true
+    default_trust: 0.5
+    hrr_dim: 1024
+  prompts:
+    answer_mode: "shared"

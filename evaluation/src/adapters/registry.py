@@ -26,6 +26,9 @@ _ADAPTER_MODULES = {
     # OpenClaw memory system (via Node bridge)
     "openclaw": "evaluation.src.adapters.openclaw_adapter",
 
+    # Hermes memory system (via path-mounted in-process import)
+    "hermes": "evaluation.src.adapters.hermes_adapter",
+
     # Future systems:
     # "nemori": "evaluation.src.adapters.nemori_adapter",
 }
