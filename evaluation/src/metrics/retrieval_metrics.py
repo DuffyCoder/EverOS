@@ -12,7 +12,7 @@ import math
 import re
 from typing import Iterable
 
-from evaluation.src.adapters.openclaw.manifest import project_message_id_to_session_id
+from evaluation.src.adapters.openclaw_manifest import project_message_id_to_session_id
 
 
 _EVIDENCE_SPLIT = re.compile(r"[;,\s]+")
