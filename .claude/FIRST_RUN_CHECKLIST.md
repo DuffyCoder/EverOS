@@ -62,6 +62,11 @@ never contained it). Click "Run now" again. Watch the live log.
         `RERANK_BASE_URL` — only if the integrated baseline system requires
         them (evermemos does — uses Sophnet for embeddings and SiliconFlow
         for rerank; most candidates will not).
+      - `MONGODB_HOST` is NOT required here — `setup.sh` writes a stub
+        value to `.env` so the harness boots. Auto-bench candidates never
+        touch EverOS Mongo. Set it only if you plan to run an integrated
+        system (e.g. evermemos) from the same routine, which this routine
+        is not designed for.
 
 ## 5. Post-enable guardrails
 

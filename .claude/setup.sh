@@ -36,6 +36,24 @@ if (( ${#missing[@]} > 0 )); then
 fi
 echo "::endgroup::"
 
+echo "::group::Harness boot prereq (.env + MONGODB_HOST)"
+# src/common_utils/load_env.py gates CLI startup on a .env file existing AND
+# check_env_var=MONGODB_HOST being set — even though auto-bench candidates
+# never touch EverOS Mongo. Provide a stub so the harness boots; a real value
+# is not needed because no code path actually connects with it.
+export MONGODB_HOST="${MONGODB_HOST:-auto-bench-unused-stub}"
+if [[ ! -f .env ]] || ! grep -q '^MONGODB_HOST=' .env; then
+  {
+    echo "# stub written by .claude/setup.sh — auto-bench candidates do not use EverOS Mongo."
+    echo "# Real Mongo config lives in the operator's own .env for interactive sessions."
+    echo "MONGODB_HOST=${MONGODB_HOST}"
+  } >> .env
+  echo "  ✅ wrote stub MONGODB_HOST to .env"
+else
+  echo "  ✅ .env already contains MONGODB_HOST"
+fi
+echo "::endgroup::"
+
 echo "::group::LoCoMo dataset"
 if [[ ! -f evaluation/data/locomo/locomo10.json ]]; then
   echo "  ❌ evaluation/data/locomo/locomo10.json missing"
