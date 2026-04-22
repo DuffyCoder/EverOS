@@ -20,7 +20,13 @@ class LLMProvider:
         max_tokens: int | None = None,
         extra_body: dict | None = None,
         response_format: dict | None = None,
+        system_prompt: str | None = None,
     ) -> str:
         return await self.provider.generate(
-            prompt, temperature, max_tokens, extra_body, response_format
+            prompt,
+            temperature,
+            max_tokens,
+            extra_body,
+            response_format,
+            system_prompt=system_prompt,
         )
