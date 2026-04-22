@@ -20,7 +20,7 @@
 set -euo pipefail
 
 DATASET="locomo"
-SYSTEMS=("evermemos" "openclaw-native-embed" "openclaw-native-noembed")
+SYSTEMS=("evermemos" "openclaw" "openclaw-fts")
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
@@ -35,7 +35,16 @@ step_a() {
   for sys in "${SYSTEMS[@]}"; do
     for run in 1 2 3; do
       OUT="$RESULTS_ROOT/step_a-${sys}-r${run}"
+      if [ -f "$OUT/benchmark_summary.json" ]; then
+        log "  ↪ skip $sys run $run (already has benchmark_summary.json)"
+        continue
+      fi
       log "  → $sys run $run → $OUT"
+      # ``|| true`` lets the pipeline exit non-zero without aborting
+      # under ``set -eo pipefail``; PIPESTATUS[0] then exposes python's
+      # own exit code so the warning says *which* end failed rather
+      # than conflating python vs tee. Single-run upstream failure is
+      # logged but doesn't stop the sweep.
       uv run python -m evaluation.cli \
         --dataset "$DATASET" \
         --system "$sys" \
@@ -44,7 +53,11 @@ step_a() {
         --deadline-ms 120000 \
         --run-name "latency-baseline-a-r${run}" \
         --output-dir "$OUT" \
-        2>&1 | tee "$OUT.log"
+        2>&1 | tee "$OUT.log" || true
+      rc=${PIPESTATUS[0]}
+      if [ "$rc" -ne 0 ]; then
+        log "  ⚠ $sys run $run failed (rc=$rc) — continuing"
+      fi
     done
   done
   log "Step A done. Results root: $RESULTS_ROOT"
@@ -54,6 +67,10 @@ step_b() {
   log "Step B — throughput baseline (default concurrency, realistic, full 1540q)"
   for sys in "${SYSTEMS[@]}"; do
     OUT="$RESULTS_ROOT/step_b-${sys}"
+    if [ -f "$OUT/benchmark_summary.json" ]; then
+      log "  ↪ skip $sys (already has benchmark_summary.json)"
+      continue
+    fi
     log "  → $sys → $OUT"
     uv run python -m evaluation.cli \
       --dataset "$DATASET" \
@@ -62,7 +79,11 @@ step_b() {
       --deadline-ms 600000 \
       --run-name "latency-baseline-b" \
       --output-dir "$OUT" \
-      2>&1 | tee "$OUT.log"
+      2>&1 | tee "$OUT.log" || true
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" -ne 0 ]; then
+      log "  ⚠ $sys failed (rc=$rc) — continuing"
+    fi
   done
   log "Step B done. Results root: $RESULTS_ROOT"
 }
