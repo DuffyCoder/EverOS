@@ -117,6 +117,7 @@ def test_add_writes_handle_and_runs_ingest_sync_per_turn(tmp_path, stub_provider
     assert handle["run_status"] == "ready"
     assert handle["plugin"] == "stub"
     assert handle["ingest_turns"] == 1
+    assert "hermes_commit" in handle  # best-effort, may be "unknown"
 
     # sync_per_turn → exactly one sync_turn, no on_session_end
     kinds = [c[0] for c in stub_provider.calls]
@@ -171,6 +172,7 @@ def test_add_records_failed_handle_when_init_raises(tmp_path, stub_provider):
     handle = json.loads(handle_path.read_text())
     assert handle["run_status"] == "failed"
     assert "init boom" in handle["error"]
+    assert "hermes_commit" in handle
 
 
 def test_build_lazy_index_rehydrates_from_handle(tmp_path, stub_provider):
@@ -234,6 +236,28 @@ def test_search_empty_context_yields_empty_results(tmp_path, stub_provider):
         query="anything?", conversation_id="c1", index=index,
     ))
     assert result.results == []
+
+
+def test_search_auto_prepares_when_not_prepared(tmp_path, stub_provider):
+    """search() after build_lazy_index() must auto-prepare (resume path)."""
+    from evaluation.src.adapters.hermes_adapter import HermesAdapter
+
+    # First adapter performs the full add() to lay down sandboxes.
+    adapter1 = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    asyncio.run(adapter1.add(
+        conversations=[_make_conv("c1")],
+        output_dir=tmp_path,
+    ))
+
+    # Fresh adapter simulates a resume session: no add(), only build_lazy_index.
+    adapter2 = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    index = adapter2.build_lazy_index([_make_conv("c1")], tmp_path)
+
+    # search() must still work without an explicit prepare() call.
+    result = asyncio.run(adapter2.search(
+        query="anything?", conversation_id="c1", index=index,
+    ))
+    assert result.conversation_id == "c1"
 
 
 def test_answer_uses_shared_prompt_template_with_fallback(tmp_path, stub_provider, monkeypatch):

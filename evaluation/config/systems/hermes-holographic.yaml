@@ -1,3 +1,5 @@
+# Explicit alias for hermes.yaml — holographic is the default variant.
+# Kept as a separate file so users can reference it by its plugin name.
 adapter: "hermes"
 
 llm:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -45,6 +46,23 @@ def _load_memory_provider(name: str):
     """Indirection so tests can swap in stubs without needing a real hermes repo."""
     from plugins.memory import load_memory_provider  # noqa: E402
     return load_memory_provider(name)
+
+
+def _get_hermes_commit(repo_path: str) -> str:
+    """Best-effort git commit hash of the mounted hermes repo.
+
+    Returns ``"unknown"`` on any failure (missing git, dirty path, etc.)
+    so runs remain reproducible-by-reference without ever crashing.
+    """
+    if not repo_path:
+        return "unknown"
+    try:
+        return subprocess.check_output(
+            ["git", "-C", repo_path, "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 
 @register_adapter("hermes")
@@ -111,7 +129,7 @@ class HermesAdapter(BaseAdapter):
         runs.sort(key=lambda p: p.stat().st_mtime)
         return runs[-1]
 
-    # -- required BaseAdapter methods (stubbed for now — filled later) ----
+    # -- core BaseAdapter methods -----------------------------------------
     async def add(
         self,
         conversations: List[Conversation],
@@ -138,6 +156,7 @@ class HermesAdapter(BaseAdapter):
 
             handle_path = sandbox_dir / "handle.json"
             t0 = time.perf_counter()
+            hermes_commit = _get_hermes_commit(self._repo_path)
             try:
                 provider = _load_memory_provider(self._plugin_name)
                 if provider is None:
@@ -159,6 +178,7 @@ class HermesAdapter(BaseAdapter):
                     "plugin": self._plugin_name,
                     "strategy": self._ingest_strategy,
                     "hermes_home": str(sandbox_dir),
+                    "hermes_commit": hermes_commit,
                     "ingest_turns": ingest_turns,
                     "ingest_latency_ms": (time.perf_counter() - t0) * 1000.0,
                     "run_id": run_id,
@@ -170,6 +190,7 @@ class HermesAdapter(BaseAdapter):
                     "plugin": self._plugin_name,
                     "strategy": self._ingest_strategy,
                     "hermes_home": str(sandbox_dir),
+                    "hermes_commit": hermes_commit,
                     "error": f"{type(err).__name__}: {err}",
                     "run_id": run_id,
                 }
@@ -289,6 +310,12 @@ class HermesAdapter(BaseAdapter):
         }
 
     async def search(self, query: str, conversation_id: str, index: Any, **kwargs) -> SearchResult:
+        if not self._prepared:
+            # Resume-path: build_lazy_index() was used without a prior add()
+            # in this process. We still need sys.path mounted and the
+            # executor constructed.
+            await self.prepare(conversations=[], output_dir=self.output_dir)
+
         conv_entry = index["conversations"].get(conversation_id)
         if conv_entry is None:
             raise KeyError(f"no hermes sandbox for conversation {conversation_id}")
