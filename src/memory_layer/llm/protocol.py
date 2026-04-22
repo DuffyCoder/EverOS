@@ -21,13 +21,20 @@ class LLMProvider(Protocol):
         temperature: float | None = None,
         extra_body: dict | None = None,
         response_format: dict | None = None,
+        system_prompt: str | None = None,
     ) -> str:
         """
         Generate a response for the given prompt.
 
         Args:
-            prompt: Input prompt text
-            temperature: Optional temperature override for this request
+            prompt: Input prompt text (becomes the ``user`` role message).
+            temperature: Optional temperature override for this request.
+            system_prompt: When provided, sent as a separate ``system`` role
+                message ahead of ``prompt``. Callers that previously
+                concatenated system+user into one string (and relied on
+                the LLM to infer roles from position) should migrate to
+                this kwarg so role separation is explicit and model
+                behaviour stays stable across provider deployments.
 
         Returns:
             Generated response text

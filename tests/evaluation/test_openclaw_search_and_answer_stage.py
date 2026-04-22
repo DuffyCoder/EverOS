@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 from evaluation.src.core.data_models import (
     Conversation,
     QAPair,
@@ -163,7 +163,7 @@ async def test_openclaw_search_uses_bridge_and_attaches_source_sessions(
         }
 
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge",
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge",
         fake_arun_bridge,
     )
 
@@ -250,7 +250,7 @@ async def test_openclaw_search_then_get_replaces_snippet_via_get(
         raise AssertionError(f"unexpected command: {payload['command']}")
 
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge",
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge",
         fake_arun_bridge,
     )
 

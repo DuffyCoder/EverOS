@@ -204,9 +204,12 @@ class EventLogExtractor:
                 f"atomic_fact is not a list: {type(event_log_data['atomic_fact'])}"
             )
 
-        # Validate atomic_fact is not empty
+        # Empty atomic_fact is a valid result (e.g. pure greetings filtered
+        # by prompt rule #5). Return None so the caller skips this memcell's
+        # event_log gracefully instead of retrying the same empty input.
         if len(event_log_data["atomic_fact"]) == 0:
-            raise ValueError("atomic_fact list is empty")
+            logger.info("atomic_fact list is empty — no retrievable facts; returning None")
+            return None
 
         # 6. Batch generate embedding for all atomic_fact (performance optimization)
         from agentic_layer.vectorize_service import get_vectorize_service
