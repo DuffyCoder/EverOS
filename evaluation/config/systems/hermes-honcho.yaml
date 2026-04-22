@@ -1,0 +1,27 @@
+adapter: "hermes"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+
+hermes:
+  repo_path: "${HERMES_REPO_PATH}"
+  plugin: "honcho"
+  ingest_strategy: "sync_per_turn"
+  # Honcho reads HONCHO_API_KEY from the process env — do not duplicate here.
+  plugin_config: {}
+  prompts:
+    answer_mode: "shared"
