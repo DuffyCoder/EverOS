@@ -59,13 +59,40 @@ test -f evaluation/data/locomo/locomo10.json || {
 
      Now the full 14 GB is available for the candidate.
 
-3. If the candidate ships its own `docker-compose.yaml`, start it with a unique project name:
+3. If the candidate ships its own `docker-compose.yaml`, start it with a unique project name and WAIT until every service reports healthy (or, for services without a healthcheck block, until the container is running). Do not proceed on a fixed `sleep` — heavy candidates (vector DBs loading large embedding stores, JVM services) routinely need minutes, not seconds:
 
    ```bash
    cd /tmp/candidate/<name>/
    docker compose -p auto-bench-<name> up -d
-   # Wait for health checks
-   docker compose -p auto-bench-<name> ps
+
+   # Poll until healthy or running, hard ceiling at 180s
+   await_stack_ready() {
+     local project="$1"
+     local deadline=$(( $(date +%s) + 180 ))
+     while [ $(date +%s) -lt $deadline ]; do
+       local containers
+       containers=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}')
+       [ -z "$containers" ] && { echo "no containers for project=$project"; return 1; }
+       local unhealthy=0
+       for c in $containers; do
+         status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$c")
+         case "$status" in
+           healthy|running) ;;
+           starting) unhealthy=1 ;;
+           *) echo "container $c status=$status"; unhealthy=1 ;;
+         esac
+       done
+       [ "$unhealthy" = 0 ] && { echo "all containers ready"; return 0; }
+       sleep 3
+     done
+     echo "stack not ready within 180s"
+     docker compose -p "$project" ps
+     return 1
+   }
+   await_stack_ready "auto-bench-<name>" || {
+     docker compose -p auto-bench-<name> logs --tail 100
+     exit 1
+   }
    ```
 
    Project-name isolation prevents candidate services with generic names (`postgres`, `redis`, `chroma`, etc.) from colliding with EverOS's own stack IF you later decide to run both. For this routine we always stop EverOS first, so this is belt-and-suspenders.
@@ -162,7 +189,10 @@ for START in $(seq 0 "$BATCH_SIZE" $((NCONVS - 1))); do
   CANDIDATE_COMPOSE="/tmp/candidate/<name>/docker-compose.yaml"
   if [ -f "$CANDIDATE_COMPOSE" ]; then
     docker compose -p auto-bench-<name> -f "$CANDIDATE_COMPOSE" restart
-    sleep 20  # let the stack settle
+    await_stack_ready "auto-bench-<name>" || {
+      docker compose -p auto-bench-<name> logs --tail 100
+      exit 1
+    }
   fi
 
   uv run python -m evaluation.cli \

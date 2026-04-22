@@ -28,6 +28,48 @@ The alternative (inherit `BaseAdapter` directly) would drop the concurrency/pers
 - Do NOT use this skill on `evermemos` or any `status: integrated` system in `seen_systems.json`.
 - Do NOT use this skill to modify an existing adapter — this skill only creates new files.
 
+## Preflight: upstream fork-sync collision check
+
+Run this BEFORE writing any file for a new candidate. The routine operates on the `DuffyCoder/EverOS` fork; if the upstream `EverMind-AI/EverMemOS` already added an adapter with the same name (via a human PR, not this routine), writing our skeleton will either clobber their file on the next sync or produce a conflicting registry entry:
+
+```bash
+# Require the upstream remote to be configured — setup.sh should ensure this,
+# but be defensive because routine sessions don't always control git state.
+git remote get-url upstream >/dev/null 2>&1 || {
+  echo "ABORT: no 'upstream' remote configured; cannot check for name collision"
+  exit 1
+}
+
+git fetch upstream main --quiet || {
+  echo "ABORT: upstream fetch failed; cannot verify adapter name is unclaimed"
+  exit 1
+}
+
+# Check the two files this skill is about to create.
+for path in \
+  "evaluation/src/adapters/<name>_adapter.py" \
+  "evaluation/config/systems/<name>.yaml"
+do
+  if git show "upstream/main:${path}" >/dev/null 2>&1; then
+    echo "ABORT: upstream/main already contains ${path}"
+    echo "       Record candidate as status=needs-revisit in seen_systems.json"
+    echo "       and skip. Do NOT write files that would collide with upstream."
+    exit 1
+  fi
+done
+
+# Also check the registry entry key — upstream may have added a mapping
+# even if their file path differs.
+if git show "upstream/main:evaluation/src/adapters/registry.py" 2>/dev/null | \
+   grep -q "\"<name>\":"
+then
+  echo "ABORT: upstream/main registry.py already maps '<name>' to an adapter"
+  exit 1
+fi
+```
+
+If any of these aborts fires, mark the candidate with `status: "needs-revisit"` in `seen_systems.json` with a note explaining the upstream collision, and let a human resolve the name conflict in a separate PR.
+
 ## Hard rules (the non-negotiables)
 
 **Rule A — Black-box local integration.** The new adapter MUST inherit from `OnlineAPIAdapter` (from `evaluation.src.adapters.online_base`) — see the naming clarification above. Do NOT inherit from `BaseAdapter` directly. Do NOT import anything from `src/memory_layer/` or `src/agentic_layer/` — those are EverMemOS internals reserved for the privileged `evermemos_adapter.py` path. The candidate must be treated as a black box: call its public SDK or HTTP endpoints only, never reach into EverMemOS primitives.
