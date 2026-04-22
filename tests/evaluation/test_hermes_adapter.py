@@ -171,3 +171,21 @@ def test_add_records_failed_handle_when_init_raises(tmp_path, stub_provider):
     handle = json.loads(handle_path.read_text())
     assert handle["run_status"] == "failed"
     assert "init boom" in handle["error"]
+
+
+def test_build_lazy_index_rehydrates_from_handle(tmp_path, stub_provider):
+    from evaluation.src.adapters.hermes_adapter import HermesAdapter
+
+    adapter = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    asyncio.run(adapter.add(
+        conversations=[_make_conv("c1"), _make_conv("c2")],
+        output_dir=tmp_path,
+    ))
+
+    # Fresh adapter instance — simulates a resume-from-disk run
+    adapter2 = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    index = adapter2.build_lazy_index([_make_conv("c1"), _make_conv("c2")], tmp_path)
+
+    assert index["type"] == "hermes_sandboxes"
+    assert set(index["conversations"]) == {"c1", "c2"}
+    assert all(h["run_status"] == "ready" for h in index["conversations"].values())

@@ -249,5 +249,44 @@ class HermesAdapter(BaseAdapter):
         payload = {"plugins": {"hermes-memory-store": dict(self._plugin_config)}}
         config_path.write_text(yaml.dump(payload, default_flow_style=False))
 
+    def build_lazy_index(
+        self, conversations: List[Conversation], output_dir: Any
+    ) -> dict:
+        """Rehydrate lazy index from handle.json files on disk.
+
+        Locates existing sandboxes from a prior add() run and builds index
+        metadata by reading handle.json for each conversation. This enables
+        checkpoint/resume workflows where search() can be called without
+        re-running add().
+
+        Args:
+            conversations: Conversation list (used to filter which handles to load)
+            output_dir: Base output directory where artifacts/hermes/ lives
+
+        Returns:
+            Dict with keys:
+              - type: "hermes_sandboxes"
+              - run_id: The run ID from the existing artifacts
+              - root_dir: Full path to the run root
+              - conversations: Dict mapping conversation_id to handle dict
+                              (includes all fields from handle.json + handle_path)
+        """
+        root_dir = self._locate_existing_run_root(Path(output_dir))
+        handles: dict[str, dict] = {}
+        for conv in conversations:
+            handle_path = root_dir / "conversations" / conv.conversation_id / "handle.json"
+            if not handle_path.exists():
+                continue
+            handle = json.loads(handle_path.read_text())
+            if handle.get("run_status") != "ready":
+                continue
+            handles[conv.conversation_id] = {**handle, "handle_path": str(handle_path)}
+        return {
+            "type": "hermes_sandboxes",
+            "run_id": root_dir.name,
+            "root_dir": str(root_dir),
+            "conversations": handles,
+        }
+
     async def search(self, query: str, conversation_id: str, index: Any, **kwargs) -> SearchResult:
         raise NotImplementedError("Task 7 implements search()")
