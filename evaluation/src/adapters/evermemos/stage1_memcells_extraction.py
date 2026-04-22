@@ -495,14 +495,22 @@ async def process_single_conversation(
             extract_with_semaphore(idx, memcell)
             for idx, memcell in memcells_with_episode
         ]
-        event_log_results = await asyncio.gather(*event_log_tasks)
+        event_log_results = await asyncio.gather(
+            *event_log_tasks, return_exceptions=True
+        )
 
-        for original_idx, event_log in event_log_results:
+        success_count = 0
+        for result in event_log_results:
+            if isinstance(result, Exception):
+                print(f"⚠️  Skipping memcell with event log failure: {result}")
+                continue
+            original_idx, event_log = result
             if event_log:
                 memcell_list[original_idx].event_log = event_log
+                success_count += 1
 
         print(
-            f"✅ Event log extraction complete: {sum(1 for _, el in event_log_results if el)}/{len(event_log_results)} succeeded"
+            f"✅ Event log extraction complete: {success_count}/{len(event_log_results)} succeeded"
         )
 
     # Save single conversation results
