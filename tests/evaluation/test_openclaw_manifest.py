@@ -3,7 +3,7 @@ Task 2: session manifest + message-to-session projector.
 """
 import pytest
 
-from evaluation.src.adapters.openclaw_manifest import (
+from evaluation.src.adapters.openclaw.manifest import (
     build_session_manifest,
     project_message_id_to_session_id,
 )

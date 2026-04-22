@@ -24,7 +24,7 @@ _ADAPTER_MODULES = {
     "supermemory": "evaluation.src.adapters.supermemory_adapter",
 
     # OpenClaw memory system (via Node bridge)
-    "openclaw": "evaluation.src.adapters.openclaw_adapter",
+    "openclaw": "evaluation.src.adapters.openclaw.adapter",
 
     # Future systems:
     # "nemori": "evaluation.src.adapters.nemori_adapter",
