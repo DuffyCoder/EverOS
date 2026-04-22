@@ -54,7 +54,7 @@ def load_env_file(
         return False
 
     try:
-        load_dotenv(env_file_path)
+        load_dotenv(env_file_path, override=True)
         logger.debug("Successfully loaded .env file: %s", env_file_path)
     except (IOError, OSError) as e:
         logger.error("Failed to load .env file: %s", e)
