@@ -13,7 +13,7 @@ The base class is called `OnlineAPIAdapter` for historical reasons. Do not read 
 
 1. Conversation-level concurrency control (`num_workers` semaphore).
 2. Dual-perspective handling for LoCoMo's `speaker_a` / `speaker_b`.
-3. `answer()` implementation built on `LLMProvider` (OpenRouter).
+3. `answer()` implementation built on `LLMProvider` (Sophnet via LLMProvider).
 
 The local-vs-SaaS distinction is enforced at discovery time (Rule 1 rejects SaaS candidates), not at the base-class level. Proof: `evermemos_api_adapter.py` is a local-HTTP adapter (`http://localhost:1995`) and inherits `OnlineAPIAdapter` — it is the canonical reference for this skill.
 
@@ -74,7 +74,7 @@ If any of these aborts fires, mark the candidate with `status: "needs-revisit"` 
 
 **Rule A — Black-box local integration.** The new adapter MUST inherit from `OnlineAPIAdapter` (from `evaluation.src.adapters.online_base`) — see the naming clarification above. Do NOT inherit from `BaseAdapter` directly. Do NOT import anything from `src/memory_layer/` or `src/agentic_layer/` — those are EverMemOS internals reserved for the privileged `evermemos_adapter.py` path. The candidate must be treated as a black box: call its public SDK or HTTP endpoints only, never reach into EverMemOS primitives.
 
-**Rule B — Force LLM/embedding to OpenRouter.** The system config's `llm:` block MUST read `api_key: "${LLM_API_KEY}"` and `base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"` and `model: "openai/gpt-4.1-mini"` (the fairness baseline). If the candidate also has its own internal LLM/embedding config (e.g. writes calls to Ollama or a bundled local model), the adapter's `__init__` MUST override those at runtime using `os.environ["LLM_BASE_URL"]` and `os.environ["LLM_API_KEY"]` before constructing the candidate's client.
+**Rule B — Force LLM/embedding to the fairness-baseline provider.** The system config's `llm:` block MUST read `api_key: "${LLM_API_KEY}"` and `base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"` and `model: "openai/gpt-4.1-mini"`. The baseline is **Sophnet** (same stack as the integrated `evermemos` system — keeps cross-system comparisons apples-to-apples). If the candidate also has its own internal LLM/embedding config (e.g. writes calls to Ollama or a bundled local model), the adapter's `__init__` MUST override those at runtime using `os.environ["LLM_BASE_URL"]` and `os.environ["LLM_API_KEY"]` before constructing the candidate's client.
 
 **Rule C — No dependency changes.** If the candidate requires a new pip package that is not already in `pyproject.toml [project.optional-dependencies] evaluation-full`, STOP. Do not edit `pyproject.toml`. Write the adapter file skeleton anyway but mark the import with:
 
@@ -98,7 +98,7 @@ Use this skeleton. Fill in the four clearly-marked TODO blocks.
 
 ```python
 """
-<SystemName> Adapter — local black-box integration, OpenRouter-rewritten LLM.
+<SystemName> Adapter — local black-box integration, fairness-baseline LLM (Sophnet).
 
 Auto-bench routine notes:
 - Inherits OnlineAPIAdapter template method.
@@ -132,7 +132,7 @@ class <SystemName>Adapter(OnlineAPIAdapter):
     llm:
       model: "openai/gpt-4.1-mini"
       api_key: "${LLM_API_KEY}"
-      base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
+      base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
     ```
     """
 
@@ -337,12 +337,12 @@ num_workers: 5
 search:
   top_k: 20
 
-# LLM configuration — FORCED to OpenRouter (Rule B, non-negotiable)
+# LLM configuration — FORCED to fairness-baseline provider (Sophnet) per Rule B, non-negotiable
 llm:
   provider: "openai"
   model: "openai/gpt-4.1-mini"
   api_key: "${LLM_API_KEY}"
-  base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0
   max_tokens: 32768
 

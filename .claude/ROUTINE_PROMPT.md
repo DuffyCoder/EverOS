@@ -54,7 +54,7 @@ Run, in order:
 
 - Only benchmark systems with a local memory backend (Rule 1 in the rules).
 - LLM/embedding config MUST be rewritten to `${LLM_API_KEY}` /
-  `${LLM_BASE_URL}` (OpenRouter) before smoke (Rule 2).
+  `${LLM_BASE_URL}` (Sophnet fairness baseline) before smoke (Rule 2).
 - If `estimated_ram_gb > 14` after stopping EverOS stack, run LoCoMo in
   batches via `--from-conv`/`--to-conv` (Rule 3); the run-bench skill handles
   the per-batch `--output-dir` isolation and the completeness assertion.

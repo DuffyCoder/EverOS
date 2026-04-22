@@ -25,7 +25,7 @@ How to check: read the system's README and quickstart. Look for:
 If in doubt, look at the actual code of the quickstart example. If the quickstart `import` line gives a class that takes a base URL pointing at the vendor's domain, it fails Rule 1.
 
 **Rule 2 — Configurable LLM and embedding**
-The system's LLM and embedding model choices must be reconfigurable. The benchmark will rewrite them to point at OpenRouter via `LLM_BASE_URL` and `LLM_API_KEY`.
+The system's LLM and embedding model choices must be reconfigurable. The benchmark will rewrite them to point at the fairness-baseline provider (Sophnet, `https://www.sophnet.com/api/open-apis/v1`, model `openai/gpt-4.1-mini`) via `LLM_BASE_URL` and `LLM_API_KEY`.
 
 How to check: look for `config.json` / `settings.py` / `LLM_PROVIDER` env var / OpenAI-compatible client usage in the system code.
 

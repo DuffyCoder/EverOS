@@ -28,8 +28,8 @@ test -f evaluation/config/systems/<name>.yaml
 python -c "from evaluation.src.adapters.registry import list_adapters; assert '<name>' in list_adapters()"
 
 # 4. Required env vars are present
-: "${LLM_API_KEY:?LLM_API_KEY (OpenRouter key sk-or-v1-...) is required}"
-: "${LLM_BASE_URL:=https://openrouter.ai/api/v1}"
+: "${LLM_API_KEY:?LLM_API_KEY (Sophnet key — no stable prefix) is required}"
+: "${LLM_BASE_URL:=https://www.sophnet.com/api/open-apis/v1}"
 
 # 5. LoCoMo data is present (path must match .claude/setup.sh)
 test -f evaluation/data/locomo/locomo10.json || {

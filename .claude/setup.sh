@@ -25,10 +25,8 @@ echo "::endgroup::"
 echo "::group::Environment sanity"
 missing=()
 [[ -z "${LLM_API_KEY:-}" ]] && missing+=("LLM_API_KEY")
-[[ -n "${LLM_API_KEY:-}" ]] && \
-  [[ "${LLM_API_KEY}" != sk-or-v1-* ]] && \
-  echo "  ⚠️  LLM_API_KEY is set but not in OpenRouter format (sk-or-v1-...); fairness baseline assumes OpenRouter."
-export LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
+# Sophnet keys have no stable prefix; only require that the key is non-empty.
+export LLM_BASE_URL="${LLM_BASE_URL:-https://www.sophnet.com/api/open-apis/v1}"
 echo "  LLM_BASE_URL=${LLM_BASE_URL}"
 
 if (( ${#missing[@]} > 0 )); then

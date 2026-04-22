@@ -27,8 +27,8 @@ Click "Run now" and inspect the log:
       valid Python (spot-check the `@register_adapter` decorator and the
       four `_add_user_messages` / `_search_single_user` / `_build_*` overrides).
 - [ ] The generated system YAML has `api_key: "${LLM_API_KEY}"` and
-      `base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"` in its `llm:`
-      block — not the candidate's default.
+      `base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"`
+      in its `llm:` block — not the candidate's default.
 
 If any check fails, fix the skill and re-run dry-run. Do NOT proceed.
 
@@ -54,12 +54,14 @@ never contained it). Click "Run now" again. Watch the live log.
       slot). Pro plan has 5 runs/day — weekly is safe, but do not chain this
       routine with others that also consume the budget.
 - [ ] Configure required env vars in the routine's env section:
-      - `LLM_API_KEY=sk-or-v1-...` (OpenRouter)
-      - `LLM_BASE_URL=https://openrouter.ai/api/v1` (optional; skill defaults
-        to this)
-      - `VECTORIZE_API_KEY` / `RERANK_API_KEY` only if the integrated
-        baseline system requires them (evermemos does; most candidates will
-        not).
+      - `LLM_API_KEY=<sophnet-project-key>` (Sophnet key; no stable prefix —
+        copy the exact value from the project's .env)
+      - `LLM_BASE_URL=https://www.sophnet.com/api/open-apis/v1` (optional;
+        skill defaults to this)
+      - `VECTORIZE_API_KEY` / `VECTORIZE_BASE_URL` / `RERANK_API_KEY` /
+        `RERANK_BASE_URL` — only if the integrated baseline system requires
+        them (evermemos does — uses Sophnet for embeddings and SiliconFlow
+        for rerank; most candidates will not).
 
 ## 5. Post-enable guardrails
 

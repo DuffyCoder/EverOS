@@ -1,13 +1,13 @@
 {
   "$schema_version": "1.0",
-  "$schema_doc": "Each entry tracks one memory framework the auto-bench routine has considered. Status values: 'integrated' (adapter merged), 'candidate' (adapter being developed), 'rejected' (does not meet decision rules), 'failed' (adapter exists but smoke test failed), 'needs-revisit' (re-evaluate when upstream changes). Tier values: 'local-with-cloud-llm' (memory backend local, LLM API cloud — ACCEPTED), 'local-with-local-llm' (everything local incl. inference — REWRITE config to OpenRouter), 'saas-only' (memory operations require vendor SaaS — REJECTED).",
-  "$decision_rules_version": "2026-04-21",
+  "$schema_doc": "Each entry tracks one memory framework the auto-bench routine has considered. Status values: 'integrated' (adapter merged), 'candidate' (adapter being developed), 'rejected' (does not meet decision rules), 'failed' (adapter exists but smoke test failed), 'needs-revisit' (re-evaluate when upstream changes). Tier values: 'local-with-cloud-llm' (memory backend local, LLM API cloud — ACCEPTED), 'local-with-local-llm' (everything local incl. inference — REWRITE config to the fairness-baseline provider), 'saas-only' (memory operations require vendor SaaS — REJECTED). Fairness-baseline provider: Sophnet (https://www.sophnet.com/api/open-apis/v1) serving openai/gpt-4.1-mini.",
+  "$decision_rules_version": "2026-04-22",
   "$decision_rules": {
-    "accept": "Memory store / search operations run in a local process or local container. LLM and embedding calls may go to cloud APIs (OpenRouter / OpenAI / etc.).",
-    "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use OpenRouter via LLM_BASE_URL + LLM_API_KEY before benchmarking.",
+    "accept": "Memory store / search operations run in a local process or local container. LLM and embedding calls may go to the fairness-baseline provider (Sophnet) or any OpenAI-compatible endpoint reachable from the cloud runner.",
+    "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-21",
+  "last_updated": "2026-04-22",
   "systems": [
     {
       "name": "evermemos",

@@ -5,7 +5,7 @@ These rules apply ONLY when this session was started by the auto-bench routine. 
 ### Three decision rules (non-negotiable)
 
 1. **Local memory backend only.** Only benchmark systems whose memory store/search runs in a local process or local container. Reject systems whose memory operations require a vendor SaaS endpoint.
-2. **Force LLM/embedding to OpenRouter.** When integrating a candidate, rewrite its LLM and embedding config to use `LLM_BASE_URL` and `LLM_API_KEY` (which are set to OpenRouter). Never benchmark a system using its default local inference model unless that model is < 1 B parameters.
+2. **Force LLM/embedding to the fairness baseline provider.** When integrating a candidate, rewrite its LLM and embedding config to use `LLM_BASE_URL` and `LLM_API_KEY`. The routine's baseline is **Sophnet** (`https://www.sophnet.com/api/open-apis/v1`) serving `openai/gpt-4.1-mini` — the same stack the existing integrated systems (e.g. `evermemos`) are scored against, so comparisons stay apples-to-apples. Never benchmark a system using its own default local inference model unless that model is < 1 B parameters.
 3. **Batch by RAM budget.** The cloud environment has 16 GB RAM. EverOS infra alone uses ~10 GB. If estimated total > 14 GB, run the candidate in batched chunks (split LoCoMo questions into N groups, restart docker stack between groups).
 
 ### File-level scope
