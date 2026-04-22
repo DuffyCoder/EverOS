@@ -1,6 +1,8 @@
 """Tests for hermes_runtime module."""
 from __future__ import annotations
 
+import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -50,3 +52,54 @@ def test_ensure_hermes_importable_rejects_missing_repo(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         ensure_hermes_importable(str(tmp_path / "does-not-exist"))
+
+
+def test_hermes_home_env_sets_and_restores(tmp_path, monkeypatch):
+    from evaluation.src.adapters.hermes_runtime import hermes_home_env
+
+    monkeypatch.setenv("HERMES_HOME", "/old")
+    with hermes_home_env(str(tmp_path)):
+        assert os.environ["HERMES_HOME"] == str(tmp_path)
+    assert os.environ["HERMES_HOME"] == "/old"
+
+
+def test_hermes_home_env_restores_when_unset_before(tmp_path, monkeypatch):
+    from evaluation.src.adapters.hermes_runtime import hermes_home_env
+
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    with hermes_home_env(str(tmp_path)):
+        assert os.environ["HERMES_HOME"] == str(tmp_path)
+    assert "HERMES_HOME" not in os.environ
+
+
+def test_hermes_executor_runs_callables():
+    from evaluation.src.adapters.hermes_runtime import HermesExecutor
+
+    executor = HermesExecutor()
+
+    async def go():
+        return await executor.run(lambda: 1 + 2)
+
+    try:
+        result = asyncio.run(go())
+    finally:
+        executor.shutdown()
+    assert result == 3
+
+
+def test_hermes_executor_propagates_exceptions():
+    from evaluation.src.adapters.hermes_runtime import HermesExecutor
+
+    executor = HermesExecutor()
+
+    def boom():
+        raise RuntimeError("provider exploded")
+
+    async def go():
+        return await executor.run(boom)
+
+    try:
+        with pytest.raises(RuntimeError, match="provider exploded"):
+            asyncio.run(go())
+    finally:
+        executor.shutdown()
