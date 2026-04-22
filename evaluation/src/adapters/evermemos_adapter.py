@@ -151,8 +151,10 @@ class EverMemOSAdapter(BaseAdapter):
         memcells_dir.mkdir(parents=True, exist_ok=True)
         bm25_index_dir = output_dir / "bm25_index"
         emb_index_dir = output_dir / "vectors"
+        metrics_dir = output_dir / "metrics"
         bm25_index_dir.mkdir(parents=True, exist_ok=True)
         emb_index_dir.mkdir(parents=True, exist_ok=True)
+        metrics_dir.mkdir(parents=True, exist_ok=True)
 
         console = Console()
 
@@ -309,9 +311,42 @@ class EverMemOSAdapter(BaseAdapter):
                     )
                     processing_tasks.append((conv_id, task))
 
-                # Define completion update function
+                # Define completion update function. Also writes per-conv
+                # add_summary.json so diagnostics.py can aggregate the
+                # add_latency distribution (p50/p95/max). EverMemOS does
+                # not retry/fallback at the add layer today, so we write
+                # flush_retry_count=0 / flush_fallback=False explicitly -
+                # diagnostics treats "absent" as "not instrumented" and
+                # "0/False" as "instrumented and clean", which the
+                # benchmark summary needs to distinguish.
                 async def run_with_completion(conv_id, task):
-                    result = await task
+                    conv_index = self._extract_conv_index(conv_id)
+                    conv_metrics_dir = metrics_dir / conv_index
+                    conv_metrics_dir.mkdir(parents=True, exist_ok=True)
+                    summary = {
+                        "conv_id": conv_id,
+                        "conv_index": conv_index,
+                        "failed": False,
+                        "flush_retry_count": 0,
+                        "flush_fallback": False,
+                    }
+                    t0 = time.perf_counter()
+                    try:
+                        result = await task
+                    except Exception as exc:
+                        summary["failed"] = True
+                        summary["error"] = repr(exc)
+                        summary["add_latency_ms"] = (time.perf_counter() - t0) * 1000.0
+                        (conv_metrics_dir / "add_summary.json").write_text(
+                            json.dumps(summary, ensure_ascii=False, indent=2)
+                        )
+                        raise
+                    summary["add_latency_ms"] = (time.perf_counter() - t0) * 1000.0
+                    _, memcell_list = result if isinstance(result, tuple) else (conv_id, result)
+                    summary["memcell_count"] = len(memcell_list or [])
+                    (conv_metrics_dir / "add_summary.json").write_text(
+                        json.dumps(summary, ensure_ascii=False, indent=2)
+                    )
                     progress.update(
                         conversation_tasks[conv_id],
                         status="✅",
@@ -320,14 +355,32 @@ class EverMemOSAdapter(BaseAdapter):
                     progress.update(main_task, advance=1)
                     return result
 
-                # Execute all pending tasks concurrently
+                # Execute all pending tasks concurrently.
+                # return_exceptions=True guarantees every sibling task
+                # gets to finish and write its own add_summary.json,
+                # otherwise the first failure would cancel the rest and
+                # corrupt add_failed_rate / add_samples in diagnostics.
                 if processing_tasks:
-                    results = await asyncio.gather(
+                    results_or_exc = await asyncio.gather(
                         *[
                             run_with_completion(conv_id, task)
                             for conv_id, task in processing_tasks
-                        ]
+                        ],
+                        return_exceptions=True,
                     )
+                    results = []
+                    first_exc = None
+                    for item in results_or_exc:
+                        if isinstance(item, BaseException):
+                            first_exc = first_exc or item
+                            continue
+                        results.append(item)
+                    if first_exc is not None:
+                        # Preserve loud-failure semantics: after every
+                        # per-conv summary is persisted, re-raise the
+                        # first exception so the pipeline aborts the run
+                        # the same way it always did.
+                        raise first_exc
                 else:
                     results = []
 
@@ -429,6 +482,7 @@ class EverMemOSAdapter(BaseAdapter):
             "memcells_dir": str(memcells_dir),
             "bm25_index_dir": str(bm25_index_dir),
             "emb_index_dir": str(emb_index_dir),
+            "metrics_dir": str(metrics_dir),
             "conversation_ids": [conv.conversation_id for conv in conversations],
             "use_hybrid_search": use_hybrid,
             "total_conversations": len(conversations),
@@ -455,6 +509,7 @@ class EverMemOSAdapter(BaseAdapter):
 
         Lazy loading: Load indexes from files on demand (memory-friendly).
         """
+        search_t0 = time.perf_counter()
         # Lazy loading - read indexes from files
         bm25_index_dir = Path(index["bm25_index_dir"])
         emb_index_dir = Path(index["emb_index_dir"])
@@ -577,6 +632,26 @@ class EverMemOSAdapter(BaseAdapter):
         # Add formatted_context to metadata
         metadata["formatted_context"] = formatted_context
 
+        # Unify on the shared latency field used by diagnostics.py.
+        # stage3 agentic/lightweight paths emit total_latency_ms; for the
+        # default hybrid path metadata is empty. Measure here so all
+        # branches report retrieval_latency_ms consistently.
+        #
+        # Scope note: this spans the whole search() method, including
+        # on-disk index load, BM25 scoring, embedding lookup, optional
+        # rerank and LLM sufficiency check. OpenClaw's counterpart only
+        # covers the backend call. Do NOT cross-compare this value
+        # across adapters - Phase 1 of the latency-alignment plan (see
+        # docs/latency-alignment.md) moves measurement to the harness
+        # layer so a single canonical scope applies to every adapter.
+        metadata["retrieval_latency_ms"] = (time.perf_counter() - search_t0) * 1000.0
+        metadata.setdefault("system", "evermemos")
+        metadata.setdefault("retrieval_route", retrieval_mode)
+        metadata.setdefault(
+            "backend_mode",
+            "hybrid" if index.get("use_hybrid_search") else "bm25_only",
+        )
+
         return SearchResult(
             query=query,
             conversation_id=conversation_id,
@@ -687,6 +762,7 @@ class EverMemOSAdapter(BaseAdapter):
             "memcells_dir": str(output_dir / "memcells"),
             "bm25_index_dir": str(output_dir / "bm25_index"),
             "emb_index_dir": str(output_dir / "vectors"),
+            "metrics_dir": str(output_dir / "metrics"),
             "conversation_ids": [conv.conversation_id for conv in conversations],
             "use_hybrid_search": True,
             "total_conversations": len(conversations),

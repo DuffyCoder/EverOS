@@ -124,6 +124,31 @@ async def main():
         help="Before Add stage, clear database data for the groups (group_id=conversation_id) involved in this run. "
              "Useful for debugging to avoid polluted data.",
     )
+    # Phase 2 latency-alignment controls. See docs/latency-alignment.md.
+    parser.add_argument(
+        "--retry-policy",
+        type=str,
+        default="realistic",
+        choices=["strict_no_retry", "retry_once", "realistic"],
+        help=(
+            "How adapters / stages should handle transient failures for this run. "
+            "'strict_no_retry' surfaces the first failure without retrying (clean "
+            "latency baseline). 'retry_once' caps at 1 retry. 'realistic' keeps the "
+            "adapter's native retry strategy (production-like). Cascades into every "
+            "stage via BenchmarkContext. Default: realistic."
+        ),
+    )
+    parser.add_argument(
+        "--deadline-ms",
+        type=float,
+        default=None,
+        help=(
+            "Optional harness-enforced per-call deadline in milliseconds. When set, "
+            "stages cancel any adapter call that exceeds this wall-clock budget "
+            "(including internal retries). Use to cap the blast radius of misbehaving "
+            "upstreams during benchmarking. Default: no deadline."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -265,6 +290,8 @@ async def main():
         llm_provider=llm_provider,
         output_dir=output_dir,
         filter_categories=filter_categories,
+        retry_policy=args.retry_policy,
+        deadline_ms=args.deadline_ms,
     )
 
     console.print(f"  ✅ Created pipeline, output: {output_dir}")

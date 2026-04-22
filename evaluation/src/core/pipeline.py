@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 
 from evaluation.src.core.data_models import (
     Dataset,
+    QAPair,
     SearchResult,
     AnswerResult,
     EvaluationResult,
@@ -28,6 +29,19 @@ from evaluation.src.core.stages.add_stage import run_add_stage
 from evaluation.src.core.stages.search_stage import run_search_stage
 from evaluation.src.core.stages.answer_stage import run_answer_stage
 from evaluation.src.core.stages.evaluate_stage import run_evaluate_stage
+
+# Benchmark-extension metrics (used by *_artifact helpers below)
+from evaluation.src.metrics.retrieval_metrics import evaluate_retrieval_metrics
+from evaluation.src.metrics.content_overlap import evaluate_content_overlap
+from evaluation.src.metrics.answer_aux_metrics import build_answer_aux_metrics
+from evaluation.src.metrics.diagnostics import aggregate_diagnostics
+from evaluation.src.metrics.benchmark_summary import build_benchmark_summary
+from evaluation.src.metrics.latency_views import aggregate_all, records_to_jsonl
+from evaluation.src.metrics.latency_invariants import (
+    check_all as check_latency_invariants,
+    summarize_violations as summarize_latency_violations,
+)
+from evaluation.src.core.benchmark_context import LatencyRecorder
 
 
 class Pipeline:
@@ -50,6 +64,8 @@ class Pipeline:
         run_name: str = "default",
         use_checkpoint: bool = True,
         filter_categories: Optional[List[int]] = None,
+        retry_policy: str = "realistic",
+        deadline_ms: Optional[float] = None,
     ):
         """
         Initialize Pipeline.
@@ -84,6 +100,14 @@ class Pipeline:
 
         # Question category filter configuration (read from dataset config)
         self.filter_categories = filter_categories or []
+
+        # Layer-1 latency recorder (see docs/latency-alignment.md). The
+        # recorder owns retry_policy / deadline_ms so we don't cache
+        # them as separate Pipeline attributes.
+        self.latency_recorder = LatencyRecorder(
+            retry_policy=retry_policy,
+            deadline_ms=deadline_ms,
+        )
 
     async def run(
         self,
@@ -245,6 +269,7 @@ class Pipeline:
                 logger=self.logger,
                 console=self.console,
                 completed_stages=self.completed_stages,
+                latency_recorder=self.latency_recorder,
             )
             results.update(stage_results)
             add_just_completed = True  # Add just completed
@@ -319,6 +344,7 @@ class Pipeline:
                 conversations=dataset.conversations,  # Pass conversations for cache rebuilding
                 checkpoint_manager=self.checkpoint,
                 logger=self.logger,
+                latency_recorder=self.latency_recorder,
             )
 
             self.saver.save_json(
@@ -326,6 +352,29 @@ class Pipeline:
                 "search_results.json",
             )
             results["search_results"] = search_results
+
+            # Benchmark-extension: retrieval quality metrics.
+            # content_overlap@k is the canonical cross-adapter metric
+            # (only needs qa.answer + search_result.results[*].content).
+            # Session-level metrics run too but are emitted as
+            # adapter-specific diagnostics; see benchmark_summary.py.
+            try:
+                results["content_overlap"] = self._write_content_overlap_artifact(
+                    dataset.qa_pairs, search_results
+                )
+            except Exception as err:  # noqa: BLE001
+                self.logger.warning(
+                    "content_overlap write failed (non-fatal): %s", err
+                )
+            try:
+                results["retrieval_metrics"] = self._write_retrieval_metrics_artifact(
+                    dataset.qa_pairs, search_results
+                )
+            except Exception as err:  # noqa: BLE001
+                self.logger.warning(
+                    "retrieval metrics write failed (non-fatal): %s", err
+                )
+
             self.logger.info("✅ Stage 2 completed")
 
             # Save checkpoint
@@ -377,6 +426,7 @@ class Pipeline:
                 search_results=search_results,
                 checkpoint_manager=self.checkpoint,
                 logger=self.logger,
+                latency_recorder=self.latency_recorder,
             )
 
             self.saver.save_json(
@@ -384,6 +434,17 @@ class Pipeline:
                 "answer_results.json",
             )
             results["answer_results"] = answer_results
+
+            # Benchmark-extension: answer-level aux (F1 / BLEU-1)
+            try:
+                results["answer_aux_metrics"] = self._write_answer_aux_metrics_artifact(
+                    answer_results
+                )
+            except Exception as err:  # noqa: BLE001
+                self.logger.warning(
+                    "answer aux metrics write failed (non-fatal): %s", err
+                )
+
             self.logger.info("✅ Stage 3 completed")
 
             # Save checkpoint
@@ -446,6 +507,27 @@ class Pipeline:
                 self._eval_result_to_dict(eval_result), "eval_results.json"
             )
             results["eval_result"] = eval_result
+
+            # Benchmark-extension: diagnostics + summary
+            try:
+                system_info = self.adapter.get_system_info() if self.adapter else {}
+                results["benchmark_summary"] = self._write_diagnostics_and_summary_artifact(
+                    system_name=system_info.get("name", "unknown"),
+                    dataset_name=dataset.dataset_name,
+                    search_results=results.get("search_results") or [],
+                    answer_results=results.get("answer_results") or [],
+                    eval_result=eval_result,
+                    retrieval_metrics=results.get("retrieval_metrics") or {},
+                    answer_aux_metrics=results.get("answer_aux_metrics") or {},
+                    index=results.get("index"),
+                    content_overlap=results.get("content_overlap"),
+                    n_conversations=len(dataset.conversations),
+                    n_qa_pairs=len(dataset.qa_pairs),
+                )
+            except Exception as err:  # noqa: BLE001
+                self.logger.warning(
+                    "benchmark summary write failed (non-fatal): %s", err
+                )
 
             # Save checkpoint
             self.completed_stages.add("evaluate")
@@ -665,6 +747,127 @@ class Pipeline:
             },
         )
 
+    # ========================================================================
+    # Benchmark-extension artifact writers (Task 7). These are called from
+    # run() at each stage boundary so a normal pipeline run also produces
+    # retrieval_metrics.json / answer_aux_metrics.json / diagnostics.json /
+    # benchmark_summary.json alongside the existing stage artifacts.
+    # ========================================================================
+
+    def _benchmark_k(self) -> int:
+        cfg = getattr(self.adapter, "config", {}) if self.adapter else {}
+        return int(cfg.get("search", {}).get("response_top_k", 5))
+
+    def _write_retrieval_metrics_artifact(
+        self, qa_pairs: List[QAPair], search_results: List[SearchResult], k: Optional[int] = None
+    ) -> dict:
+        k = k or self._benchmark_k()
+        metrics = evaluate_retrieval_metrics(qa_pairs, search_results, k=k)
+        self.saver.save_json(metrics, "retrieval_metrics.json")
+        return metrics
+
+    def _write_content_overlap_artifact(
+        self, qa_pairs: List[QAPair], search_results: List[SearchResult], k: Optional[int] = None
+    ) -> dict:
+        k = k or self._benchmark_k()
+        metrics = evaluate_content_overlap(qa_pairs, search_results, k=k)
+        self.saver.save_json(metrics, "content_overlap.json")
+        return metrics
+
+    def _write_answer_aux_metrics_artifact(
+        self, answer_results: List[AnswerResult]
+    ) -> dict:
+        metrics = build_answer_aux_metrics(answer_results)
+        self.saver.save_json(metrics, "answer_aux_metrics.json")
+        return metrics
+
+    def _write_diagnostics_and_summary_artifact(
+        self,
+        *,
+        system_name: str,
+        dataset_name: str,
+        search_results: List[SearchResult],
+        answer_results: List[AnswerResult],
+        eval_result: EvaluationResult,
+        retrieval_metrics: dict,
+        answer_aux_metrics: dict,
+        index: Optional[dict] = None,
+        k: Optional[int] = None,
+        content_overlap: Optional[dict] = None,
+        n_conversations: int = 0,
+        n_qa_pairs: int = 0,
+    ) -> dict:
+        k = k or self._benchmark_k()
+        answer_metadata = [ar.metadata or {} for ar in answer_results]
+        diagnostics = aggregate_diagnostics(
+            search_results=search_results,
+            answer_results_metadata=answer_metadata,
+            index=index,
+        )
+        self.saver.save_json(diagnostics, "diagnostics.json")
+
+        # Phase 1: Layer-1 canonical latency views derived from the
+        # harness-owned LatencyRecorder. See docs/latency-alignment.md.
+        latency_views = aggregate_all(self.latency_recorder.records)
+        self.saver.save_json(latency_views, "latency_views.json")
+        # Raw call-record log for post-hoc analysis / debugging. Cheap
+        # to write (hundreds of rows per 1540-question run) and often
+        # worth keeping for reproducibility.
+        self.saver.save_json(
+            records_to_jsonl(self.latency_recorder.records),
+            "latency_records.json",
+        )
+
+        # Phase 3: invariant checks on the Layer-1 data. Errors are
+        # logged and persisted to latency_invariants.json; neither
+        # severity aborts the run because the raw data is already on
+        # disk and post-hoc inspection is usually more useful than a
+        # hard stop.
+        try:
+            violations = check_latency_invariants(
+                self.latency_recorder.records,
+                n_conversations=n_conversations,
+                n_qa_pairs=n_qa_pairs,
+                retry_policy=self.latency_recorder.retry_policy,
+            )
+            violation_report = summarize_latency_violations(violations)
+            self.saver.save_json(violation_report, "latency_invariants.json")
+            if violation_report["by_severity"]["error"]:
+                self.logger.error(
+                    "Latency invariant errors (%d): %s",
+                    violation_report["by_severity"]["error"],
+                    violation_report["by_code"],
+                )
+            elif violation_report["by_severity"]["warning"]:
+                self.logger.warning(
+                    "Latency invariant warnings (%d): %s",
+                    violation_report["by_severity"]["warning"],
+                    violation_report["by_code"],
+                )
+        except Exception as err:  # noqa: BLE001
+            self.logger.warning(
+                "latency invariant check failed (non-fatal): %s", err
+            )
+            violation_report = None
+
+        summary = build_benchmark_summary(
+            system=system_name,
+            dataset=dataset_name,
+            eval_result={
+                "accuracy": getattr(eval_result, "accuracy", 0.0),
+            },
+            retrieval_metrics=retrieval_metrics,
+            answer_aux_metrics=answer_aux_metrics,
+            diagnostics=diagnostics,
+            k=k,
+            content_overlap=content_overlap,
+            latency_views=latency_views,
+            retry_policy=self.latency_recorder.retry_policy,
+            latency_invariants=violation_report,
+        )
+        self.saver.save_json(summary, "benchmark_summary.json")
+        return summary
+
     def _generate_report(self, results: Dict[str, Any], elapsed_time: float):
         """Generate evaluation report."""
         report_lines = []
@@ -686,6 +889,110 @@ class Pipeline:
             report_lines.append(f"Correct: {eval_result.correct}")
             report_lines.append(f"Accuracy: {eval_result.accuracy:.2%}")
             report_lines.append("")
+
+        # Benchmark-extension: retrieval + diagnostics sections
+        benchmark_summary = results.get("benchmark_summary")
+        if benchmark_summary:
+            retrieval = benchmark_summary.get("retrieval_level") or {}
+            if retrieval:
+                report_lines.append("Retrieval-level (canonical, cross-adapter):")
+                for key, value in retrieval.items():
+                    if value is None:
+                        report_lines.append(f"  {key}: n/a")
+                    elif isinstance(value, (int, float)):
+                        report_lines.append(f"  {key}: {value:.4f}")
+                    else:
+                        report_lines.append(f"  {key}: {value}")
+                report_lines.append("")
+
+            adapter_retrieval = (
+                benchmark_summary.get("adapter_specific_retrieval") or {}
+            )
+            # Only render the section if at least one value is populated,
+            # otherwise it's noise for adapters without source_sessions.
+            if any(v is not None for v in adapter_retrieval.values()):
+                report_lines.append(
+                    "Adapter-specific retrieval (diagnostic, NOT cross-adapter):"
+                )
+                for key, value in adapter_retrieval.items():
+                    if value is None:
+                        report_lines.append(f"  {key}: n/a")
+                    elif isinstance(value, (int, float)):
+                        report_lines.append(f"  {key}: {value:.4f}")
+                    else:
+                        report_lines.append(f"  {key}: {value}")
+                report_lines.append("")
+
+            latency = benchmark_summary.get("latency") or {}
+            if latency:
+                report_lines.append(
+                    f"Latency (canonical, retry_policy={benchmark_summary.get('retry_policy')}):"
+                )
+                for op in ("add", "search", "answer", "e2e_query_ms"):
+                    stage = latency.get(op)
+                    if not stage:
+                        continue
+                    wall_views = stage.get("wall_ms") or {}
+                    n_calls = stage.get("n_calls")
+                    report_lines.append(f"  {op} (n={n_calls}):")
+                    for view_name, v in wall_views.items():
+                        if not v:
+                            report_lines.append(f"    {view_name}: n/a")
+                            continue
+                        parts = [
+                            f"n={v['n']}",
+                            f"mean={v['mean']:.2f}",
+                            f"p50={v['p50']:.2f}",
+                            f"p95={v['p95']:.2f}",
+                            f"max={v['max']:.2f}",
+                        ]
+                        report_lines.append(
+                            f"    {view_name}: {{{', '.join(parts)}}}"
+                        )
+                    rel = stage.get("reliability")
+                    if rel:
+                        parts = [
+                            f"retry={rel['retry_rate']:.3f}",
+                            f"fallback={rel['fallback_rate']:.3f}",
+                            f"failed={rel['failed_rate']:.3f}",
+                        ]
+                        if rel["retry_by_class"]:
+                            parts.append(f"by_class={rel['retry_by_class']}")
+                        report_lines.append(
+                            f"    reliability: {{{', '.join(parts)}}}"
+                        )
+                report_lines.append("")
+
+            diag = benchmark_summary.get("diagnostics") or {}
+            if diag:
+                report_lines.append("Diagnostics:")
+                for key, value in diag.items():
+                    if value is None:
+                        report_lines.append(f"  {key}: n/a")
+                    elif isinstance(value, (int, float)):
+                        report_lines.append(f"  {key}: {value:.2f}")
+                    elif isinstance(value, dict) and key.endswith("_stats"):
+                        # Render latency distributions compactly.
+                        parts = []
+                        for stat_key in ("n", "mean", "p50", "p95", "max"):
+                            if stat_key in value and value[stat_key] is not None:
+                                if stat_key == "n":
+                                    parts.append(f"{stat_key}={value[stat_key]}")
+                                else:
+                                    parts.append(f"{stat_key}={value[stat_key]:.2f}")
+                        report_lines.append(f"  {key}: {{{', '.join(parts)}}}")
+                    else:
+                        report_lines.append(f"  {key}: {value}")
+                report_lines.append("")
+
+            answer = benchmark_summary.get("answer_level") or {}
+            if answer.get("f1_mean") is not None or answer.get("bleu1_mean") is not None:
+                report_lines.append("Answer-level (aux):")
+                for key in ("f1_mean", "bleu1_mean"):
+                    value = answer.get(key)
+                    if value is not None:
+                        report_lines.append(f"  {key}: {value:.4f}")
+                report_lines.append("")
 
         report_lines.append("=" * 60)
 
