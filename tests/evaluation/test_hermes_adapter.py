@@ -37,12 +37,17 @@ def test_prepare_is_idempotent_and_resolves_run_root(tmp_path):
 
     adapter = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
     asyncio.run(adapter.prepare(conversations=[_make_conv()], output_dir=tmp_path))
-    # second call must not blow up or re-init
-    asyncio.run(adapter.prepare(conversations=[_make_conv()], output_dir=tmp_path))
 
     run_root = tmp_path / "artifacts" / "hermes"
-    assert run_root.exists()
     latest = run_root / "LATEST"
     assert latest.exists()
-    run_id = latest.read_text().strip()
-    assert (run_root / run_id).is_dir()
+    run_id_first = latest.read_text().strip()
+    assert (run_root / run_id_first).is_dir()
+
+    # Second prepare() must NOT create a new run_id. This proves idempotency
+    # is a real no-op, not just crash-free.
+    asyncio.run(adapter.prepare(conversations=[_make_conv()], output_dir=tmp_path))
+    run_id_second = latest.read_text().strip()
+    assert run_id_first == run_id_second, (
+        f"prepare() regenerated run_id on second call: {run_id_first!r} -> {run_id_second!r}"
+    )
