@@ -621,12 +621,22 @@ class OpenClawAdapter(BaseAdapter):
         base_delay = float(self._openclaw_cfg.get("flush_retry_base_seconds", 3.0))
 
         async def _call(system_prompt: str, user_prompt: str) -> str:
+            # Pass system_prompt as a separate ``system`` role message
+            # instead of concatenating. Concatenation relied on the LLM
+            # inferring roles from position; on some deployments (observed
+            # on sophnet-proxied Azure gpt-4o-mini) the whole string gets
+            # treated as one user turn and the model responds conversa-
+            # tionally ("Would you like a summary?") instead of following
+            # the flush instructions, producing useless memory content.
             provider = self._get_llm_provider()
-            prompt = f"{system_prompt}\n\n{user_prompt}"
             last_err: Optional[Exception] = None
             for attempt in range(max_retries):
                 try:
-                    result = await provider.generate(prompt=prompt, temperature=0)
+                    result = await provider.generate(
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        temperature=0,
+                    )
                     return result.strip() if isinstance(result, str) else ""
                 except Exception as err:  # noqa: BLE001
                     last_err = err
