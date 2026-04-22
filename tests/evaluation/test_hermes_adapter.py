@@ -234,3 +234,27 @@ def test_search_empty_context_yields_empty_results(tmp_path, stub_provider):
         query="anything?", conversation_id="c1", index=index,
     ))
     assert result.results == []
+
+
+def test_answer_uses_shared_prompt_template_with_fallback(tmp_path, stub_provider, monkeypatch):
+    """answer() calls the LLMProvider with a prompt that contains context + question."""
+    from evaluation.src.adapters import hermes_adapter as _ha
+    from evaluation.src.adapters.hermes_adapter import HermesAdapter
+
+    captured = {}
+
+    class _FakeLLM:
+        async def generate(self, prompt: str, temperature: float = 0):
+            captured["prompt"] = prompt
+            return "test-answer"
+
+    monkeypatch.setattr(HermesAdapter, "_get_llm_provider", lambda self: _FakeLLM())
+
+    adapter = HermesAdapter(_base_config(str(tmp_path)), output_dir=tmp_path)
+    result = asyncio.run(adapter.answer(
+        query="what happened?", context="the cat sat on the mat",
+    ))
+
+    assert result == "test-answer"
+    assert "what happened?" in captured["prompt"]
+    assert "the cat sat on the mat" in captured["prompt"]

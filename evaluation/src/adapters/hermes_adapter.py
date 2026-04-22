@@ -349,3 +349,50 @@ class HermesAdapter(BaseAdapter):
                 "conversation_id": conversation_id,
             },
         )
+
+    # -- answer --------------------------------------------------------
+    async def answer(self, query: str, context: str, **kwargs) -> str:
+        prompt = self._shared_answer_prompt().format(context=context, question=query)
+        provider = self._get_llm_provider()
+        result = await provider.generate(prompt=prompt, temperature=0)
+        if "FINAL ANSWER:" in result:
+            parts = result.split("FINAL ANSWER:")
+            result = parts[1].strip() if len(parts) > 1 else result.strip()
+        return result.strip()
+
+    def _get_llm_provider(self):
+        if self._llm_provider is not None:
+            return self._llm_provider
+        from memory_layer.llm.llm_provider import LLMProvider
+
+        llm_cfg = self.config.get("llm", {}) or {}
+        self._llm_provider = LLMProvider(
+            provider_type=llm_cfg.get("provider", "openai"),
+            model=llm_cfg.get("model", "gpt-4o-mini"),
+            api_key=llm_cfg.get("api_key", ""),
+            base_url=llm_cfg.get("base_url", "https://api.openai.com/v1"),
+            temperature=llm_cfg.get("temperature", 0.0),
+            max_tokens=llm_cfg.get("max_tokens", 1024),
+        )
+        return self._llm_provider
+
+    def _shared_answer_prompt(self) -> str:
+        if self._shared_prompt_template is not None:
+            return self._shared_prompt_template
+        try:
+            from evaluation.src.utils.config import load_yaml
+
+            prompts_path = Path(__file__).parent.parent.parent / "config" / "prompts.yaml"
+            prompts = load_yaml(str(prompts_path))
+            self._shared_prompt_template = prompts["online_api"]["default"]["answer_prompt_mem0"]
+        except Exception:
+            self._shared_prompt_template = _DEFAULT_ANSWER_PROMPT
+        return self._shared_prompt_template
+
+    def get_system_info(self) -> dict:
+        return {
+            "name": "Hermes",
+            "plugin": self._plugin_name,
+            "strategy": self._ingest_strategy,
+            "config": self.config,
+        }
