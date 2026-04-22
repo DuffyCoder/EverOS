@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.src.adapters.openclaw_ingestion import (
+from evaluation.src.adapters.openclaw.ingestion import (
     bucket_conversation_by_session,
     render_raw_session_markdown,
     session_id_from_path,
     session_markdown_filename,
     write_session_files,
 )
-from evaluation.src.adapters.openclaw_resolved_config import (
+from evaluation.src.adapters.openclaw.resolved_config import (
     build_openclaw_resolved_config,
 )
 from evaluation.src.core.data_models import Conversation, Message
@@ -101,7 +101,7 @@ async def test_shared_llm_uses_native_plan_when_provided(tmp_path):
     """Option A: when a flush_plan (system_prompt/prompt/silent_token) is
     supplied, render_flushed_session_markdown must use THOSE prompts, not
     the in-process fallback template."""
-    from evaluation.src.adapters.openclaw_ingestion import (
+    from evaluation.src.adapters.openclaw.ingestion import (
         render_flushed_session_markdown,
     )
 
@@ -139,7 +139,7 @@ async def test_shared_llm_uses_native_plan_when_provided(tmp_path):
 async def test_shared_llm_silent_token_honored_when_flag_on(tmp_path):
     """honor_silent_token=True writes the stub-with-comment and flags silent.
     Matches OpenClaw's 'nothing to retain this session' semantics."""
-    from evaluation.src.adapters.openclaw_ingestion import (
+    from evaluation.src.adapters.openclaw.ingestion import (
         render_flushed_session_markdown,
     )
 
@@ -167,7 +167,7 @@ async def test_shared_llm_retries_then_falls_back_when_silent_default(tmp_path):
     an override, and if still silent we fall back to the raw transcript so
     OpenClaw has content to index. silent=False so downstream metrics still
     include the session."""
-    from evaluation.src.adapters.openclaw_ingestion import (
+    from evaluation.src.adapters.openclaw.ingestion import (
         render_flushed_session_markdown,
     )
 
@@ -252,8 +252,8 @@ async def test_end_to_end_ingest_writes_config_and_calls_bridge(tmp_path, monkey
     we verify the adapter writes session files + an OpenClaw-schema config,
     and that the bridge was called once for index + once for status.
     """
-    from evaluation.src.adapters import openclaw_adapter as adapter_mod
-    from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
+    from evaluation.src.adapters.openclaw import adapter as adapter_mod
+    from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 
     calls = []
 

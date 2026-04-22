@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.src.adapters.openclaw_runtime import arun_bridge, run_bridge
+from evaluation.src.adapters.openclaw.runtime import arun_bridge, run_bridge
 
 
 BRIDGE_PATH = (

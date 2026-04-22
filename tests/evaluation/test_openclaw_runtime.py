@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.src.adapters.openclaw_runtime import (
+from evaluation.src.adapters.openclaw.runtime import (
     BridgeError,
     BridgeTimeout,
     arun_bridge,

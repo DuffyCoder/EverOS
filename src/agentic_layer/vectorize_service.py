@@ -26,6 +26,14 @@ from agentic_layer.vectorize_deepinfra import (
     DeepInfraVectorizeService,
     DeepInfraVectorizeConfig,
 )
+from agentic_layer.vectorize_siliconflow import (
+    SiliconFlowVectorizeService,
+    SiliconFlowVectorizeConfig,
+)
+from agentic_layer.vectorize_sophnet import (
+    SophnetVectorizeService,
+    SophnetVectorizeConfig,
+)
 from agentic_layer.metrics.vectorize_metrics import (
     record_vectorize_request,
     record_vectorize_fallback,
@@ -171,6 +179,33 @@ def _create_service_from_config(
             dimensions=dimensions,
         )
         return DeepInfraVectorizeService(config)
+    elif provider.lower() == "siliconflow":
+        config = SiliconFlowVectorizeConfig(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            max_retries=max_retries,
+            batch_size=batch_size,
+            max_concurrent_requests=max_concurrent,
+            encoding_format=encoding_format,
+            dimensions=dimensions,
+        )
+        return SiliconFlowVectorizeService(config)
+    elif provider.lower() == "sophnet":
+        config = SophnetVectorizeConfig(
+            api_key=api_key,
+            base_url=base_url,
+            easyllm_id=os.getenv("SOPH_EMBED_EASYLLM_ID", ""),
+            model=model or "text-embeddings",
+            timeout=timeout,
+            max_retries=max_retries,
+            batch_size=batch_size,
+            max_concurrent_requests=max_concurrent,
+            encoding_format=encoding_format,
+            dimensions=dimensions,
+        )
+        return SophnetVectorizeService(config)
     else:
         raise VectorizeError(f"Unsupported provider: {provider}")
 

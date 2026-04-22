@@ -2,13 +2,13 @@
 Sandbox path layout + Node bridge invocation for the OpenClaw adapter.
 
 The bridge is a Node script that speaks the BridgeCommand/BridgeResponse
-JSON protocol (see openclaw_types.py). We provide both sync and async
+JSON protocol (see types.py). We provide both sync and async
 wrappers so callers can pick based on context:
 
-- run_bridge: blocking, used from add()/prepare() paths that run outside
-  the asyncio event loop (Task 4 ingest + flush + index).
-- arun_bridge: async, used from search() so concurrent per-question
-  requests don't stall the event loop (Task 5).
+- run_bridge: blocking, for callers that run outside the asyncio event
+  loop (kept for ad-hoc scripts; the adapter itself uses arun_bridge).
+- arun_bridge: async, used from add()/search() so concurrent per-
+  question requests don't stall the event loop.
 
 All failure modes - non-zero exit, non-JSON stdout, ok=false - raise
 BridgeError. Timeouts kill the entire process group so a stalled Node child
@@ -52,8 +52,8 @@ def build_sandbox_paths(
         <base>/events.jsonl        = per-stage trace log
         <base>/openclaw.json       = OpenClaw-schema resolved config
 
-    Layout is deterministic so build_lazy_index() in Task 4 can rebuild the
-    handle without re-running ingest.
+    Layout is deterministic so build_lazy_index() can rebuild the handle
+    without re-running ingest.
     """
     base = (
         Path(output_dir)

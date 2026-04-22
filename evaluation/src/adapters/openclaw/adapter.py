@@ -4,11 +4,9 @@ OpenClaw adapter for the EverMemOS evaluation pipeline.
 Wraps OpenClaw memory lifecycle (ingest / flush / index / search / get) via a
 Node bridge, exposes the BaseAdapter surface, and emits session-level
 retrieval traces + lifecycle diagnostics alongside the shared answer prompt.
-
-Task 4 adds add() + build_lazy_index() with per-conversation sandbox
-isolation. ingest + flush calls are currently thin placeholders so the
-control flow is exercisable without a real OpenClaw runtime; Task 8 wires
-them to the native bridge.
+Per-conversation sandboxes are isolated on disk and the Node bridge is
+invoked with a per-sandbox env so concurrent conversations do not
+collide.
 """
 from __future__ import annotations
 
@@ -20,21 +18,20 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from evaluation.src.adapters.base import BaseAdapter
-from evaluation.src.adapters.openclaw_ingestion import (
+from evaluation.src.adapters.openclaw.ingestion import (
     session_id_from_path,
     write_session_files,
 )
-from evaluation.src.adapters.openclaw_manifest import (
+from evaluation.src.adapters.openclaw.manifest import (
     build_session_manifest,
     project_message_id_to_session_id,
 )
-from evaluation.src.adapters.openclaw_resolved_config import (
+from evaluation.src.adapters.openclaw.resolved_config import (
     build_openclaw_resolved_config,
 )
-from evaluation.src.adapters.openclaw_runtime import (
+from evaluation.src.adapters.openclaw.runtime import (
     arun_bridge,
     build_sandbox_paths,
-    isolated_env_for_sandbox,
 )
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, SearchResult
@@ -45,6 +42,11 @@ logger = logging.getLogger(__name__)
 
 _RUN_ID_LATEST_FILE = "LATEST"
 _ARTIFACT_ROOT = "artifacts/openclaw"
+
+# this file lives at evaluation/src/adapters/openclaw/adapter.py
+_EVAL_DIR = Path(__file__).resolve().parents[3]
+_BRIDGE_SCRIPT_PATH = _EVAL_DIR / "scripts" / "openclaw_eval_bridge.mjs"
+_PROMPTS_YAML_PATH = _EVAL_DIR / "config" / "prompts.yaml"
 
 
 _DEFAULT_ANSWER_PROMPT = (
@@ -356,8 +358,7 @@ class OpenClawAdapter(BaseAdapter):
         try:
             from evaluation.src.utils.config import load_yaml
 
-            prompts_path = Path(__file__).parent.parent.parent / "config" / "prompts.yaml"
-            prompts = load_yaml(str(prompts_path))
+            prompts = load_yaml(str(_PROMPTS_YAML_PATH))
             self._shared_prompt_template = prompts["online_api"]["default"]["answer_prompt_mem0"]
         except Exception:
             self._shared_prompt_template = _DEFAULT_ANSWER_PROMPT
@@ -368,7 +369,7 @@ class OpenClawAdapter(BaseAdapter):
         return {"name": "OpenClaw", "config": self.config}
 
     def _bridge_script_path(self) -> Path:
-        return Path(__file__).parent.parent.parent / "scripts" / "openclaw_eval_bridge.mjs"
+        return _BRIDGE_SCRIPT_PATH
 
     def _bridge_base_payload(self, sandbox: dict) -> dict:
         """Fields every BridgeCommand needs: where OpenClaw lives, where the
@@ -620,12 +621,22 @@ class OpenClawAdapter(BaseAdapter):
         base_delay = float(self._openclaw_cfg.get("flush_retry_base_seconds", 3.0))
 
         async def _call(system_prompt: str, user_prompt: str) -> str:
+            # Pass system_prompt as a separate ``system`` role message
+            # instead of concatenating. Concatenation relied on the LLM
+            # inferring roles from position; on some deployments (observed
+            # on sophnet-proxied Azure gpt-4o-mini) the whole string gets
+            # treated as one user turn and the model responds conversa-
+            # tionally ("Would you like a summary?") instead of following
+            # the flush instructions, producing useless memory content.
             provider = self._get_llm_provider()
-            prompt = f"{system_prompt}\n\n{user_prompt}"
             last_err: Optional[Exception] = None
             for attempt in range(max_retries):
                 try:
-                    result = await provider.generate(prompt=prompt, temperature=0)
+                    result = await provider.generate(
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        temperature=0,
+                    )
                     return result.strip() if isinstance(result, str) else ""
                 except Exception as err:  # noqa: BLE001
                     last_err = err
