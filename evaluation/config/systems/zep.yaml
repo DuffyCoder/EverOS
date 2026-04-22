@@ -21,7 +21,7 @@ post_add_wait_seconds: 0  # Set to 0 to not wait (messages already wait for proc
 # LLM configuration (for answer generation)
 llm:
   provider: "openai"
-  model: "openai/gpt-4.1-mini"
+  model: "${LLM_MODEL}"
   api_key: "${LLM_API_KEY}"
   base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
   temperature: 0
