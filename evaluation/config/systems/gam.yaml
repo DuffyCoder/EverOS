@@ -1,0 +1,40 @@
+# GAM — auto-bench candidate config.
+# Sophnet baseline. Filesystem-only local memory; no embedding model download.
+
+name: "gam"
+version: "main-2026-04"
+description: "General Agentic Memory — filesystem-backed tree with ReAct Q&A (VectorSpaceLab/general-agentic-memory)"
+
+adapter: "gam"
+
+llm:
+  provider: "openai"
+  model: "${LLM_MODEL:openai/gpt-4.1-mini}"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.3
+  max_tokens: 4096
+
+search:
+  # GAM bundles retrieval + Q&A inside its request() call. The adapter treats
+  # search() as a no-op and defers the work to answer(). max_iterations caps
+  # the ReAct exploration depth per question.
+  max_iterations: 6
+  top_k: 0
+
+answer:
+  max_retries: 3
+
+python_deps:
+  - "pydantic>=2.0"
+  - "tiktoken>=0.5"
+  - "openai>=1.0"
+  - "tqdm>=4.60"
+  - "requests>=2.28"
+  - "python-dotenv>=1.0"
+  - "docker>=7.0"         # required by gam.workspaces even in local mode
+  - "json-repair>=0.25"   # gam.agents imports it at module load
+
+repo:
+  git_url: "https://github.com/VectorSpaceLab/general-agentic-memory.git"
+  clone_dir: "/tmp/candidate/gam"
