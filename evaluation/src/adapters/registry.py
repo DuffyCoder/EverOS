@@ -26,6 +26,9 @@ _ADAPTER_MODULES = {
     # OpenClaw memory system (via Node bridge)
     "openclaw": "evaluation.src.adapters.openclaw.adapter",
 
+    # Auto-bench candidates (local memory backends)
+    "amem": "evaluation.src.adapters.amem_adapter",
+
     # Future systems:
     # "nemori": "evaluation.src.adapters.nemori_adapter",
 }

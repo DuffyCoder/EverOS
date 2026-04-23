@@ -1,0 +1,40 @@
+# A-MEM — auto-bench candidate config.
+# Sophnet baseline. Embedding: all-MiniLM-L6-v2 (~22 M params < 1 B threshold).
+
+name: "amem"
+version: "main-2026-04"
+description: "Agentic Memory (A-MEM) — local ChromaDB + sentence-transformers (WujiangXu/A-mem-sys, NeurIPS 2025)"
+
+adapter: "amem"
+
+llm:
+  provider: "openai"
+  model: "${LLM_MODEL:openai/gpt-4.1-mini}"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  backend: "openai"
+  temperature: 0.3
+  max_tokens: 8192
+
+search:
+  top_k: 10
+  embedding_model: "all-MiniLM-L6-v2"
+
+answer:
+  max_retries: 3
+
+python_deps:
+  - "chromadb>=0.4.22"
+  - "sentence-transformers>=2.2.2"
+  - "rank-bm25>=0.2.2"
+  - "nltk>=3.8.1"
+  - "transformers>=4.55,<4.58,!=4.57.0"
+  - "torch"
+  - "openai>=2.3.0"
+  - "litellm>=1.16"
+  - "scikit-learn>=1.3"
+  - "numpy<3"
+
+repo:
+  git_url: "https://github.com/WujiangXu/A-mem-sys.git"
+  clone_dir: "/tmp/candidate/amem"
