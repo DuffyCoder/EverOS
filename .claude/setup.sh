@@ -80,6 +80,82 @@ else
 fi
 echo "::endgroup::"
 
+echo "::group::External asset caches (HF Hub + tiktoken)"
+# Background: most candidate memory frameworks download embedding models
+# from huggingface.co and/or tiktoken BPE encodings from
+# openaipublic.blob.core.windows.net at first import. PR#11/12/13 all
+# failed smoke on these exact downloads (403 / connection refused) from
+# the cloud container under the default "Trusted" network policy.
+#
+# Strategy: set cache dirs to a routine-scoped location, and if network
+# access is allowed at setup time, pre-pull the two most common assets
+# (all-MiniLM-L6-v2 + tiktoken o200k_base). If the pre-pull fails, log
+# a clear hint and continue — the candidate run may still succeed if the
+# cloud env has a route for HF that setup.sh didn't see, and failures
+# at smoke time will now carry a pre-diagnosed [asset-download-failed]
+# tag rather than looking like a generic crash.
+
+export HF_HOME="${HF_HOME:-${HOME:-/root}/.cache/huggingface}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
+export TIKTOKEN_CACHE_DIR="${TIKTOKEN_CACHE_DIR:-${HOME:-/root}/.cache/tiktoken}"
+mkdir -p "$HF_HOME" "$TIKTOKEN_CACHE_DIR"
+
+# Operator escape hatches — if the default CDNs are blocked, point at a mirror.
+# The HF_ENDPOINT var is read by huggingface_hub; uv/pip can't help here.
+if [[ -n "${HF_ENDPOINT:-}" ]]; then
+  echo "  ℹ️  HF_ENDPOINT=${HF_ENDPOINT} (operator override — HF Hub calls routed via mirror)"
+fi
+
+# Probe HF + tiktoken CDN egress. Probes are best-effort and do NOT fail the
+# setup — a blocked egress is recorded so the routine agent can cite it in
+# a [asset-download-failed] PR rather than guessing at the cause.
+hf_ok=no
+tiktoken_ok=no
+if curl -fsSL --max-time 8 -o /dev/null \
+      "${HF_ENDPOINT:-https://huggingface.co}/api/models/sentence-transformers/all-MiniLM-L6-v2" 2>/dev/null; then
+  hf_ok=yes
+fi
+if curl -fsSL --max-time 8 -o /dev/null \
+      "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" 2>/dev/null; then
+  tiktoken_ok=yes
+fi
+echo "  HF Hub reachable: $hf_ok"
+echo "  tiktoken CDN reachable: $tiktoken_ok"
+
+if [[ "$hf_ok" = yes ]]; then
+  # Pre-pull the most common small embedding model so the first candidate
+  # run doesn't pay a cold download cost (~90 MB). Non-fatal on failure.
+  uv run --with "sentence-transformers>=2.2" python - <<'PY' 2>&1 | tail -3 || \
+    echo "  (warm-pull failed — candidate may still work if it tries a different HF mirror)"
+try:
+    from sentence_transformers import SentenceTransformer
+    SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    print("  ✅ pre-pulled all-MiniLM-L6-v2 to $HF_HOME")
+except Exception as e:
+    print(f"  ⚠️  pre-pull failed: {type(e).__name__}: {str(e)[:120]}")
+PY
+else
+  echo "  ⚠️  HF Hub blocked — candidates needing downloaded embeddings will fail at smoke."
+  echo "     Operator fix: switch cloud env Network access to a tier that allows huggingface.co,"
+  echo "     OR set HF_ENDPOINT to an allowed mirror in the routine env vars."
+fi
+
+if [[ "$tiktoken_ok" = yes ]]; then
+  uv run --with "tiktoken" python - <<'PY' 2>&1 | tail -3 || \
+    echo "  (tiktoken warm-pull failed — GAM-style candidates may still fail at smoke)"
+try:
+    import tiktoken
+    tiktoken.get_encoding("o200k_base")
+    tiktoken.get_encoding("cl100k_base")
+    print("  ✅ pre-pulled tiktoken o200k_base + cl100k_base to $TIKTOKEN_CACHE_DIR")
+except Exception as e:
+    print(f"  ⚠️  tiktoken warm-pull failed: {type(e).__name__}: {str(e)[:120]}")
+PY
+else
+  echo "  ⚠️  openaipublic blob blocked — candidates using tiktoken encodings will fail at smoke."
+fi
+echo "::endgroup::"
+
 echo "::group::LoCoMo dataset"
 if [[ ! -f evaluation/data/locomo/locomo10.json ]]; then
   echo "  ❌ evaluation/data/locomo/locomo10.json missing"

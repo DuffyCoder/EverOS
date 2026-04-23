@@ -59,6 +59,7 @@ For each candidate that passes discovery:
 | Candidate has no Python SDK or REST API | Add to `seen_systems.json` with `status: rejected, rejection_reason: "no programmatic interface"`. Do not open PR. |
 | `uv run --with` fails to install the candidate's `python_deps:` (unresolvable pin, wheel build fail, network) | Add to `seen_systems.json` with `status: failed, last_error: <tail of uv output>`. Open PR with `[install-failed]` tag, no eval results. |
 | `uv run --with` installs but candidate dep conflicts with main evaluation-full deps | Add to `seen_systems.json` with `status: failed, rejection_reason: "dep conflict"`. Open PR with `[dep-conflict]` tag, no eval results. |
+| Candidate blocks on external CDN (HuggingFace Hub 403, tiktoken blob 403, OSError couldn't-connect) | Operator-side network-policy issue, not a candidate defect. Add to `seen_systems.json` with `status: failed, rejection_reason: "<cdn host> blocked"`. Open PR with `[asset-download-failed]` tag so operator can whitelist the host and rerun. |
 | Smoke test crashes | Open PR titled `[Auto-Bench][smoke-failed] ...` with the traceback in the body. Do not run full eval. |
 | OOM during full run | Switch to batch mode. If batch mode also OOMs, abort and open PR with `[oom-batched]` tag. |
 | Timeout (> 90 min total per candidate) | Abort that candidate, continue with the next one. |
