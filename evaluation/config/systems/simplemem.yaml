@@ -1,0 +1,45 @@
+# SimpleMem — auto-bench candidate config.
+# Fairness baseline: Sophnet (openai/gpt-4.1-mini). Embedding is Qwen3-Embedding-0.6B
+# (0.6 B < 1 B param threshold), which the auto-bench rules permit.
+#
+# Declared python_deps are installed ephemerally via `uv run --with <pkg>` at
+# smoke/full-run time — pyproject.toml / uv.lock are never modified by the routine.
+
+name: "simplemem"
+version: "0.2.0"
+description: "Local LanceDB + SQLite memory with hybrid retrieval (aiming-lab/SimpleMem v0.2.0)"
+
+adapter: "simplemem"
+
+llm:
+  provider: "openai"
+  model: "${LLM_MODEL:openai/gpt-4.1-mini}"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.3
+  max_tokens: 8192
+
+search:
+  top_k: 10
+
+answer:
+  max_retries: 3
+
+# Ephemeral deps — installed via `uv run --with` at bench time. See
+# .claude/rules/auto-bench-routine.md § File-level scope.
+python_deps:
+  - "lancedb==0.25.3"
+  - "sentence-transformers==5.1.1"
+  - "transformers>=4.55,<4.58,!=4.57.0"  # 4.57.0 was yanked
+  - "torch"
+  - "rank-bm25==0.2.2"
+  - "openai>=2.3.0"
+  - "tiktoken==0.12.0"
+  - "numpy<3"
+  - "dateparser==1.2.2"
+  - "pydantic>=2.10"
+
+# Consumed by SimpleMemAdapter via env var SIMPLEMEM_REPO_DIR (fallback below).
+repo:
+  git_url: "https://github.com/aiming-lab/SimpleMem.git"
+  clone_dir: "/tmp/candidate/simplemem"
