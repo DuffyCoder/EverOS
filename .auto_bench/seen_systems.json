@@ -7,8 +7,23 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
+    {
+      "name": "amem",
+      "display_name": "A-MEM (Agentic Memory)",
+      "github": "WujiangXu/A-mem-sys",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/amem_adapter.py",
+      "config_path": "evaluation/config/systems/amem.yaml",
+      "infra_required": ["chromadb"],
+      "estimated_ram_gb": 2,
+      "last_error": "smoke-failed: HuggingFace Hub unreachable from the cloud runner (OSError / 403) — ChromaDB's default SentenceTransformerEmbeddingFunction cannot load `all-MiniLM-L6-v2`. Adapter + config are rule-compliant; re-run when HF egress is unblocked or when the embedding model is pre-seeded to the HF cache.",
+      "notes": "Rule-compliant: ChromaDB local backend; OpenAI client routed to Sophnet via OPENAI_BASE_URL env before import. Embedding `all-MiniLM-L6-v2` is 22M params (<1B exception). Source: NeurIPS 2025 paper `A-Mem: Agentic Memory for LLM Agents`."
+    },
     {
       "name": "evermemos",
       "display_name": "EverMemOS",
