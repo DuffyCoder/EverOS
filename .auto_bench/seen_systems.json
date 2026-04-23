@@ -1,13 +1,13 @@
 {
   "$schema_version": "1.0",
-  "$schema_doc": "Each entry tracks one memory framework the auto-bench routine has considered. Status values: 'integrated' (adapter merged), 'candidate' (adapter being developed), 'rejected' (does not meet decision rules), 'failed' (adapter exists but smoke test failed), 'needs-revisit' (re-evaluate when upstream changes). Tier values: 'local-with-cloud-llm' (memory backend local, LLM API cloud — ACCEPTED), 'local-with-local-llm' (everything local incl. inference — REWRITE config to the fairness-baseline provider), 'saas-only' (memory operations require vendor SaaS — REJECTED). Fairness-baseline provider: Sophnet (https://www.sophnet.com/api/open-apis/v1) serving openai/gpt-4.1-mini.",
+  "$schema_doc": "Each entry tracks one memory framework the auto-bench routine has considered. Status values: 'integrated' (adapter merged), 'candidate' (adapter being developed), 'rejected' (does not meet decision rules), 'failed' (adapter exists but smoke test failed), 'needs-revisit' (re-evaluate when upstream changes). Tier values: 'local-with-cloud-llm' (memory backend local, LLM API cloud \u2014 ACCEPTED), 'local-with-local-llm' (everything local incl. inference \u2014 REWRITE config to the fairness-baseline provider), 'saas-only' (memory operations require vendor SaaS \u2014 REJECTED). Fairness-baseline provider: Sophnet (https://www.sophnet.com/api/open-apis/v1) serving openai/gpt-4.1-mini.",
   "$decision_rules_version": "2026-04-22",
   "$decision_rules": {
     "accept": "Memory store / search operations run in a local process or local container. LLM and embedding calls may go to the fairness-baseline provider (Sophnet) or any OpenAI-compatible endpoint reachable from the cloud runner.",
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
     {
       "name": "evermemos",
@@ -19,7 +19,12 @@
       "memory_backend": "local",
       "adapter_path": "evaluation/src/adapters/evermemos_adapter.py",
       "config_path": "evaluation/config/systems/evermemos.yaml",
-      "infra_required": ["mongodb", "elasticsearch", "milvus", "redis"],
+      "infra_required": [
+        "mongodb",
+        "elasticsearch",
+        "milvus",
+        "redis"
+      ],
       "estimated_ram_gb": 12,
       "notes": "Native system. Fork target. Routine should never modify this adapter."
     },
@@ -31,7 +36,7 @@
       "status": "rejected",
       "tier": "saas-only",
       "memory_backend": "saas",
-      "rejection_reason": "EverOS upstream evaluates Mem0 via MemoryClient (cloud), which violates 'local memory backend' rule. The mem0 Python package does expose a local Memory() class — reconsider as 'needs-revisit' if a local-mode adapter is contributed.",
+      "rejection_reason": "EverOS upstream evaluates Mem0 via MemoryClient (cloud), which violates 'local memory backend' rule. The mem0 Python package does expose a local Memory() class \u2014 reconsider as 'needs-revisit' if a local-mode adapter is contributed.",
       "notes": "If you decide to add a local-mode adapter, change status to 'candidate' and remove from routine deny-list."
     },
     {
@@ -63,6 +68,32 @@
       "tier": "saas-only",
       "memory_backend": "saas",
       "rejection_reason": "Community Edition deprecated; only Graphiti engine remains open source. No clean self-hosted memory path that matches upstream evaluation conditions."
+    },
+    {
+      "name": "simplemem",
+      "display_name": "SimpleMem",
+      "github": "aiming-lab/SimpleMem",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/simplemem_adapter.py",
+      "config_path": "evaluation/config/systems/simplemem.yaml",
+      "infra_required": [
+        "lancedb-embedded",
+        "sqlite"
+      ],
+      "estimated_ram_gb": 2,
+      "rejection_reason": "missing dep \u2014 `simplemem` (top-level module `simplemem_router`) not in pyproject.toml [evaluation-full]",
+      "last_run": {
+        "date": "2026-04-23",
+        "run_name": "auto-bench-simplemem-smoke-20260423-085148",
+        "smoke_result": "fail",
+        "full_result": "skipped",
+        "batch_mode": false,
+        "overall_score": null,
+        "notes": "ImportError: 'simplemem_router' module not installed. Adapter scaffolding written; `pip install simplemem` is the upstream path. Add to evaluation-full deps in a follow-up PR before re-running."
+      }
     }
   ],
   "deny_keywords": [
