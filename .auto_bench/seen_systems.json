@@ -7,8 +7,23 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
+    {
+      "name": "gam",
+      "display_name": "General Agentic Memory",
+      "github": "VectorSpaceLab/general-agentic-memory",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/gam_adapter.py",
+      "config_path": "evaluation/config/systems/gam.yaml",
+      "infra_required": ["filesystem"],
+      "estimated_ram_gb": 1,
+      "last_error": "smoke-failed: tiktoken failed to download the o200k_base BPE encoding from https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken (HTTP 403) — the cloud runner blocks that egress. Adapter + config are rule-compliant; retry once the BPE file is either cached in TIKTOKEN_CACHE_DIR or that CDN is reachable.",
+      "notes": "Rule-compliant: filesystem-only local memory, GAM_API_KEY/GAM_API_BASE/GAM_MODEL wired to Sophnet. Lightweight deps (no torch, no sentence-transformers). GAM paradigm is ReAct Q&A — adapter defers retrieval to answer() and returns GAM's answer verbatim for LLM-judge evaluation."
+    },
     {
       "name": "evermemos",
       "display_name": "EverMemOS",
