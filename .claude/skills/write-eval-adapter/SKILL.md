@@ -76,19 +76,17 @@ If any of these aborts fires, mark the candidate with `status: "needs-revisit"` 
 
 **Rule B — Force LLM/embedding to the fairness-baseline provider.** The system config's `llm:` block MUST read `api_key: "${LLM_API_KEY}"` and `base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"` and `model: "openai/gpt-4.1-mini"`. The baseline is **Sophnet** (same stack as the integrated `evermemos` system — keeps cross-system comparisons apples-to-apples). If the candidate also has its own internal LLM/embedding config (e.g. writes calls to Ollama or a bundled local model), the adapter's `__init__` MUST override those at runtime using `os.environ["LLM_BASE_URL"]` and `os.environ["LLM_API_KEY"]` before constructing the candidate's client.
 
-**Rule C — No dependency changes.** If the candidate requires a new pip package that is not already in `pyproject.toml [project.optional-dependencies] evaluation-full`, STOP. Do not edit `pyproject.toml`. Write the adapter file skeleton anyway but mark the import with:
+**Rule C — Declare candidate deps in YAML, never in `pyproject.toml`.** If the candidate needs pip packages that are NOT in `pyproject.toml [project.optional-dependencies] evaluation-full`, declare them in the candidate's system YAML under a `python_deps:` list (see template below). The run-bench skill installs them ephemerally via `uv run --with <pkg>` at smoke/full time. This overlay:
 
-```python
-try:
-    from candidatepkg import CandidateClient
-except ImportError:
-    raise ImportError(
-        "candidatepkg not installed. Add to pyproject.toml evaluation-full group "
-        "and open a separate PR before running this adapter."
-    )
-```
+- leaves `pyproject.toml` and `uv.lock` completely untouched (verified — main-project hashes are byte-identical before and after);
+- caches by the `--with` content hash, so repeat runs for the same candidate are warm;
+- is transparent to the main EverOS venv — `import <candidatepkg>` in the main venv still fails (no pollution, no locking).
 
-Then the next skill (run-bench) will see the import error and emit a `[install-failed]` PR.
+So: never edit `pyproject.toml`. Always populate `python_deps:` in the YAML. The adapter module's `import <candidatepkg>` line can be unconditional — the package WILL be present at smoke/full time because run-bench puts it there.
+
+Keep a defensive `try/except ImportError` around the candidate import ONLY if the import is expensive (big ML stack) or if you want a friendlier error when someone runs the adapter outside `uv run --with` (e.g. from a dev REPL). For most candidates, plain `from candidatepkg import X` is fine.
+
+If `uv run --with` itself fails to install the declared deps (version pin unresolvable, wheel build fail, network fail), run-bench emits `[install-failed]`. If it installs but conflicts with the main venv's resolved deps, run-bench emits `[dep-conflict]`. Neither case is handled by this skill — just declare the deps accurately.
 
 ## Adapter file template
 
@@ -146,13 +144,12 @@ class <SystemName>Adapter(OnlineAPIAdapter):
         os.environ.setdefault("OPENAI_API_KEY", os.environ.get("LLM_API_KEY", ""))
 
         # --- TODO 2: construct the candidate client (Rule A, Rule C) ---
-        try:
-            from candidatepkg import CandidateClient  # type: ignore
-        except ImportError as e:
-            raise ImportError(
-                f"<name> not installed: {e}. Not in evaluation-full — add dependency "
-                "in a separate PR before running this adapter."
-            ) from e
+        # Plain import — Rule C says the candidate package will be present
+        # at smoke/full time via run-bench's `uv run --with` overlay built
+        # from the `python_deps:` block in this candidate's system YAML.
+        # Wrap in try/except only if the ML stack is huge or you want a
+        # friendlier error when someone runs the adapter outside uv run --with.
+        from candidatepkg import CandidateClient  # type: ignore
 
         self.base_url = str(config.get("base_url", "") or "").rstrip("/")
         self.api_key = str(config.get("api_key", "") or "")
@@ -330,6 +327,16 @@ api_key: ""                           # most local candidates don't require auth
 max_retries: 3
 request_interval: 0.0
 
+# Candidate's pip deps (Rule C). Installed EPHEMERALLY via `uv run --with <pkg>`
+# at smoke/full time — does NOT touch pyproject.toml or uv.lock. Pin versions
+# that you observed in the candidate's README / pypi page; use `>=x.y.z` if the
+# candidate has a stable release history, `==x.y.z` if you want reproducibility.
+# Omit or leave empty list [] if the candidate is already in evaluation-full
+# (mem0, zep) or is pure-stdlib.
+python_deps:
+  - "candidatepkg>=1.0.0"
+  - "candidate-extra-dep>=0.5"
+
 # Concurrency (conversation-level; keep low until smoke test passes)
 num_workers: 5
 
@@ -375,7 +382,9 @@ When writing the adapter, pre-decide how the next-step (run-bench) skill will cl
 
 | Symptom at smoke time | Cause | seen_systems.json status |
 |---|---|---|
-| `ImportError` on candidate package | Rule C: dep not in evaluation-full | `status: failed`, `rejection_reason: "not in evaluation-full dep group"` |
+| `uv run --with` exits non-zero (version pin unresolvable, wheel build fail, network fail) | Rule C install path failed | `status: failed`, `rejection_reason: "ephemeral install failed: <tail of uv output>"`, PR tag `[install-failed]` |
+| `uv run --with` succeeds but harness imports break with `ImportError` / `VersionConflict` | candidate dep conflicts with main evaluation-full deps | `status: failed`, `rejection_reason: "dep conflict with main venv"`, PR tag `[dep-conflict]` |
+| `ImportError` on candidate package AFTER uv install succeeded | `python_deps:` listed wrong package name | fix `python_deps:` in YAML, re-run smoke |
 | HTTP 401/403 on `base_url` | candidate requires auth that this env can't provide | `status: failed`, `rejection_reason: "auth required"` |
 | `AttributeError: 'CandidateClient' has no attribute 'add'` | TODO 2/3 method names wrong | fix in-place, re-run smoke |
 | Candidate returns empty results for all queries on `--smoke` | search API wired incorrectly OR candidate requires background indexing | try `post_add_wait_seconds: 60` in config; if still empty → `status: failed` |

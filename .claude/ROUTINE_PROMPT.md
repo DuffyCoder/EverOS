@@ -69,8 +69,11 @@ Run, in order:
 - If `estimated_ram_gb > 14` after stopping EverOS stack, run LoCoMo in
   batches via `--from-conv`/`--to-conv` (Rule 3); the run-bench skill handles
   the per-batch `--output-dir` isolation and the completeness assertion.
-- Do NOT add dependencies. If a candidate needs a missing pip package, open
-  the PR with `[install-failed]` tag and no eval results.
+- Do NOT edit `pyproject.toml` / `uv.lock`. If a candidate needs a pip package
+  not in `evaluation-full`, declare it in the candidate's system YAML under
+  `python_deps:`. run-bench installs these ephemerally via `uv run --with` —
+  lockfile stays clean. Only tag `[install-failed]` when the ephemeral install
+  itself fails, `[dep-conflict]` on resolver conflicts.
 - Do NOT modify anything outside `evaluation/src/adapters/`,
   `evaluation/config/systems/`, `evaluation/results/`, `.auto_bench/`.
 - Never invent benchmark numbers. Only quote what appears in the canonical

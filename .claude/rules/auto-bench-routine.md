@@ -19,10 +19,10 @@ Auto-bench routine sessions may modify ONLY:
 Auto-bench routine sessions MUST NOT modify:
 - Anything in `src/` (the EverOS core)
 - Existing adapters or system configs
-- `pyproject.toml` / `uv.lock` (no dependency changes from the routine)
+- `pyproject.toml` / `uv.lock` (no permanent dependency changes from the routine)
 - `CLAUDE.md` itself
 
-If the routine needs a dependency that is not already in `pyproject.toml [project.optional-dependencies] evaluation-full`, abort the candidate and note this in the PR description. Do not silently add dependencies.
+If the routine needs a dependency that is not already in `pyproject.toml [project.optional-dependencies] evaluation-full`, DECLARE it in the candidate's `evaluation/config/systems/<name>.yaml` under the `python_deps:` list. The run-bench skill installs these ephemerally via `uv run --with <pkg>` — `pyproject.toml` and `uv.lock` are NOT modified. Never edit those two files from a routine session.
 
 ### Branching and PR conventions
 
@@ -46,7 +46,7 @@ For each candidate that passes discovery:
 3. If candidate ships its own `docker-compose.yaml`, start it with a unique project name to avoid colliding with EverOS infra: `docker compose -p auto-bench-<name> up -d`.
 4. Write the adapter at `evaluation/src/adapters/<name>_adapter.py` using `evermemos_adapter.py` as the structural reference (NOT mem0_adapter.py — that one targets a SaaS API and is the wrong template for our rules).
 5. Write the system config at `evaluation/config/systems/<name>.yaml`. The LLM/embedding section MUST point at `${LLM_BASE_URL}` and `${LLM_API_KEY}` even if the candidate normally uses its own.
-6. Run smoke first: `uv run python -m evaluation.cli --dataset locomo --system <name> --smoke`.
+6. Run smoke first: `uv run "${WITH_ARGS[@]}" python -m evaluation.cli --dataset locomo --system <name> --smoke` — where `WITH_ARGS` is built from the candidate YAML's `python_deps:` list (see run-bench skill for the mapfile incantation).
 7. If smoke passes AND total RAM estimate ≤ 14 GB: run full LoCoMo. Skip LongMemEval unless explicitly requested — it is too token-heavy for daily automation.
 8. If smoke passes but RAM > 14 GB: run in batches (see Rule 3). The current evaluation CLI may not support `--questions-range` natively — if so, write the batched results manually and merge in the report.
 9. After each candidate (pass or fail), tear down its docker stack: `docker compose -p auto-bench-<name> down -v`. THIS IS CRITICAL — without it, the next candidate will OOM.
@@ -57,7 +57,8 @@ For each candidate that passes discovery:
 | Failure | Action |
 |---|---|
 | Candidate has no Python SDK or REST API | Add to `seen_systems.json` with `status: rejected, rejection_reason: "no programmatic interface"`. Do not open PR. |
-| Candidate's `pip install` fails in the cloud env | Add to `seen_systems.json` with `status: failed, last_error: <traceback first 20 lines>`. Open PR with `[install-failed]` tag for visibility, no eval results. |
+| `uv run --with` fails to install the candidate's `python_deps:` (unresolvable pin, wheel build fail, network) | Add to `seen_systems.json` with `status: failed, last_error: <tail of uv output>`. Open PR with `[install-failed]` tag, no eval results. |
+| `uv run --with` installs but candidate dep conflicts with main evaluation-full deps | Add to `seen_systems.json` with `status: failed, rejection_reason: "dep conflict"`. Open PR with `[dep-conflict]` tag, no eval results. |
 | Smoke test crashes | Open PR titled `[Auto-Bench][smoke-failed] ...` with the traceback in the body. Do not run full eval. |
 | OOM during full run | Switch to batch mode. If batch mode also OOMs, abort and open PR with `[oom-batched]` tag. |
 | Timeout (> 90 min total per candidate) | Abort that candidate, continue with the next one. |

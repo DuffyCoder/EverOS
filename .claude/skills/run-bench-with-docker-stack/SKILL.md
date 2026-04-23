@@ -120,12 +120,35 @@ FULL_BASE="evaluation/results/auto-bench-<name>-full-$TS"
 
 `$FULL_BASE` is a directory that contains one subdirectory per batch (or one subdirectory for the single-batch case) plus a merged summary JSON. Never write anything above `$FULL_BASE` from this skill.
 
+## Build the `--with` overlay from YAML (Rule C)
+
+Read the candidate's `python_deps:` list from its system YAML and turn it into
+`--with <pkg>` flags. This is what makes the candidate package importable at
+smoke/full time without touching `pyproject.toml` or `uv.lock`:
+
+```bash
+# Collect python_deps from the candidate YAML into WITH_FLAGS array.
+# Empty list → empty array → unchanged `uv run` behavior.
+mapfile -t WITH_ARGS < <(
+  uv run --group evaluation-full python - "evaluation/config/systems/<name>.yaml" <<'PY'
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+for dep in (cfg.get("python_deps") or []):
+    print("--with")
+    print(dep)
+PY
+)
+```
+
+The array splat `"${WITH_ARGS[@]}"` below expands to zero flags for candidates
+already in `evaluation-full` (e.g. mem0, zep) and to the overlay list otherwise.
+
 ## Smoke test FIRST (always)
 
 Before any full run, prove the adapter is wired up. Explicit `--output-dir` makes the output path knowable and keeps the smoke run out of the full-run namespace:
 
 ```bash
-uv run python -m evaluation.cli \
+uv run "${WITH_ARGS[@]}" python -m evaluation.cli \
   --dataset locomo \
   --system <name> \
   --smoke \
@@ -140,7 +163,9 @@ Interpret the smoke result:
 | Outcome | Action |
 |---|---|
 | Exits 0, `"$SMOKE_DIR/eval_results.json"` exists and is non-empty | Proceed to full run |
-| ImportError on candidate package | Stop. Write failure row to `seen_systems.json` with `status: failed`, `rejection_reason: "missing dep — not in evaluation-full"`. No PR; report to routine prompt. |
+| `uv run` exits before any CLI output — fails at overlay install (version pin unresolvable, wheel build fail, network fail) | Stop. `status: failed`, `rejection_reason: "ephemeral install failed: <tail of uv output>"`. PR tag `[install-failed]`. |
+| `uv run` installs but then `ImportError` / `VersionConflict` during CLI import chain | Candidate dep conflicts with main evaluation-full deps. `status: failed`, `rejection_reason: "dep conflict with main venv"`. PR tag `[dep-conflict]`. |
+| `ImportError` on candidate package after successful install | `python_deps:` listed wrong package name in YAML. Fix the YAML (not this skill), re-run smoke. |
 | HTTP error from candidate service | Inspect docker logs: `docker compose -p auto-bench-<name> logs --tail 100`. If service never became healthy, mark `status: failed`, `rejection_reason: "service unhealthy on boot"`. |
 | `results` empty for all queries | Likely search method name wrong OR async indexing not awaited. Try adding `post_add_wait_seconds: 60` to config, re-run smoke ONCE (to a FRESH `$SMOKE_DIR` — don't reuse). If still empty: `status: failed`, `rejection_reason: "empty retrieval"`. |
 | OOM (container killed) | Stop. Mark `tier: oversize-infra`. No PR from this run; routine's main prompt will record this for the next iteration. |
@@ -156,14 +181,14 @@ Only reachable if smoke passed. In both single- and multi-batch paths each CLI i
 BATCH_DIR="$FULL_BASE/all"
 mkdir -p "$FULL_BASE"
 
-uv run python -m evaluation.cli \
+uv run "${WITH_ARGS[@]}" python -m evaluation.cli \
   --dataset locomo \
   --system <name> \
   --output-dir "$BATCH_DIR" \
   --clean-groups
 ```
 
-The per-batch `eval_results.json` lands at `"$BATCH_DIR/eval_results.json"`.
+The per-batch `eval_results.json` lands at `"$BATCH_DIR/eval_results.json"`. `WITH_ARGS` is the array built above from `python_deps:` — same rules apply to full run as to smoke.
 
 **Multi-batch path** (when `BATCH_SIZE < 10`):
 
@@ -195,7 +220,7 @@ for START in $(seq 0 "$BATCH_SIZE" $((NCONVS - 1))); do
     }
   fi
 
-  uv run python -m evaluation.cli \
+  uv run "${WITH_ARGS[@]}" python -m evaluation.cli \
     --dataset locomo \
     --system <name> \
     --from-conv "$START" \
@@ -345,8 +370,8 @@ The routine's overall wall-clock budget is ~90 minutes per candidate. Hard ceili
 Use `timeout` wrappers:
 
 ```bash
-timeout 600 uv run python -m evaluation.cli ... --smoke --output-dir "$SMOKE_DIR" ...
-timeout 3000 uv run python -m evaluation.cli ... --from-conv "$START" --to-conv "$END" --output-dir "$BATCH_DIR" ...
+timeout 600 uv run "${WITH_ARGS[@]}" python -m evaluation.cli ... --smoke --output-dir "$SMOKE_DIR" ...
+timeout 3000 uv run "${WITH_ARGS[@]}" python -m evaluation.cli ... --from-conv "$START" --to-conv "$END" --output-dir "$BATCH_DIR" ...
 ```
 
 `$START` is inclusive, `$END` is exclusive — these match the CLI's semantics directly. Do not subtract one from `$END`.
