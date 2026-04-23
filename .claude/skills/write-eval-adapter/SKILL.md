@@ -7,19 +7,76 @@ description: Use after discover-memory-frameworks has produced a candidate list.
 
 This skill is the **second step** of every auto-bench routine run. Its job is to produce a working, registered adapter for ONE candidate memory framework at a time.
 
-## Naming clarification (important)
+## Base-class choice (decide FIRST)
 
-The base class is called `OnlineAPIAdapter` for historical reasons. Do not read it as "cloud SaaS adapter". Its actual role is **black-box template method base class**: it provides three pieces of generic evaluation scaffolding that any system — local-SDK, local-HTTP, or SaaS — can share:
+Two valid base classes. Pick based on how the candidate exposes its surface:
 
-1. Conversation-level concurrency control (`num_workers` semaphore).
-2. Dual-perspective handling for LoCoMo's `speaker_a` / `speaker_b`.
-3. `answer()` implementation built on `LLMProvider` (Sophnet via LLMProvider).
+**`BaseAdapter` (direct) — use for most new candidates, especially SDK-in-process.** Live routine runs confirm this is the common case: `simplemem`, `amem`, `gam` all inherit `BaseAdapter` directly. It is the right choice when the candidate ships a Python class you instantiate in `__init__` (or a git repo you `sys.path`-inject). Yes, you give up `OnlineAPIAdapter`'s built-in concurrency semaphore + dual-perspective helpers, but in exchange you get a much smaller surface and no ill-fitting HTTP-session assumptions. Reference: `evermemos_adapter.py`.
 
-The local-vs-SaaS distinction is enforced at discovery time (Rule 1 rejects SaaS candidates), not at the base-class level. Proof: `evermemos_api_adapter.py` is a local-HTTP adapter (`http://localhost:1995`) and inherits `OnlineAPIAdapter` — it is the canonical reference for this skill.
+**`OnlineAPIAdapter` — use only for candidates that are HTTP-behind-localhost.** Think a candidate that ships `docker compose up` spinning a REST server at `http://localhost:<port>`. Reference: `evermemos_api_adapter.py`. The base name is historical — it does NOT imply "cloud SaaS" (Rule 1 already rejected SaaS at discovery). Inherits conversation-level concurrency, dual-perspective handling for LoCoMo's `speaker_a` / `speaker_b`, and a Sophnet-backed `answer()`. For HTTP candidates this is worth the added plumbing; for SDK candidates it's a mismatch because you'd fake a `ClientSession`.
 
-**The structural reference for every new adapter is `evermemos_api_adapter.py`.** It shows the local-HTTP variant. For local-SDK candidates, use the same template-method overrides but construct the candidate's Python class in `__init__` instead of an `aiohttp.ClientSession`. Do NOT use `mem0_adapter.py` as a template — it targets Mem0's SaaS endpoint, which our Rule 1 already rejected.
+Do NOT use `mem0_adapter.py` as a template — it targets Mem0's SaaS endpoint which Rule 1 rejects. For SDK candidates, copy the structural shape of `evermemos_adapter.py`.
 
-The alternative (inherit `BaseAdapter` directly) would drop the concurrency/perspective/answer scaffolding and force every new adapter to re-implement ~400 lines of harness plumbing. Not worth it.
+## Patterns from live routine runs (2026-04)
+
+These are patterns the routine agent rediscovered on its own across `simplemem` / `amem` / `gam` — promote them here so subsequent runs don't burn cycles re-deriving them.
+
+### Repo clone via YAML `repo:` block
+
+Candidates often ship a PyPI package that is NOT the reference implementation (or ship no PyPI package at all). When you need the git repo, declare:
+
+```yaml
+repo:
+  git_url: "https://github.com/<owner>/<name>.git"
+  clone_dir: "/tmp/candidate/<name>"
+```
+
+The run-bench skill (TODO on run-bench: add) can `git clone` this at smoke time. Until then, the ROUTINE_PROMPT workflow step 1 tells the agent to clone into `/tmp/candidate/<name>/` explicitly.
+
+### `_ensure_<name>_importable()` helper
+
+Standardized shape — insert the cloned repo at the **front** of `sys.path`, optionally evict conflicting `sys.modules` entries:
+
+```python
+<NAME>_REPO_DIR = Path(os.environ.get("<NAME>_REPO_DIR", "/tmp/candidate/<name>"))
+
+def _ensure_<name>_importable(repo_dir: Path) -> None:
+    if not repo_dir.exists():
+        raise RuntimeError(
+            f"<name> repo not found at {repo_dir}. Clone it: "
+            f"`git clone <git_url> {repo_dir}` or set <NAME>_REPO_DIR."
+        )
+    repo_str = str(repo_dir.resolve())
+    sys.path[:] = [repo_str] + [p for p in sys.path if p != repo_str]
+
+    # OPTIONAL — only if the candidate has generic top-level packages (core, utils,
+    # main, database, models, config) that collide with EverOS's src/ layout.
+    # SimpleMem has this problem; A-MEM and GAM do not. When in doubt, include it —
+    # it's a no-op if nothing conflicts.
+    conflicting = ("config", "main", "core", "database", "utils", "models")
+    for mod_name in list(sys.modules):
+        if mod_name in conflicting or any(mod_name.startswith(p + ".") for p in conflicting):
+            del sys.modules[mod_name]
+```
+
+### Config-injection pattern (two variants)
+
+Candidates consume LLM/embed config differently. Pick:
+
+- **Env-var injection** (A-MEM, GAM) — simpler. Set `os.environ["OPENAI_API_KEY"]` / `os.environ["OPENAI_BASE_URL"]` BEFORE the first `from candidatepkg import ...`. The openai SDK honors these on client construction.
+- **Module-constant mutation** (SimpleMem) — when the candidate has a `config.py` with module-level constants that its components read at init time (not per-call), `import config as simplemem_config` and overwrite the constants explicitly. Env vars alone don't work for this pattern.
+
+If you can't tell which pattern fits from the README, do BOTH (env vars + module mutation). Double-setting is harmless.
+
+### Per-conversation isolation
+
+LoCoMo has 10 conversations and the harness processes them serially. Pick ONE isolation strategy:
+
+- **Per-conversation instance** (SimpleMem): construct one `<System>` object per conv, persisted under `output_dir/<store>/` with a table name derived from the conv id. Clean boundaries.
+- **Shared instance + tag filter** (A-MEM): one system for the whole run, tag every write with `conv:<conversation_id>`, over-fetch + filter at search time. Use when the candidate's `__init__` is expensive (model loads, big index builds).
+- **Per-conversation directory** (GAM): filesystem-backed candidates work well with `output_dir/<conversation_id>/` and let the candidate reload its state from disk.
+
+Never share state across conversations without a tag or directory — you'll get cross-conv leakage and misleading scores.
 
 ## When to use
 
@@ -336,6 +393,14 @@ request_interval: 0.0
 python_deps:
   - "candidatepkg>=1.0.0"
   - "candidate-extra-dep>=0.5"
+
+# If the candidate's PyPI package is not the reference implementation (or it
+# has no PyPI release), point at the git repo so the agent can clone it into
+# /tmp/candidate/<name>/ and sys.path-inject. See "Patterns from live routine
+# runs" above for the full shape.
+repo:
+  git_url: "https://github.com/<owner>/<name>.git"
+  clone_dir: "/tmp/candidate/<name>"
 
 # Concurrency (conversation-level; keep low until smoke test passes)
 num_workers: 5
