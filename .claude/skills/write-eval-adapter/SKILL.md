@@ -9,13 +9,38 @@ This skill is the **second step** of every auto-bench routine run. Its job is to
 
 ## Base-class choice (decide FIRST)
 
-Two valid base classes. Pick based on how the candidate exposes its surface:
+**Default: `OnlineAPIAdapter`.** Evidence from the repo: 5 out of 5 non-native integrated adapters (`mem0`, `zep`, `memos`, `memu`, `evermemos_api`) inherit `OnlineAPIAdapter` regardless of transport (SDK / HTTP / SaaS). The "SDK vs HTTP" dichotomy isn't the right axis — **the right axis is whether the candidate's add/search/answer can be split into the template's 4 hooks**.
 
-**`BaseAdapter` (direct) — use for most new candidates, especially SDK-in-process.** Live routine runs confirm this is the common case: `simplemem`, `amem`, `gam` all inherit `BaseAdapter` directly. It is the right choice when the candidate ships a Python class you instantiate in `__init__` (or a git repo you `sys.path`-inject). Yes, you give up `OnlineAPIAdapter`'s built-in concurrency semaphore + dual-perspective helpers, but in exchange you get a much smaller surface and no ill-fitting HTTP-session assumptions. Reference: `evermemos_adapter.py`.
+`OnlineAPIAdapter` hands you for free:
 
-**`OnlineAPIAdapter` — use only for candidates that are HTTP-behind-localhost.** Think a candidate that ships `docker compose up` spinning a REST server at `http://localhost:<port>`. Reference: `evermemos_api_adapter.py`. The base name is historical — it does NOT imply "cloud SaaS" (Rule 1 already rejected SaaS at discovery). Inherits conversation-level concurrency, dual-perspective handling for LoCoMo's `speaker_a` / `speaker_b`, and a Sophnet-backed `answer()`. For HTTP candidates this is worth the added plumbing; for SDK candidates it's a mismatch because you'd fake a `ClientSession`.
+1. **`answer()` built on `LLMProvider` (Sophnet)** — this is THE fairness-baseline requirement. Every integrated system's answer stage goes through this same LLMProvider path, so cross-system comparisons stay apples-to-apples. Skip it and you're on the hook for re-implementing ~40 lines AND making sure you route to Sophnet not the candidate's default LLM.
+2. **Dual-perspective** for LoCoMo's `speaker_a` / `speaker_b` (~100 lines of template logic across `_search_single_perspective` / `_search_dual_perspective` / `_build_dual_search_result`).
+3. **Conversation-level concurrency** — `num_workers` semaphore baked in.
+4. **Batching with retry** (`_batch_messages_with_retry`), `_extract_user_id`, role/content determination, prompt loading from `evaluation/config/prompts.yaml`.
 
-Do NOT use `mem0_adapter.py` as a template — it targets Mem0's SaaS endpoint which Rule 1 rejects. For SDK candidates, copy the structural shape of `evermemos_adapter.py`.
+You only implement 4 hooks:
+- `_add_user_messages(conv, messages, speaker, **kwargs)` — ingest one speaker's messages for one conversation
+- `_search_single_user(query, conversation_id, user_id, top_k, **kwargs)` — retrieve top-k memories for one user
+- `_build_single_search_result(...)` — wrap results into a `SearchResult`
+- `_build_dual_search_result(...)` — dual-perspective variant (usually 5-10 lines using the template's formatted-context helper)
+
+Reference: `evermemos_api_adapter.py` (HTTP), `mem0_adapter.py` (SaaS SDK), `zep_adapter.py` (SaaS SDK). All three are OnlineAPIAdapter regardless of transport — proving the decision is about shape, not transport.
+
+### Use `BaseAdapter` ONLY when one of these is true
+
+Verified against live routine outputs (simplemem / amem / gam):
+
+**(a) The candidate bundles search + answer in a single call.** GAM's only query API is `wf.request(question)` — it runs retrieval + reasoning + answer together in one ReAct loop. There is no way to split it into `_search_single_user` + template `answer()`. GAM's BaseAdapter choice was correct.
+
+**(b) You're writing a native re-implementation.** Like `evermemos_adapter.py` itself — heavy multi-stage pipelines, rich progress bars, depth-first custom orchestration. The template would be in the way.
+
+**(c) The candidate's shape truly doesn't map to 4 hooks.** Rare. If you find yourself faking `_add_user_messages` to do nothing or stuffing an unrelated call into `_search_single_user`, the template is the wrong fit.
+
+### Cautionary tale — simplemem and amem got it wrong
+
+Live routine runs produced BaseAdapter adapters for simplemem and amem. Both candidates DO fit the 4 hooks (`add_dialogue` → `_add_user_messages`, `retrieve` / `search` → `_search_single_user`). Both adapters ended up MANUALLY re-implementing `answer()` with `from memory_layer.llm.llm_provider import LLMProvider` — exactly the 40-line boilerplate OnlineAPIAdapter hands you free. Don't repeat this. If the candidate has split `add` + `search` entry points, use OnlineAPIAdapter.
+
+Do NOT use `mem0_adapter.py` as the API-method-naming template — it wraps Mem0's SaaS endpoint which Rule 1 rejects for new candidates. But DO use it as the **structural** template for how a typical OnlineAPIAdapter subclass is shaped.
 
 ## Patterns from live routine runs (2026-04)
 
