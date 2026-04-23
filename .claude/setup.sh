@@ -17,6 +17,23 @@ if [[ ! -f pyproject.toml ]]; then
   exit 0
 fi
 
+echo "::group::Git remotes (origin + upstream)"
+# The write-eval-adapter skill runs a preflight collision check against
+# `upstream/main` (EverMind-AI/EverMemOS) so it doesn't clobber an adapter
+# name a human PR already claimed upstream. Cloud clones only have `origin`;
+# add `upstream` idempotently here. If it's already set, we leave it alone.
+if ! git remote get-url upstream >/dev/null 2>&1; then
+  git remote add upstream https://github.com/EverMind-AI/EverMemOS.git
+  echo "  ✅ added upstream remote"
+else
+  echo "  ✅ upstream remote already configured"
+fi
+# Warm the fetch cache so the first preflight check doesn't pay cold latency.
+# Network-fail is non-fatal — the skill will re-fetch and surface the error.
+git fetch upstream main --quiet 2>/dev/null || \
+  echo "  (upstream fetch failed — skill will retry at collision-check time)"
+echo "::endgroup::"
+
 echo "::group::Python dependencies (evaluation-full)"
 uv sync --group evaluation-full
 echo "::endgroup::"
