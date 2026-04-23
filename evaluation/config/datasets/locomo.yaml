@@ -21,7 +21,7 @@ evaluation:
     provider: "openai"
     model: "gpt-4o-mini"
     api_key: "${LLM_API_KEY}"
-    base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   
   num_runs: 3  # Number of judging runs per question
   

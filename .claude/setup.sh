@@ -5,7 +5,17 @@
 # Keep cheap and idempotent.
 set -euo pipefail
 
+# Locate project root.
+# When pasted into the cloud-environment "Setup script" field, this script runs
+# BEFORE Claude Code launches and BEFORE the repo is cloned, so CLAUDE_PROJECT_DIR
+# may not be set yet. In that case pyproject.toml won't exist and we exit cleanly —
+# the full setup will run again once CLAUDE_PROJECT_DIR is available (routine start).
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
+if [[ ! -f pyproject.toml ]]; then
+  echo "ℹ️  pyproject.toml not found (CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-unset})."
+  echo "   Project-level setup deferred to routine runtime when repo is available."
+  exit 0
+fi
 
 echo "::group::Python dependencies (evaluation-full)"
 uv sync --group evaluation-full
