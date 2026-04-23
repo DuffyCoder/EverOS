@@ -7,7 +7,7 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
     {
       "name": "evermemos",
@@ -63,6 +63,29 @@
       "tier": "saas-only",
       "memory_backend": "saas",
       "rejection_reason": "Community Edition deprecated; only Graphiti engine remains open source. No clean self-hosted memory path that matches upstream evaluation conditions."
+    },
+    {
+      "name": "cognee",
+      "display_name": "Cognee",
+      "github": "topoteretes/cognee",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/cognee_adapter.py",
+      "config_path": "evaluation/config/systems/cognee.yaml",
+      "infra_required": ["networkx-in-process", "optional-neo4j", "optional-postgres"],
+      "estimated_ram_gb": 4,
+      "rejection_reason": "install-failed: `cognee` package is not in pyproject.toml [dependency-groups] evaluation-full. Per Rule C the routine cannot add deps; adapter skeleton was written and registry registered, but smoke fails at adapter __init__.",
+      "last_run": {
+        "date": "2026-04-23",
+        "smoke_result": "fail",
+        "full_result": "fail",
+        "batch_mode": false,
+        "overall_score": null,
+        "last_error": "ModuleNotFoundError: No module named 'cognee'. Raised from cognee_adapter.py:51 on adapter construction (before any LoCoMo conversation was processed).",
+        "notes": "Tier-1 candidate, very fresh (v1.0.2 Apr 22 2026). Async-native SDK (cognee.add / cognify / search), per-user isolation via dataset_name. Defaults to in-process NetworkX backend so RAM stays inside Rule 3 budget. Unblock by adding `cognee` to evaluation-full in a separate PR; transitive ML deps (sentence-transformers, neo4j optional) will need to be reviewed."
+      }
     }
   ],
   "deny_keywords": [
