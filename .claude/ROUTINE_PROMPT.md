@@ -47,7 +47,7 @@ Run, in order:
 3. **Notify.** After all candidates are processed, send ONE Gmail via the
    Gmail connector:
      - To: the routine owner's configured email.
-     - Subject: `Auto-Bench weekly: <N_pass>/<N_total> candidates passed`.
+     - Subject: `Auto-Bench daily: <N_pass>/<N_total> candidates passed`.
      - Body: one bullet per candidate with PR URL and headline metric.
 
 ## Non-negotiables (abort if violated)

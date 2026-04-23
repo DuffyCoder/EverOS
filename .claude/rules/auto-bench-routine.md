@@ -47,7 +47,7 @@ For each candidate that passes discovery:
 4. Write the adapter at `evaluation/src/adapters/<name>_adapter.py` using `evermemos_adapter.py` as the structural reference (NOT mem0_adapter.py — that one targets a SaaS API and is the wrong template for our rules).
 5. Write the system config at `evaluation/config/systems/<name>.yaml`. The LLM/embedding section MUST point at `${LLM_BASE_URL}` and `${LLM_API_KEY}` even if the candidate normally uses its own.
 6. Run smoke first: `uv run python -m evaluation.cli --dataset locomo --system <name> --smoke`.
-7. If smoke passes AND total RAM estimate ≤ 14 GB: run full LoCoMo. Skip LongMemEval unless explicitly requested — it is too token-heavy for weekly automation.
+7. If smoke passes AND total RAM estimate ≤ 14 GB: run full LoCoMo. Skip LongMemEval unless explicitly requested — it is too token-heavy for daily automation.
 8. If smoke passes but RAM > 14 GB: run in batches (see Rule 3). The current evaluation CLI may not support `--questions-range` natively — if so, write the batched results manually and merge in the report.
 9. After each candidate (pass or fail), tear down its docker stack: `docker compose -p auto-bench-<name> down -v`. THIS IS CRITICAL — without it, the next candidate will OOM.
 10. Update `.auto_bench/seen_systems.json` with the new entry and commit.

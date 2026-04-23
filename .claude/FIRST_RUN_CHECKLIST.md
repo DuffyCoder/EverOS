@@ -1,6 +1,6 @@
 # Auto-Bench Routine — First-Run Checklist (operator-facing)
 
-Do this ONCE before enabling the weekly schedule. None of these steps are
+Do this ONCE before enabling the daily schedule. None of these steps are
 part of the committed routine prompt; they happen through the claude.ai/code
 UI and in your local shell.
 
@@ -50,9 +50,12 @@ never contained it). Click "Run now" again. Watch the live log.
 
 ## 4. Enable the schedule
 
-- [ ] Set schedule to `Sunday 20:00 local` (or your preferred low-traffic
-      slot). Pro plan has 5 runs/day — weekly is safe, but do not chain this
-      routine with others that also consume the budget.
+- [ ] Set schedule to **daily at 02:00 Asia/Shanghai (UTC+8)** — i.e. `0 2 * * *`
+      in Asia/Shanghai, or `0 18 * * *` in UTC. Low-traffic slot for the
+      cloud runner; discovery that finds no new candidates exits cheaply
+      without burning the per-candidate bench budget. Daily cadence uses
+      1/15 runs on Max 5x (30 on Max 20x, 5 on Pro — Pro users should
+      downshift to every 2–3 days to leave headroom for other routines).
 - [ ] Configure required env vars in the routine's env section:
       - `LLM_API_KEY=<sophnet-project-key>` (Sophnet key; no stable prefix —
         copy the exact value from the project's .env)
@@ -73,11 +76,11 @@ never contained it). Click "Run now" again. Watch the live log.
 - After the first scheduled run, visit the resulting PR and Gmail. If the PR
   body contains a `[coverage-gap]`, `[install-failed]`, `[oom-batched]`,
   `[zero-score]`, or `[smoke-failed]` tag, investigate before letting the
-  next weekly run happen.
-- If two consecutive weeks produce empty discovery, widen the discovery
+  next day's run happen.
+- If **7 consecutive days** produce empty discovery, widen the discovery
   sources in `.claude/skills/discover-memory-frameworks/SKILL.md`.
-- If the Pro plan daily-run budget is hit, move the routine to Max or
-  reduce its frequency.
+- If the daily-run budget is hit (5 on Pro, 15 on Max 5x, 30 on Max 20x),
+  either reduce to every 2–3 days or upgrade plan.
 
 ## Troubleshooting
 
