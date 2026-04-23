@@ -44,11 +44,22 @@ Run, in order:
    f. Teardown already happened inside the run-bench skill. Verify no
       `auto-bench-<name>-*` containers remain before moving on.
 
-3. **Notify.** After all candidates are processed, send ONE Gmail via the
-   Gmail connector:
+3. **Notify.** After all candidates are processed, create ONE draft in Gmail
+   via `create_draft` (the connector does NOT expose send — operator will
+   review and send the draft manually):
      - To: the routine owner's configured email.
      - Subject: `Auto-Bench daily: <N_pass>/<N_total> candidates passed`.
      - Body: one bullet per candidate with PR URL and headline metric.
+
+**Non-negotiables for infra (do NOT try to start EverOS stack):**
+- DO NOT run `docker compose up` / `docker compose -f docker-compose.yaml up`
+  on the repo's own EverOS compose file. Auto-bench candidates are local
+  black-box systems and never touch MongoDB / Elasticsearch / Milvus / Redis.
+- If the EverOS stack happens to be running when the routine starts, stop it
+  with `docker compose -f docker-compose.yaml down` to free 14 GB RAM for the
+  candidate, as the rules file says.
+- The only docker stack the routine may start is a CANDIDATE's own
+  `docker-compose.yaml` (with `-p auto-bench-<name>` project isolation).
 
 ## Non-negotiables (abort if violated)
 
@@ -69,7 +80,7 @@ Run, in order:
 
 If any step throws, record the failure in `.auto_bench/seen_systems.json`
 against that candidate (`status: failed`, `last_error: <first 20 lines>`),
-continue to the next candidate, and include the failure in the Gmail summary.
+continue to the next candidate, and include the failure in the Gmail draft.
 Do not abort the whole routine on one candidate's failure.
 
 ## Session context for humans

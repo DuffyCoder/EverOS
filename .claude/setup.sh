@@ -21,12 +21,11 @@ echo "::group::Python dependencies (evaluation-full)"
 uv sync --group evaluation-full
 echo "::endgroup::"
 
-echo "::group::Preload EverMemOS docker images"
-# EverMemOS infra is NOT started by the routine (candidates don't need it),
-# but pulling keeps the cached image layer available for future cold runs.
-docker compose -f docker-compose.yaml pull --quiet || \
-  echo "  (pull failed — skipping; routine doesn't require EverOS infra)"
-echo "::endgroup::"
+# EverMemOS docker images are intentionally NOT preloaded. Auto-bench candidates
+# are local black-box systems — they never depend on EverOS's MongoDB / ES /
+# Milvus / Redis stack. Pulling those images wastes cache and (more importantly)
+# misleads the routine agent into thinking EverOS infra is required — past runs
+# have tried `docker compose up` and wasted budget on quay.io 403s for etcd.
 
 echo "::group::Candidate scratch dir"
 mkdir -p /tmp/candidate

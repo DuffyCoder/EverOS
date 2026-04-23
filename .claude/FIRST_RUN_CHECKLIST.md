@@ -4,6 +4,22 @@ Do this ONCE before enabling the daily schedule. None of these steps are
 part of the committed routine prompt; they happen through the claude.ai/code
 UI and in your local shell.
 
+## 0. GitHub write access (prerequisite — do this FIRST)
+
+Routines use your connected GitHub identity (OAuth token), NOT the Claude
+Code GitHub App. Without this step, every `git push` from the routine
+returns HTTP 403 "denied to <user>" / "Resource not accessible by integration".
+
+- In your local Claude Code CLI, run `/web-setup` and authorize the GitHub
+  account that OWNS the routine target repo (`DuffyCoder/EverOS` in our case).
+  This grants the routine's OAuth token `contents:write` + `pull_requests:write`.
+- Separately, at https://claude.ai/code/routines → your routine →
+  **Select repositories**, confirm `DuffyCoder/EverOS` is listed.
+- Branch push policy: routines can push ONLY to `claude/`-prefixed branches
+  by default. The routine's convention `claude/auto-bench-<name>-YYYYMMDD`
+  satisfies this automatically. If you need to push to other branches from
+  the routine, toggle **Allow unrestricted branch pushes** on the repo.
+
 ## 1. Create the routine with NO schedule
 
 - Go to https://claude.ai/code/routines → Create routine.
