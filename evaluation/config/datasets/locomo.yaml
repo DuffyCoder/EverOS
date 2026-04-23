@@ -19,7 +19,7 @@ evaluation:
   # LLM Judge settings
   llm:
     provider: "openai"
-    model: "${LLM_MODEL:openai/gpt-4.1-mini}"
+    model: "gpt-4o-mini"
     api_key: "${LLM_API_KEY}"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   
