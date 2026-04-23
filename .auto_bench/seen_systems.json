@@ -7,8 +7,23 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
+    {
+      "name": "simplemem",
+      "display_name": "SimpleMem",
+      "github": "aiming-lab/SimpleMem",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/simplemem_adapter.py",
+      "config_path": "evaluation/config/systems/simplemem.yaml",
+      "infra_required": ["lancedb", "sqlite"],
+      "estimated_ram_gb": 2,
+      "last_error": "smoke-failed: HuggingFace Hub returns HTTP 403 for Qwen/Qwen3-Embedding-0.6B from the cloud runner; SentenceTransformer cannot initialize without the weights. Adapter + config are rule-compliant; retry when HF access is unblocked or when a proxy-backed embedding override is added to SimpleMem.",
+      "notes": "Rule-compliant: local LanceDB+SQLite backend, Sophnet LLM wired via api_key/base_url/model kwargs. Embedding is Qwen3-Embedding-0.6B (0.6B < 1B routine threshold) but requires HF download at init. Ephemeral `uv run --with` install succeeded; failure is environmental."
+    },
     {
       "name": "evermemos",
       "display_name": "EverMemOS",
