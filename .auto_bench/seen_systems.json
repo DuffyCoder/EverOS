@@ -7,7 +7,7 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-23",
   "systems": [
     {
       "name": "evermemos",
@@ -63,6 +63,30 @@
       "tier": "saas-only",
       "memory_backend": "saas",
       "rejection_reason": "Community Edition deprecated; only Graphiti engine remains open source. No clean self-hosted memory path that matches upstream evaluation conditions."
+    },
+    {
+      "name": "reme",
+      "display_name": "ReMe",
+      "github": "agentscope-ai/ReMe",
+      "first_seen": "2026-04-23",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/reme_adapter.py",
+      "config_path": "evaluation/config/systems/reme.yaml",
+      "infra_required": ["in-process vector store"],
+      "estimated_ram_gb": 1,
+      "rejection_reason": "Fairness-baseline provider (Sophnet) does not expose an OpenAI-compatible embedding endpoint; ReMe's personal-memory flow depends on vector-store inserts via an openai_compatible embedding backend, so UpdateVectorStoreOp silently produces zero-vector inserts. Retrieval for all LoCoMo queries returned '(No memories found)'.",
+      "last_run": {
+        "date": "2026-04-23",
+        "run_name": "auto-bench-reme-smoke2-20260423-183552",
+        "smoke_result": "fail",
+        "full_result": "not-run",
+        "batch_mode": false,
+        "overall_score": 0.02,
+        "notes": "Smoke exited 0 but 50/50 retrievals were empty; only 1/50 answers correct (LLM guess, no context). LLM stage worked once the model name was corrected to 'gpt-4.1-mini'. Root blocker: embedding endpoint absent on Sophnet."
+      },
+      "notes": "Requires an OpenAI-compatible embedding provider. Re-run once the routine offers one (e.g. via a separate EMBEDDING_BASE_URL in the cloud runner)."
     }
   ],
   "deny_keywords": [
