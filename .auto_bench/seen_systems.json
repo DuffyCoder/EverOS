@@ -7,8 +7,30 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-24",
   "systems": [
+    {
+      "name": "reme",
+      "display_name": "ReMe (Remember Me, Refine Me)",
+      "github": "agentscope-ai/ReMe",
+      "first_seen": "2026-04-24",
+      "status": "candidate",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/reme_adapter.py",
+      "config_path": "evaluation/config/systems/reme.yaml",
+      "infra_required": ["sqlite-vec"],
+      "estimated_ram_gb": 2,
+      "last_run": {
+        "date": "2026-04-24",
+        "run_name": "auto-bench-reme-20260424",
+        "smoke_result": "pass",
+        "full_result": "infeasible-time-budget",
+        "batch_mode": false,
+        "overall_score": 0.3433,
+        "notes": "Smoke (20q) = 48% acc, larger smoke (100q, 500 msgs) = 34.33% acc. Full LoCoMo (1986q) infeasible in 50-min routine budget: Stage 1 alone ~45 min, Stage 2 agentic retrieval ~17 s/query extrapolates to 8+ hours. Adapter registers an inline sophnet_embeddings backend because Sophnet's /embeddings endpoint uses a non-OpenAI-compatible body shape."
+      }
+    },
     {
       "name": "evermemos",
       "display_name": "EverMemOS",
