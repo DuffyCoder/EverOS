@@ -55,6 +55,16 @@ class SimpleMemAdapter(OnlineAPIAdapter):
         os.environ["OPENAI_BASE_URL"] = baseline_url
         os.environ["LLM_MODEL"] = baseline_model
 
+        # SimpleMem defaults to Qwen3-Embedding-0.6B which loads in bfloat16
+        # and balloons to ~1.5 GB per instance once cast to float32 for CPU
+        # inference. With one SimpleMemSystem per LoCoMo speaker (×10 convs)
+        # that exceeds the 16 GB cloud budget. Override to the lightweight
+        # MiniLM fallback (~80 MB, 384-dim, float32 native).
+        embedding_override = config.get(
+            "embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+        )
+        os.environ["SIMPLEMEM_EMBEDDING_MODEL"] = embedding_override
+
         self._llm_api_key = baseline_key
         self._llm_base_url = baseline_url
         self._llm_model = baseline_model
