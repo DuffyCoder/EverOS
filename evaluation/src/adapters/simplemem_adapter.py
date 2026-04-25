@@ -90,7 +90,7 @@ class SimpleMemAdapter(OnlineAPIAdapter):
 
                 table = _safe_table(user_id)
                 db_path = str(self._db_root / f"{table}.lance")
-                return SimpleMemSystem(
+                inst = SimpleMemSystem(
                     api_key=self._llm_api_key,
                     base_url=self._llm_base_url,
                     model=self._llm_model,
@@ -98,6 +98,19 @@ class SimpleMemAdapter(OnlineAPIAdapter):
                     table_name=table,
                     clear_db=True,
                 )
+                # Qwen3 weights load as bfloat16 but sentence-transformers
+                # tokenizes inputs as float32; on CPU the linear layer rejects
+                # the mismatch. Cast the embedding stack to float32 explicitly.
+                try:
+                    import torch  # type: ignore
+
+                    emb = getattr(inst, "embedding_model", None)
+                    st = getattr(emb, "model", None)
+                    if st is not None:
+                        st.to(torch.float32)
+                except Exception as e:  # noqa: BLE001
+                    print(f"   SimpleMem dtype cast skipped: {e}")
+                return inst
 
             mem = await asyncio.to_thread(_construct)
             self._mem_instances[user_id] = mem
