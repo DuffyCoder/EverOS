@@ -7,8 +7,37 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-25",
   "systems": [
+    {
+      "name": "simplemem",
+      "display_name": "SimpleMem",
+      "github": "aiming-lab/SimpleMem",
+      "first_seen": "2026-04-25",
+      "status": "candidate",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/simplemem_adapter.py",
+      "config_path": "evaluation/config/systems/simplemem.yaml",
+      "infra_required": ["lancedb", "sqlite"],
+      "estimated_ram_gb": 1,
+      "license": "MIT",
+      "pypi_package": "simplemem>=0.1.0",
+      "last_run": {
+        "date": "2026-04-25",
+        "run_name": "auto-bench-simplemem-full-20260425-191344",
+        "smoke_result": "pass",
+        "full_result": "partial",
+        "batch_mode": false,
+        "smoke_accuracy": 0.5733,
+        "smoke_questions": 50,
+        "smoke_f1_mean": 0.3299,
+        "smoke_bleu1_mean": 0.2253,
+        "overall_score": null,
+        "notes": "Smoke (10 convs x 5 questions) passed at 57.33% accuracy. Full LoCoMo Stage 1 (Add) completed in ~39 min; Stage 2 (Search) hit the 50-min run-bench ceiling mid-execution due to SimpleMem's hybrid retriever invoking iterative LLM reflection rounds (~10-25 s/query). Adapter is functional; full eval needs longer budget or coarser retrieval mode."
+      },
+      "notes": "Black-box SDK adapter. Per-user_id SimpleMemSystem isolation via LanceDB tables under output_dir. Embedding overridden to all-MiniLM-L6-v2 (Qwen3-0.6B caused CPU dtype mismatch + 10x OOM). LLM forced to Sophnet via constructor + OPENAI_* env. Sophnet model id MUST be bare 'gpt-4.1-mini' (no openai/ prefix)."
+    },
     {
       "name": "evermemos",
       "display_name": "EverMemOS",
