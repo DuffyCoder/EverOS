@@ -40,6 +40,8 @@ RUN apt-get update \
 # Eval-layer assets
 COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
 COPY --chown=node:node container/entrypoint.sh /eval/entrypoint.sh
+COPY --chown=node:node container/openclaw_eval_bridge.mjs /eval/openclaw_eval_bridge.mjs
+COPY --chown=node:node container/openclaw_eval_bridge_lib.mjs /eval/openclaw_eval_bridge_lib.mjs
 RUN chmod 755 /eval/entrypoint.sh
 
 # Memory plugin id is read by entrypoint.sh to render the right plugin
