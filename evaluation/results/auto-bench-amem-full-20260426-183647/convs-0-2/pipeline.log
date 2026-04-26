@@ -1,0 +1,10 @@
+2026-04-26 18:36:55,546 - evaluation - INFO - Conversation range [0:3] - selected 3/10 conversations, 497/1986 questions
+2026-04-26 18:36:55,550 - evaluation - INFO - Starting Stage 1: Add
+2026-04-26 19:54:05,384 - evaluation - INFO - ✅ Stage 1 completed
+2026-04-26 19:54:05,385 - evaluation - INFO - Starting Stage 2: Search
+2026-04-26 19:54:16,500 - evaluation - INFO - ✅ Stage 2 completed
+2026-04-26 19:54:16,662 - evaluation - INFO - Starting Stage 3: Answer
+2026-04-26 19:54:29,265 - evaluation - INFO - ✅ Stage 3 completed
+2026-04-26 19:54:29,451 - evaluation - INFO - Starting Stage 4: Evaluate
+2026-04-26 19:56:42,094 - evaluation - INFO - ✅ Stage 4 completed
+2026-04-26 19:56:42,325 - evaluation - INFO - Report saved to: evaluation/results/auto-bench-amem-full-20260426-183647/convs-0-2/report.txt

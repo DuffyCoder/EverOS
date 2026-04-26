@@ -1,0 +1,63 @@
+============================================================
+📊 Evaluation Report
+============================================================
+
+System: A-MEM
+Time Elapsed: 4786.77s
+
+Total Questions: 385
+Correct: 222
+Accuracy: 57.84%
+
+Retrieval-level (canonical, cross-adapter):
+  content_overlap_at_5: 0.0412
+  content_overlap_precision_at_5: 0.0225
+  content_overlap_recall_at_5: 0.3690
+
+Adapter-specific retrieval (diagnostic, NOT cross-adapter):
+  evidence_hit_at_5: 0.0000
+  evidence_recall_at_5: 0.0000
+  mrr: 0.0000
+  ndcg_at_5: 0.0000
+
+Latency (canonical, retry_policy=realistic):
+  add (n=1):
+    realistic: {n=1, mean=4629833.29, p50=4629833.29, p95=4629833.29, max=4629833.29}
+    clean: {n=1, mean=4629833.29, p50=4629833.29, p95=4629833.29, max=4629833.29}
+    first_attempt: {n=1, mean=4629833.29, p50=4629833.29, p95=4629833.29, max=4629833.29}
+    successful_attempt: {n=1, mean=4629833.29, p50=4629833.29, p95=4629833.29, max=4629833.29}
+    reliability: {retry=0.000, fallback=0.000, failed=0.000}
+  search (n=385):
+    realistic: {n=385, mean=109.56, p50=106.19, p95=124.25, max=402.67}
+    clean: {n=385, mean=109.56, p50=106.19, p95=124.25, max=402.67}
+    first_attempt: {n=385, mean=109.55, p50=106.18, p95=124.25, max=402.66}
+    successful_attempt: {n=385, mean=109.55, p50=106.18, p95=124.25, max=402.66}
+    reliability: {retry=0.000, fallback=0.000, failed=0.000}
+  answer (n=385):
+    realistic: {n=385, mean=1370.50, p50=1144.94, p95=2784.95, max=3246.87}
+    clean: {n=385, mean=1370.50, p50=1144.94, p95=2784.95, max=3246.87}
+    first_attempt: {n=385, mean=1370.48, p50=1144.93, p95=2784.94, max=3246.86}
+    successful_attempt: {n=385, mean=1370.48, p50=1144.93, p95=2784.94, max=3246.86}
+    reliability: {retry=0.000, fallback=0.000, failed=0.000}
+  e2e_query_ms (n=385):
+    realistic: {n=385, mean=1480.05, p50=1255.42, p95=2897.94, max=3359.69}
+
+Diagnostics:
+  add_latency_ms_mean: n/a
+  retrieval_latency_ms_mean: n/a
+  answer_latency_ms_mean: 1370.48
+  final_context_tokens_mean: 782.71
+  add_latency_ms_stats: n/a
+  retrieval_latency_ms_stats: n/a
+  answer_latency_ms_stats: {n=385, mean=1370.48, p50=1144.93, p95=2784.94, max=3246.86}
+  final_context_tokens_stats: {n=385, mean=782.71, p50=768.00, p95=1088.40, max=1286.00}
+  add_retry_rate: n/a
+  add_fallback_rate: n/a
+  add_failed_rate: n/a
+  add_samples: 0.00
+
+Answer-level (aux):
+  f1_mean: 0.4224
+  bleu1_mean: 0.2549
+
+============================================================

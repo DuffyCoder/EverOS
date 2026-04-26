@@ -1,0 +1,680 @@
+{
+  "total_questions": 50,
+  "correct": 26,
+  "accuracy": 0.52,
+  "detailed_results": {
+    "locomo_exp_user_0": [
+      {
+        "question_id": "locomo_0_qa0",
+        "question": "When did Caroline go to the LGBTQ support group?",
+        "golden_answer": "7 May 2023",
+        "generated_answer": "7 May 2023",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_0_qa1",
+        "question": "When did Melanie paint a sunrise?",
+        "golden_answer": 2022,
+        "generated_answer": "Last year (2022).",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_0_qa2",
+        "question": "What fields would Caroline be likely to pursue in her educaton?",
+        "golden_answer": "Psychology, counseling certification",
+        "generated_answer": "Counseling or mental health.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "3"
+      },
+      {
+        "question_id": "locomo_0_qa3",
+        "question": "What did Caroline research?",
+        "golden_answer": "Adoption agencies",
+        "generated_answer": "Career options in mental health.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_0_qa4",
+        "question": "What is Caroline's identity?",
+        "golden_answer": "Transgender woman",
+        "generated_answer": "Caroline identifies as transgender.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      }
+    ],
+    "locomo_exp_user_1": [
+      {
+        "question_id": "locomo_1_qa0",
+        "question": "When Jon has lost his job as a banker?",
+        "golden_answer": "19 January, 2023",
+        "generated_answer": "19 January 2023",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_1_qa1",
+        "question": "When Gina has lost her job at Door Dash?",
+        "golden_answer": "January, 2023",
+        "generated_answer": "January 2023",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_1_qa2",
+        "question": "How do Jon and Gina both like to destress?",
+        "golden_answer": "by dancing",
+        "generated_answer": "Through dance.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "4"
+      },
+      {
+        "question_id": "locomo_1_qa3",
+        "question": "What do Jon and Gina both have in common?",
+        "golden_answer": "They lost their jobs and decided to start their own businesses.",
+        "generated_answer": "A love for contemporary dance.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_1_qa4",
+        "question": "Why did Jon decide to start his dance studio?",
+        "golden_answer": "He lost his job and decided to start his own business to share his passion.",
+        "generated_answer": "To share his passion for dancing.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "4"
+      }
+    ],
+    "locomo_exp_user_2": [
+      {
+        "question_id": "locomo_2_qa0",
+        "question": "Who did Maria have dinner with on May 3, 2023?",
+        "golden_answer": "her mother",
+        "generated_answer": "No information available.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_2_qa1",
+        "question": "When did Maria donate her car?",
+        "golden_answer": "21 December 2022",
+        "generated_answer": "21 December 2022",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_2_qa2",
+        "question": "What martial arts has John done?",
+        "golden_answer": "Kickboxing, Taekwondo",
+        "generated_answer": "Kickboxing",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_2_qa3",
+        "question": "What type of volunteering have John and Maria both done?",
+        "golden_answer": "Volunteering at a homeless shelter",
+        "generated_answer": "Volunteering at a homeless shelter.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_2_qa4",
+        "question": "When did John join the online support group?",
+        "golden_answer": "The week before 1 January 2023",
+        "generated_answer": "The memories do not mention John joining an online support group.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      }
+    ],
+    "locomo_exp_user_3": [
+      {
+        "question_id": "locomo_3_qa0",
+        "question": "Is it likely that Nate has friends besides Joanna?",
+        "golden_answer": "Yesteammates on hisvideo game team.",
+        "generated_answer": "Yes, likely.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "3"
+      },
+      {
+        "question_id": "locomo_3_qa1",
+        "question": "What kind of interests do Joanna and Nate share?",
+        "golden_answer": "Watching movies, making desserts",
+        "generated_answer": "Movies and video games.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_3_qa2",
+        "question": "When did Joanna first watch \"Eternal Sunshine of the Spotless Mind?",
+        "golden_answer": "2019",
+        "generated_answer": "Around January 2020.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_3_qa3",
+        "question": "When did Nate win his first video game tournament?",
+        "golden_answer": "the week before 21Janury, 2022",
+        "generated_answer": "January 14, 2022",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_3_qa4",
+        "question": "What pets wouldn't cause any discomfort to Joanna?",
+        "golden_answer": "Hairless cats or pigs,since they don't have fur, which is one of the main causes of Joanna's allergy.",
+        "generated_answer": "No specific pets mentioned.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "3"
+      }
+    ],
+    "locomo_exp_user_4": [
+      {
+        "question_id": "locomo_4_qa0",
+        "question": "what are John's goals with regards to his basketball career?",
+        "golden_answer": "improve shooting percentage, win a championship",
+        "generated_answer": "Improve shooting percentage.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_4_qa1",
+        "question": "What are John's goals for his career that are not related to his basketball skills?",
+        "golden_answer": "get endorsements, build his brand, do charity work",
+        "generated_answer": "No goals mentioned.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_4_qa2",
+        "question": "What items does John collect?",
+        "golden_answer": "sneakers, fantasy movie DVDs, jerseys",
+        "generated_answer": "Sneakers.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_4_qa3",
+        "question": "Would Tim enjoy reading books by C. S. Lewis or John Greene?",
+        "golden_answer": "C. S.Lewis",
+        "generated_answer": "Tim would enjoy C. S. Lewis.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "3"
+      },
+      {
+        "question_id": "locomo_4_qa4",
+        "question": "What books has Tim read?",
+        "golden_answer": "Harry Potter, Game of Thrones, the Name of the Wind, The Alchemist, The Hobbit, A Dance with Dragons, and the Wheel of Time.",
+        "generated_answer": "Harry Potter series.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      }
+    ],
+    "locomo_exp_user_5": [
+      {
+        "question_id": "locomo_5_qa0",
+        "question": "Which year did Audrey adopt the first three of her dogs?",
+        "golden_answer": "2020",
+        "generated_answer": "2020",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_5_qa1",
+        "question": "When did Andrew start his new job as a financial analyst?",
+        "golden_answer": "The week before March 27, 2023",
+        "generated_answer": "March 20, 2023.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_5_qa2",
+        "question": "What kind of indoor activities has Andrew pursued with his girlfriend?",
+        "golden_answer": "boardgames, volunteering at pet shelter, wine tasting, growing flowers",
+        "generated_answer": "No indoor activities mentioned.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_5_qa3",
+        "question": "What kind of places have Andrew and his girlfriend checked out around the city?",
+        "golden_answer": "cafes, new places to eat, open space for hikes, pet shelter, wine tasting event, park",
+        "generated_answer": "Hiking trails like Fox Hollow.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_5_qa4",
+        "question": "When did Audrey make muffins for herself?",
+        "golden_answer": "The week of April 3rd to 9th",
+        "generated_answer": "No memory of muffins found.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      }
+    ],
+    "locomo_exp_user_6": [
+      {
+        "question_id": "locomo_6_qa0",
+        "question": "What are John's suspected health problems?",
+        "golden_answer": "Obesity",
+        "generated_answer": "The memories do not contain any information about John's suspected health problems.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "3"
+      },
+      {
+        "question_id": "locomo_6_qa1",
+        "question": "Which recreational activity was James pursuing on March 16, 2022?",
+        "golden_answer": "bowling",
+        "generated_answer": "No relevant information available.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_6_qa2",
+        "question": "Which places or events have John and James planned to meet at?",
+        "golden_answer": "VR Club, McGee's, baseball game",
+        "generated_answer": "No specific places or events planned.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_6_qa3",
+        "question": "Do both James and John have pets?",
+        "golden_answer": "No",
+        "generated_answer": "Yes, both have pets.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_6_qa4",
+        "question": "When did John resume playing drums in his adulthood?",
+        "golden_answer": "February 2022",
+        "generated_answer": "No information available.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      }
+    ],
+    "locomo_exp_user_7": [
+      {
+        "question_id": "locomo_7_qa0",
+        "question": "What kind of project was Jolene working on in the beginning of January 2023?",
+        "golden_answer": "electricity engineering project",
+        "generated_answer": "Electrical engineering project.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_7_qa1",
+        "question": "Which of Deborah`s family and friends have passed away?",
+        "golden_answer": "mother, father, her friend Karlie",
+        "generated_answer": "Deborah's mother and father.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_7_qa2",
+        "question": "When did Deborah`s mother pass away?",
+        "golden_answer": "a few years before 2023",
+        "generated_answer": "A few years ago.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_7_qa3",
+        "question": "When did Jolene`s mother pass away?",
+        "golden_answer": "in 2022",
+        "generated_answer": "In 2022.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_7_qa4",
+        "question": "When did Jolene's mom gift her a pendant?",
+        "golden_answer": "in 2010",
+        "generated_answer": "In 2010.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      }
+    ],
+    "locomo_exp_user_8": [
+      {
+        "question_id": "locomo_8_qa0",
+        "question": "What kind of car does Evan drive?",
+        "golden_answer": "Prius",
+        "generated_answer": "Evan drives a Prius.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_8_qa1",
+        "question": "What kinds of things did Evan have broken?",
+        "golden_answer": "His old Prius and his new Prius.",
+        "generated_answer": "The old car.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_8_qa2",
+        "question": "Where has Evan been on roadtrips with his family?",
+        "golden_answer": "Rockies, Jasper",
+        "generated_answer": "Evan went on a trip with his family.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_8_qa3",
+        "question": "How many Prius has Evan owned?",
+        "golden_answer": "two",
+        "generated_answer": "Two Prius.",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_8_qa4",
+        "question": "Which hobby did Sam take up in May 2023?",
+        "golden_answer": "painting",
+        "generated_answer": "Painting",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      }
+    ],
+    "locomo_exp_user_9": [
+      {
+        "question_id": "locomo_9_qa0",
+        "question": "When did Calvin first travel to Tokyo?",
+        "golden_answer": "between 26 March and 20 April 2023",
+        "generated_answer": "Calvin is traveling to Japan next month (April 2023).",
+        "llm_judgments": {
+          "judgment_1": true,
+          "judgment_2": true,
+          "judgment_3": true
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_9_qa1",
+        "question": "What items did Calvin buy in March 2023?",
+        "golden_answer": "mansion in Japan, luxury car Ferrari 488 GTB",
+        "generated_answer": "A new car.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_9_qa2",
+        "question": "When did Dave see Aerosmith perform live?",
+        "golden_answer": "on the weekend before March 26, 2023",
+        "generated_answer": "The memories do not mention Dave seeing Aerosmith perform live.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "2"
+      },
+      {
+        "question_id": "locomo_9_qa3",
+        "question": "Which bands has Dave enjoyed listening to?",
+        "golden_answer": "Aerosmith, The Fireworks",
+        "generated_answer": "No information available on bands.",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "1"
+      },
+      {
+        "question_id": "locomo_9_qa4",
+        "question": "Which country do Calvin and Dave want to meet in?",
+        "golden_answer": "United States",
+        "generated_answer": "Japan",
+        "llm_judgments": {
+          "judgment_1": false,
+          "judgment_2": false,
+          "judgment_3": false
+        },
+        "category": "3"
+      }
+    ]
+  },
+  "metadata": {
+    "model": "gpt-4o-mini",
+    "num_runs": 3,
+    "mean_accuracy": 0.52,
+    "std_accuracy": 0.0,
+    "run_scores": [
+      0.52,
+      0.52,
+      0.52
+    ],
+    "category_accuracies": {
+      "2": {
+        "mean": 0.6666666666666666,
+        "std": 0.0,
+        "individual_runs": [
+          0.6666666666666666,
+          0.6666666666666666,
+          0.6666666666666666
+        ],
+        "total": 21
+      },
+      "3": {
+        "mean": 0.3333333333333333,
+        "std": 0.0,
+        "individual_runs": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ],
+        "total": 6
+      },
+      "1": {
+        "mean": 0.38095238095238093,
+        "std": 0.0,
+        "individual_runs": [
+          0.38095238095238093,
+          0.38095238095238093,
+          0.38095238095238093
+        ],
+        "total": 21
+      },
+      "4": {
+        "mean": 1.0,
+        "std": 0.0,
+        "individual_runs": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "total": 2
+      }
+    }
+  }
+}
