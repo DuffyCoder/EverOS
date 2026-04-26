@@ -26,6 +26,9 @@ _ADAPTER_MODULES = {
     # OpenClaw memory system (via Node bridge)
     "openclaw": "evaluation.src.adapters.openclaw.adapter",
 
+    # A-MEM (NeurIPS 2025, ChromaDB-backed local memory)
+    "amem": "evaluation.src.adapters.amem_adapter",
+
     # Future systems:
     # "nemori": "evaluation.src.adapters.nemori_adapter",
 }

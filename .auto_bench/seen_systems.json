@@ -7,7 +7,7 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-26",
   "systems": [
     {
       "name": "evermemos",
@@ -63,6 +63,23 @@
       "tier": "saas-only",
       "memory_backend": "saas",
       "rejection_reason": "Community Edition deprecated; only Graphiti engine remains open source. No clean self-hosted memory path that matches upstream evaluation conditions."
+    },
+    {
+      "name": "amem",
+      "display_name": "A-MEM",
+      "github": "agiresearch/A-mem",
+      "first_seen": "2026-04-26",
+      "status": "integrated",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/amem_adapter.py",
+      "config_path": "evaluation/config/systems/amem.yaml",
+      "infra_required": ["chromadb-embedded"],
+      "estimated_ram_gb": 1,
+      "discovered_via": "arXiv 2502.12110 (NeurIPS 2025) + GitHub agiresearch",
+      "ephemeral_pip_overlay": ["agentic-memory @ git+https://github.com/agiresearch/A-mem.git"],
+      "model_override_note": "Sophnet rejects 'openai/gpt-4.1-mini' with HTTP 400 ('model not supported') from this runner. Adapter and answer stage both run against 'gpt-4o-mini' instead — the same model the LoCoMo LLM-judge stage already uses on this Sophnet endpoint, so fairness is preserved within this run.",
+      "rejected_candidates_this_scan": ["memori (saas-default)", "byterover (node)", "memmachine (graph-db infra)"]
     }
   ],
   "deny_keywords": [
