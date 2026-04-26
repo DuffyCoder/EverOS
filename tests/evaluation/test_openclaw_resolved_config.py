@@ -191,6 +191,35 @@ def test_noop_disables_memory_search_enabled():
     assert cfg["agents"]["defaults"]["memorySearch"]["enabled"] is False
 
 
+def test_noop_omits_embedding_credentials_block(monkeypatch):
+    """v0.7 Codex r7 F1: noop mode must NOT emit ``${SOPH_API_KEY}``-style
+    template strings in the resolved config. OpenClaw evaluates env
+    substitution at startup before runtime can ignore disabled blocks,
+    so a disabled-but-credential-bearing block fails on any deployment
+    without sophnet env vars.
+
+    Even when an embedding fixture is passed (as it is in our
+    openclaw-docker-noop.yaml), the resolved config for noop mode must
+    omit provider/remote and use ``provider="auto"``.
+    """
+    monkeypatch.delenv("SOPH_API_KEY", raising=False)
+    cfg = build_openclaw_resolved_config(
+        **_BASE,
+        memory_mode="noop",
+        embedding=_embedding_fixture(),  # has api_key_env="SOPH_API_KEY"
+    )
+    serialized = json.dumps(cfg)
+    assert "${SOPH_API_KEY}" not in serialized, (
+        "noop mode leaked sophnet credential template into resolved config; "
+        "OpenClaw will throw MissingEnvVarError if SOPH_API_KEY is unset"
+    )
+    ms = cfg["agents"]["defaults"]["memorySearch"]
+    assert ms["enabled"] is False
+    assert ms["provider"] == "auto"
+    assert "remote" not in ms
+    assert "outputDimensionality" not in ms
+
+
 def test_memory_core_keeps_memory_search_enabled():
     cfg = build_openclaw_resolved_config(**_BASE, memory_mode="memory-core")
     assert cfg["agents"]["defaults"]["memorySearch"]["enabled"] is True

@@ -84,16 +84,27 @@ def build_openclaw_resolved_config(
     sqlite_path = str(Path(native_store_dir) / "memory" / "default.sqlite")
 
     # === memorySearch (incl. sophnet embedding) ==========================
+    # v0.7 fix (Codex r7 F1): when memory_mode == "noop", omit the
+    # embedding provider/model/remote block entirely. OpenClaw's env
+    # substitution evaluates ALL ${VAR} placeholders at startup before
+    # runtime can decide to ignore them based on enabled=false. Leaving
+    # ${SOPH_API_KEY} in a "disabled" block makes noop runs fail in any
+    # environment without sophnet credentials.
+    is_noop = memory_mode == "noop"
+
     memory_search: dict[str, Any] = {
-        "enabled": memory_mode != "noop",
+        "enabled": not is_noop,
         "store": {
             "path": sqlite_path,
-            "vector": {"enabled": backend_mode != "fts_only"},
+            "vector": {"enabled": backend_mode != "fts_only" and not is_noop},
         },
         "sources": ["memory"],
     }
 
-    if backend_mode == "fts_only":
+    if is_noop:
+        # No embedding required; agent has no memory tools anyway.
+        memory_search["provider"] = "auto"
+    elif backend_mode == "fts_only":
         memory_search["provider"] = "auto"
     else:
         memory_search["provider"] = (embedding or {}).get("provider", "sophnet")
