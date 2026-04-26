@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+#
+# Memory Evaluation eval-layer Dockerfile.
+#
+# Layered on top of an openclaw-base image built from the openclaw repo's
+# own Dockerfile with OPENCLAW_EXTENSIONS=memory-core (and any plugin
+# being benchmarked) + OPENCLAW_VARIANT=slim.
+#
+# Run with:
+#   harness/build.py --memory-plugin memory-core
+# which orchestrates:
+#   Step 1: docker build $OPENCLAW_REPO_PATH --build-arg OPENCLAW_EXTENSIONS=...
+#           -> tags openclaw-base:<sha>-<plugin>-slim
+#   Step 2: docker build openclaw-eval/ --build-arg BASE_IMAGE=...
+#           -> tags openclaw-eval:<sha>-<plugin>-slim
+#
+# Container entrypoint keeps the container alive (sleep) so the harness
+# can issue many `docker exec openclaw ...` calls per per-conversation
+# container. The per-RPC openclaw invocation is one-shot (CLI, exits).
+
+ARG BASE_IMAGE=openclaw-base:latest
+FROM ${BASE_IMAGE}
+
+ARG MEMORY_PLUGIN=memory-core
+ARG OPENCLAW_COMMIT=unknown
+ARG PLUGIN_REV=unknown
+LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
+      eval.openclaw_commit=${OPENCLAW_COMMIT} \
+      eval.plugin_rev=${PLUGIN_REV} \
+      eval.layer=eval-runtime
+
+# We need root briefly to mkdir + install jq for entrypoint config render.
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jq \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /eval /workspace /etc/openclaw \
+ && chown -R node:node /eval /workspace /etc/openclaw
+
+# Eval-layer assets
+COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
+COPY --chown=node:node container/entrypoint.sh /eval/entrypoint.sh
+RUN chmod 755 /eval/entrypoint.sh
+
+# Memory plugin id is read by entrypoint.sh to render the right plugin
+# entries / slot config into /workspace/openclaw.json.
+ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
+
+# Per-conv mounted at /workspace by the harness.
+ENV WORKSPACE_DIR=/workspace
+ENV OPENCLAW_CONFIG_PATH=/workspace/openclaw.json
+ENV OPENCLAW_STATE_DIR=/workspace/state
+ENV HOME=/workspace/home
+
+# Defaults that may be overridden via -e at docker run time.
+ENV MEMORY_MODE=memory-core
+ENV LLM_BASE_URL=
+ENV LLM_API_KEY=
+ENV LLM_MODEL=gpt-4.1-mini
+ENV SOPH_API_KEY=
+ENV SOPH_EMBED_URL=
+ENV SOPH_EMBED_EASYLLM_ID=
+
+# Drop back to non-root for runtime.
+USER node
+
+# Override openclaw's default gateway CMD - we want a passive long-lived
+# container that the harness drives via docker exec.
+ENTRYPOINT ["/eval/entrypoint.sh"]
+CMD ["sleep", "infinity"]
