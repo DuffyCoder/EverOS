@@ -77,27 +77,53 @@ def compute_content_overlap_at_k(qa, search_result, k: int) -> dict:
 
 
 def evaluate_content_overlap(qa_pairs, search_results, k: int = 5) -> dict:
-    """Batch wrapper. Returns per-question rows plus mean aggregates."""
+    """Batch wrapper. Returns per-question rows plus mean aggregates.
+
+    v0.7: ``retrieval_metadata.skipped == True`` samples are suppressed
+    from aggregation. Used by Path B ``answer_mode=agent_local`` where
+    the agent owns retrieval and adapter.search() returns a placeholder.
+    """
     from evaluation.src.metrics.pairing import pair_by_question_id
 
     by_id, _ = pair_by_question_id(qa_pairs, search_results)
 
     per_question: list[dict] = []
+    skipped_ids: list[str] = []
     unresolved: list[str] = []
     for qa in qa_pairs:
         sr = by_id.get(qa.question_id)
         if sr is None:
             unresolved.append(qa.question_id)
             continue
+        # v0.7: skipped samples are suppressed (not aggregated as 0)
+        meta = getattr(sr, "retrieval_metadata", None) or {}
+        if meta.get("skipped"):
+            skipped_ids.append(qa.question_id)
+            continue
         per_question.append(compute_content_overlap_at_k(qa, sr, k=k))
 
     if not per_question:
+        # v0.7: distinguish "all skipped" (N/A) from legacy "no data"
+        if skipped_ids and not unresolved:
+            return {
+                "k": k,
+                "status": "not_applicable",
+                "reason": "all_queries_skipped",
+                "per_question": [],
+                "n_scored": 0,
+                "n_skipped": len(skipped_ids),
+                "skipped_question_ids": skipped_ids,
+                "unresolved_question_ids": unresolved,
+            }
         return {
             "k": k,
             "per_question": [],
             "content_overlap_at_k_mean": 0.0,
             "content_overlap_precision_mean": 0.0,
             "content_overlap_recall_mean": 0.0,
+            "n_scored": 0,
+            "n_skipped": len(skipped_ids),
+            "skipped_question_ids": skipped_ids,
             "unresolved_question_ids": unresolved,
         }
 
@@ -114,5 +140,8 @@ def evaluate_content_overlap(qa_pairs, search_results, k: int = 5) -> dict:
         "content_overlap_recall_mean": sum(
             p["content_overlap_recall"] for p in per_question
         ) / n,
+        "n_scored": n,
+        "n_skipped": len(skipped_ids),
+        "skipped_question_ids": skipped_ids,
         "unresolved_question_ids": unresolved,
     }

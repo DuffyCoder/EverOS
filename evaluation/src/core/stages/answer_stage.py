@@ -116,7 +116,12 @@ async def run_answer_stage(
     print(f"{'='*60}")
     
     SAVE_INTERVAL = 400  # Save every 400 tasks
-    MAX_CONCURRENT = 50  # Max concurrency
+    # v0.7 D5: configurable concurrency. Default 50 preserves historical
+    # behavior; sophnet/rate-limited backends should reduce to 4-10 to
+    # avoid 429 throttling pollution. Read from
+    # adapter.config['answer']['max_concurrent'] when present.
+    answer_cfg = (getattr(adapter, "config", None) or {}).get("answer") or {}
+    MAX_CONCURRENT = int(answer_cfg.get("max_concurrent", 50))
     
     # Load fine-grained checkpoint
     all_answer_results = {}
@@ -232,7 +237,14 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 # max_retries is set by the pipeline's retry_policy; the
                 # strict_no_retry value of 1 disables retries entirely.
                 max_retries = answer_max_retries
-                timeout_seconds = 120.0  # 2 minutes timeout per attempt
+                # v0.7: Negotiate timeout with adapter. Default 120s preserves
+                # historical behavior; adapters like OpenClaw agent_local need
+                # longer (e.g. agent_timeout_seconds + 30s margin).
+                timeout_seconds = (
+                    adapter.get_answer_timeout()
+                    if hasattr(adapter, "get_answer_timeout")
+                    else 120.0
+                )
                 retry_wait_seconds = 2.0
 
                 async with recorder.measure("answer", qa.question_id) as ctx:

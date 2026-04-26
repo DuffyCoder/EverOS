@@ -96,16 +96,33 @@ class BaseAdapter(ABC):
     def build_lazy_index(self, conversations: List[Conversation], output_dir: Any) -> Any:
         """
         Build lazy-loaded index metadata.
-        
+
         Default: return None (online API systems don't need index)
         Local systems (e.g., EverMemOS) should override this method
-        
+
         Args:
             conversations: Conversation list
             output_dir: Output directory
-            
+
         Returns:
             Index object or metadata (local systems return index metadata, online systems return None)
         """
         return None
+
+    def get_answer_timeout(self) -> float:
+        """
+        Per-attempt timeout (in seconds) for ``answer()`` in answer_stage.
+
+        Default 120s matches the historical hardcoded value in
+        ``answer_stage.py``. Adapters whose answer path can legitimately
+        run longer (e.g. OpenClaw ``agent_local`` mode that drives a full
+        agent loop with multiple tool calls) should override to negotiate
+        a higher timeout — otherwise answer_stage's outer
+        ``asyncio.wait_for`` will kill valid runs.
+
+        Returns:
+            Timeout in seconds. Used by answer_stage as
+            ``timeout_seconds = adapter.get_answer_timeout()``.
+        """
+        return 120.0
 

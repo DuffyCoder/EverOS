@@ -18,6 +18,12 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  stripAnsi,
+  extractJsonObject,
+  extractErrorTail,
+} from "./openclaw_eval_bridge_lib.mjs";
+
 function respond(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
@@ -52,10 +58,13 @@ function resolveLauncher(input) {
 function envForSandbox(input) {
   // Minimal env - mirrors v0.1/v0.2 isolation. Inheriting the full parent
   // env would leak OPENAI_API_KEY etc into OpenClaw's auto-provider
-  // selection, which we explicitly do NOT want: the resolved config file
-  // already carries the sophnet credentials for embedding, and the bench
-  // LLM key is for our own post-retrieval answer prompt, not for OpenClaw's
-  // internal flush agent.
+  // selection, which we explicitly do NOT want.
+  //
+  // v0.7: agent_llm_env_vars is the explicit whitelist for env passthrough
+  // when answer_mode=agent_local. The resolved config carries ${VAR}
+  // template strings for secrets (apiKey), so OpenClaw resolves them at
+  // startup against the env this function provides. Without the whitelist
+  // OpenClaw throws MissingEnvVarError on unresolved templates.
   const env = {
     PATH: process.env.PATH || "",
     HOME: input.home_dir || input.workspace_dir || "",
@@ -65,6 +74,20 @@ function envForSandbox(input) {
   };
   if (input.config_path) env.OPENCLAW_CONFIG_PATH = input.config_path;
   if (input.state_dir) env.OPENCLAW_STATE_DIR = input.state_dir;
+
+  // v0.7: explicit env whitelist - only listed names are passed through.
+  if (Array.isArray(input.agent_llm_env_vars)) {
+    for (const name of input.agent_llm_env_vars) {
+      if (typeof name !== "string") continue;
+      // Validate: env var names should match openclaw SecretRef regex
+      // (uppercase + digits + underscore, starts with uppercase). This
+      // prevents accidentally listing unrelated entries like full paths.
+      if (!/^[A-Z][A-Z0-9_]{0,127}$/.test(name)) continue;
+      const value = process.env[name];
+      if (value !== undefined) env[name] = value;
+    }
+  }
+
   return env;
 }
 
@@ -236,6 +259,86 @@ async function handleSearch(input, launcher) {
   return { ok: true, command: "search", hits };
 }
 
+// v0.7: agent --local one-shot agent run. Used by Path B answer mode.
+//
+// Stdout is empty; the structured JSON block lands on stderr after some
+// plugin warning lines (D1 smoke confirmed). We strip ANSI escapes and
+// scan stderr for the last well-formed `{payloads, meta}` block.
+//
+// Stub mode (no launcher) returns a deterministic shape so contract
+// tests can assert response keys without spawning real openclaw.
+async function handleAgentRun(input, launcher) {
+  if (!launcher) {
+    return {
+      ok: true,
+      command: "agent_run",
+      reply: "[stub] agent_run reply",
+      raw: {
+        payloads: [{ text: "[stub] agent_run reply", mediaUrl: null }],
+        meta: { stub: true },
+      },
+      duration_ms: 0,
+      aborted: false,
+      stop_reason: "stub",
+      tool_names: [],
+      system_prompt_chars: 0,
+      last_call_usage: null,
+    };
+  }
+
+  const env = envForSandbox(input);
+  const cwd = cwdForSandbox(input);
+  const args = [
+    "agent",
+    "--local",
+    "--session-id",
+    String(input.session_id ?? ""),
+    "--message",
+    String(input.message ?? ""),
+    "--json",
+    "--timeout",
+    String(input.timeout_seconds ?? 180),
+  ];
+
+  const { code, stdout, stderr } = await runLauncher(launcher, args, env, cwd);
+
+  // openclaw agent --local --json puts the JSON on stderr; stdout is empty.
+  // Fall back to stdout if stderr is empty (e.g. behavior changes upstream).
+  const merged = stripAnsi(stderr || "") || stripAnsi(stdout || "");
+
+  if (code !== 0) {
+    return {
+      ok: false,
+      command: "agent_run",
+      error: extractErrorTail(merged) || `exit ${code}`,
+    };
+  }
+
+  const parsed = extractJsonObject(merged);
+  if (!parsed) {
+    return {
+      ok: false,
+      command: "agent_run",
+      error: "no valid JSON object (with payloads+meta) found in stderr",
+    };
+  }
+
+  const reply = parsed.payloads?.[0]?.text ?? "";
+  const meta = parsed.meta || {};
+  return {
+    ok: true,
+    command: "agent_run",
+    reply,
+    raw: parsed,
+    duration_ms: meta.durationMs ?? null,
+    aborted: meta.aborted ?? false,
+    stop_reason: meta.stopReason ?? null,
+    tool_names: (meta.systemPromptReport?.tools?.entries || []).map((t) => t.name),
+    system_prompt_chars: meta.systemPromptReport?.systemPrompt?.chars ?? null,
+    last_call_usage: meta.agentMeta?.lastCallUsage ?? null,
+  };
+}
+
 async function handleBuildFlushPlan(input, launcher) {
   // Returns OpenClaw's native memory-flush plan (the canonical system/user
   // prompt that the production agent-runner would send when flushing
@@ -381,6 +484,9 @@ const command = input.command;
         break;
       case "build_flush_plan":
         resp = await handleBuildFlushPlan(input, launcher);
+        break;
+      case "agent_run":
+        resp = await handleAgentRun(input, launcher);
         break;
       default:
         return fail(`unknown command: ${command}`, command);
