@@ -49,8 +49,11 @@ RUN chmod 755 /eval/entrypoint.sh
 ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
 
 # Per-conv mounted at /workspace by the harness.
+# Use a docker-specific config path so we don't collide with the
+# host-side config that the harness writes to /workspace/openclaw.json
+# (host paths) for host-side ingest/flush bridge calls.
 ENV WORKSPACE_DIR=/workspace
-ENV OPENCLAW_CONFIG_PATH=/workspace/openclaw.json
+ENV OPENCLAW_CONFIG_PATH=/workspace/openclaw.docker.json
 ENV OPENCLAW_STATE_DIR=/workspace/state
 ENV HOME=/workspace/home
 

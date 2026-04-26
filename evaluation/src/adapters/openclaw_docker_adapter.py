@@ -192,9 +192,29 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 f"prepare() / add() must have spawned one first"
             )
 
-        # Inside the container, repo_path is /app (where openclaw.mjs lives).
-        # Override payload's repo_path to the in-container path.
-        payload = {**payload, "repo_path": "/app"}
+        # Inside the container, paths are different from host (sandbox
+        # dict has host paths like /Data3/.../artifacts/.../workspace).
+        # Rewrite to in-container paths so bridge.mjs running inside the
+        # container can find files. This mirrors what the entrypoint sets
+        # via env vars (WORKSPACE_DIR=/workspace, etc).
+        #
+        # config_path uses a docker-specific filename to avoid colliding
+        # with the host-side config the harness wrote at openclaw.json.
+        # The entrypoint renders openclaw.docker.json with container paths.
+        # Also forward yaml-declared agent_llm_env_vars so the in-container
+        # bridge's envForSandbox passes secrets to the openclaw subprocess.
+        agent_llm = self._openclaw_cfg.get("agent_llm") or {}
+        env_vars = list(agent_llm.get("env_vars") or [])
+        payload = {
+            **payload,
+            "repo_path": "/app",
+            "config_path": "/workspace/openclaw.docker.json",
+            "workspace_dir": "/workspace",
+            "state_dir": "/workspace/state",
+            "home_dir": "/workspace/home",
+            "cwd_dir": "/workspace",
+            "agent_llm_env_vars": payload.get("agent_llm_env_vars") or env_vars,
+        }
 
         cmd = [
             "docker", "exec", "-i",
@@ -365,6 +385,69 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
     # mode (inherited from base), so this works for Path B end-to-end.
     # When we add Path A docker support, we'll route the memory-search
     # bridge command through docker exec as well.
+
+    async def _prebootstrap_workspace(self, sandbox: dict) -> None:
+        """Override base impl to route prebootstrap through the container.
+
+        Base impl uses host node + bridge.mjs against host openclaw and
+        writes AGENTS.md/SOUL.md/TOOLS.md to host's home_dir (which is a
+        sibling of workspace_dir, NOT inside the volume). That bypasses
+        the container entirely and leaves the container's /workspace
+        without bootstrap files. Container's first answer call would then
+        race on writing them.
+
+        Docker route: do a dummy agent_run via _arun_bridge_via_docker
+        which runs `openclaw agent --local` inside the container,
+        producing AGENTS.md etc. under /workspace/home which IS inside
+        the volume + therefore visible to subsequent docker exec calls.
+        """
+        conv_id = sandbox["conversation_id"]
+        last_error: Optional[str] = None
+        for attempt in range(3):
+            payload = {
+                "command": "agent_run",
+                "session_id": f"{conv_id}__bootstrap",
+                "message": "Reply with: BOOTSTRAP_OK",
+                "timeout_seconds": 60,
+            }
+            try:
+                resp = await self._arun_bridge_via_docker(
+                    conv_id, payload, timeout=90.0,
+                )
+                if resp.get("ok"):
+                    last_error = None
+                    break
+                last_error = resp.get("error", "")
+            except (BridgeError, BridgeTimeout) as err:
+                last_error = str(err)
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+
+        if last_error:
+            raise RuntimeError(
+                f"docker prebootstrap agent_run failed for "
+                f"{conv_id!r} after 3 attempts: {last_error}"
+            )
+
+        # Verify bootstrap files. openclaw writes AGENTS.md/SOUL.md/etc.
+        # to `agents.defaults.workspace` (= /workspace inside container),
+        # NOT to HOME. Host's view of /workspace is sandbox["workspace_dir"].
+        ws = Path(sandbox["workspace_dir"])
+        expected = ["AGENTS.md", "SOUL.md", "TOOLS.md"]
+        missing = [n for n in expected if not (ws / n).exists()]
+        if missing:
+            raise RuntimeError(
+                f"workspace bootstrap files missing for {conv_id!r}: "
+                f"{missing}. docker openclaw agent --local did not write "
+                f"expected files."
+            )
+
+        self._append_events(sandbox, [{
+            "event": "prebootstrap_complete",
+            "conversation_id": conv_id,
+            "bootstrap_files": expected,
+            "via": "docker",
+        }])
 
     def get_system_info(self) -> dict:
         info = super().get_system_info()
