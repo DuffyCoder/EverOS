@@ -1,0 +1,33 @@
+{
+  "add_latency_ms_mean": null,
+  "retrieval_latency_ms_mean": null,
+  "scheduler_wait_ms_mean": null,
+  "answer_latency_ms_mean": 1370.4846014207915,
+  "empty_retrieval_rate": 0.0,
+  "final_context_tokens_mean": 782.7116883116884,
+  "final_context_chars_mean": 3226.688311688312,
+  "retrieval_route_distribution": {},
+  "backend_mode_distribution": {},
+  "flush_triggered_count_total": 0,
+  "index_settle_latency_ms_total": 0.0,
+  "add_latency_ms_stats": null,
+  "retrieval_latency_ms_stats": null,
+  "answer_latency_ms_stats": {
+    "n": 385,
+    "mean": 1370.4846014207915,
+    "p50": 1144.9262460000682,
+    "p95": 2784.9410045999284,
+    "max": 3246.8626780000704
+  },
+  "final_context_tokens_stats": {
+    "n": 385,
+    "mean": 782.7116883116884,
+    "p50": 768.0,
+    "p95": 1088.3999999999992,
+    "max": 1286.0
+  },
+  "add_retry_rate": null,
+  "add_fallback_rate": null,
+  "add_failed_rate": null,
+  "add_samples": 0
+}

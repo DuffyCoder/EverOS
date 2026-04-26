@@ -79,7 +79,43 @@
       "discovered_via": "arXiv 2502.12110 (NeurIPS 2025) + GitHub agiresearch",
       "ephemeral_pip_overlay": ["agentic-memory @ git+https://github.com/agiresearch/A-mem.git"],
       "model_override_note": "Sophnet rejects 'openai/gpt-4.1-mini' with HTTP 400 ('model not supported') from this runner. Adapter and answer stage both run against 'gpt-4o-mini' instead — the same model the LoCoMo LLM-judge stage already uses on this Sophnet endpoint, so fairness is preserved within this run.",
-      "rejected_candidates_this_scan": ["memori (saas-default)", "byterover (node)", "memmachine (graph-db infra)"]
+      "rejected_candidates_this_scan": ["memori (saas-default)", "byterover (node)", "memmachine (graph-db infra)"],
+      "benchmarks": {
+        "locomo": {
+          "scope": "reduced-full: conversations 0..2 of 10 (497 questions / 1986; 90-min budget per candidate would be exceeded by full 10-conv run at A-MEM's ~1.6 s/message add latency)",
+          "result_file": "evaluation/results/auto-bench-amem-full-20260426-183647/convs-0-2/eval_results.json",
+          "total_questions": 385,
+          "correct": 222,
+          "mean_accuracy": 0.5784,
+          "std_accuracy": 0.0024,
+          "run_scores": [0.5818, 0.5766, 0.5766],
+          "category_accuracies": {
+            "1_single_hop": {"mean": 0.4054, "n": 74},
+            "2_multi_hop": {"mean": 0.6370, "n": 90},
+            "3_open_domain": {"mean": 0.5873, "n": 21},
+            "4_commonsense": {"mean": 0.6150, "n": 200}
+          },
+          "f1_mean": 0.4224,
+          "bleu1_mean": 0.2549,
+          "content_overlap_at_5": 0.0412,
+          "content_overlap_recall_at_5": 0.3690,
+          "latency_ms": {
+            "add_total": 4629833,
+            "search_p50": 106.19,
+            "search_p95": 124.25,
+            "answer_p50": 1144.94,
+            "answer_p95": 2784.95,
+            "e2e_p50": 1255.42
+          }
+        },
+        "locomo_smoke": {
+          "scope": "smoke: 10 convs × 20 messages each, 5 questions per conv = 50 questions",
+          "result_file": "evaluation/results/auto-bench-amem-smoke-20260426-182955/eval_results.json",
+          "total_questions": 50,
+          "correct": 26,
+          "accuracy": 0.5200
+        }
+      }
     }
   ],
   "deny_keywords": [

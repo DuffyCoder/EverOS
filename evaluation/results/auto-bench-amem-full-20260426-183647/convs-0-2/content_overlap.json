@@ -1,0 +1,2704 @@
+{
+  "k": 5,
+  "per_question": [
+    {
+      "question_id": "locomo_0_qa0",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa1",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa2",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa3",
+      "k": 5,
+      "content_overlap_precision": 0.012658227848101266,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.02469135802469136
+    },
+    {
+      "question_id": "locomo_0_qa4",
+      "k": 5,
+      "content_overlap_precision": 0.010309278350515464,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.020202020202020204
+    },
+    {
+      "question_id": "locomo_0_qa5",
+      "k": 5,
+      "content_overlap_precision": 0.01020408163265306,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.01923076923076923
+    },
+    {
+      "question_id": "locomo_0_qa6",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa7",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa8",
+      "k": 5,
+      "content_overlap_precision": 0.011363636363636364,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.021276595744680854
+    },
+    {
+      "question_id": "locomo_0_qa9",
+      "k": 5,
+      "content_overlap_precision": 0.014084507042253521,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.025974025974025976
+    },
+    {
+      "question_id": "locomo_0_qa10",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa11",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa12",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa13",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa14",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa15",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa16",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa17",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa18",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa19",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa20",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa21",
+      "k": 5,
+      "content_overlap_precision": 0.017391304347826087,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.03305785123966942
+    },
+    {
+      "question_id": "locomo_0_qa22",
+      "k": 5,
+      "content_overlap_precision": 0.013888888888888888,
+      "content_overlap_recall": 0.14285714285714285,
+      "content_overlap_at_k": 0.02531645569620253
+    },
+    {
+      "question_id": "locomo_0_qa23",
+      "k": 5,
+      "content_overlap_precision": 0.0375,
+      "content_overlap_recall": 0.6,
+      "content_overlap_at_k": 0.07058823529411765
+    },
+    {
+      "question_id": "locomo_0_qa24",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa25",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa26",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa27",
+      "k": 5,
+      "content_overlap_precision": 0.02727272727272727,
+      "content_overlap_recall": 0.2727272727272727,
+      "content_overlap_at_k": 0.04958677685950413
+    },
+    {
+      "question_id": "locomo_0_qa28",
+      "k": 5,
+      "content_overlap_precision": 0.015267175572519083,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.0291970802919708
+    },
+    {
+      "question_id": "locomo_0_qa29",
+      "k": 5,
+      "content_overlap_precision": 0.010101010101010102,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.01904761904761905
+    },
+    {
+      "question_id": "locomo_0_qa30",
+      "k": 5,
+      "content_overlap_precision": 0.019417475728155338,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.034782608695652174
+    },
+    {
+      "question_id": "locomo_0_qa31",
+      "k": 5,
+      "content_overlap_precision": 0.009900990099009901,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.018691588785046728
+    },
+    {
+      "question_id": "locomo_0_qa32",
+      "k": 5,
+      "content_overlap_precision": 0.03571428571428571,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.06779661016949153
+    },
+    {
+      "question_id": "locomo_0_qa33",
+      "k": 5,
+      "content_overlap_precision": 0.015625,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.029850746268656716
+    },
+    {
+      "question_id": "locomo_0_qa34",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa35",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa36",
+      "k": 5,
+      "content_overlap_precision": 0.009259259259259259,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.017543859649122806
+    },
+    {
+      "question_id": "locomo_0_qa37",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa38",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa39",
+      "k": 5,
+      "content_overlap_precision": 0.04201680672268908,
+      "content_overlap_recall": 0.35714285714285715,
+      "content_overlap_at_k": 0.07518796992481203
+    },
+    {
+      "question_id": "locomo_0_qa40",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa41",
+      "k": 5,
+      "content_overlap_precision": 0.019230769230769232,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.034482758620689655
+    },
+    {
+      "question_id": "locomo_0_qa42",
+      "k": 5,
+      "content_overlap_precision": 0.03225806451612903,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.06060606060606061
+    },
+    {
+      "question_id": "locomo_0_qa43",
+      "k": 5,
+      "content_overlap_precision": 0.009900990099009901,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.019417475728155338
+    },
+    {
+      "question_id": "locomo_0_qa44",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa45",
+      "k": 5,
+      "content_overlap_precision": 0.0078125,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.014925373134328358
+    },
+    {
+      "question_id": "locomo_0_qa46",
+      "k": 5,
+      "content_overlap_precision": 0.010526315789473684,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.020202020202020204
+    },
+    {
+      "question_id": "locomo_0_qa47",
+      "k": 5,
+      "content_overlap_precision": 0.013888888888888888,
+      "content_overlap_recall": 0.2,
+      "content_overlap_at_k": 0.025974025974025972
+    },
+    {
+      "question_id": "locomo_0_qa48",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa49",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa50",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa51",
+      "k": 5,
+      "content_overlap_precision": 0.0136986301369863,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.02631578947368421
+    },
+    {
+      "question_id": "locomo_0_qa52",
+      "k": 5,
+      "content_overlap_precision": 0.021739130434782608,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.042105263157894736
+    },
+    {
+      "question_id": "locomo_0_qa53",
+      "k": 5,
+      "content_overlap_precision": 0.017094017094017096,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.032520325203252036
+    },
+    {
+      "question_id": "locomo_0_qa54",
+      "k": 5,
+      "content_overlap_precision": 0.024691358024691357,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.04597701149425287
+    },
+    {
+      "question_id": "locomo_0_qa55",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa56",
+      "k": 5,
+      "content_overlap_precision": 0.022988505747126436,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.04395604395604396
+    },
+    {
+      "question_id": "locomo_0_qa57",
+      "k": 5,
+      "content_overlap_precision": 0.024691358024691357,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.04597701149425287
+    },
+    {
+      "question_id": "locomo_0_qa58",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa59",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa60",
+      "k": 5,
+      "content_overlap_precision": 0.017543859649122806,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.03333333333333333
+    },
+    {
+      "question_id": "locomo_0_qa61",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa62",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa63",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa64",
+      "k": 5,
+      "content_overlap_precision": 0.02564102564102564,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.048780487804878044
+    },
+    {
+      "question_id": "locomo_0_qa65",
+      "k": 5,
+      "content_overlap_precision": 0.022727272727272728,
+      "content_overlap_recall": 0.2857142857142857,
+      "content_overlap_at_k": 0.042105263157894736
+    },
+    {
+      "question_id": "locomo_0_qa66",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa67",
+      "k": 5,
+      "content_overlap_precision": 0.027777777777777776,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.04761904761904762
+    },
+    {
+      "question_id": "locomo_0_qa68",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa69",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa70",
+      "k": 5,
+      "content_overlap_precision": 0.024793388429752067,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.048387096774193554
+    },
+    {
+      "question_id": "locomo_0_qa71",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa72",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa73",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa74",
+      "k": 5,
+      "content_overlap_precision": 0.01282051282051282,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.023809523809523808
+    },
+    {
+      "question_id": "locomo_0_qa75",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa76",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa77",
+      "k": 5,
+      "content_overlap_precision": 0.015384615384615385,
+      "content_overlap_recall": 0.14285714285714285,
+      "content_overlap_at_k": 0.02777777777777778
+    },
+    {
+      "question_id": "locomo_0_qa78",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa79",
+      "k": 5,
+      "content_overlap_precision": 0.015267175572519083,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.0291970802919708
+    },
+    {
+      "question_id": "locomo_0_qa80",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa81",
+      "k": 5,
+      "content_overlap_precision": 0.018518518518518517,
+      "content_overlap_recall": 0.125,
+      "content_overlap_at_k": 0.03225806451612903
+    },
+    {
+      "question_id": "locomo_0_qa82",
+      "k": 5,
+      "content_overlap_precision": 0.01680672268907563,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.03305785123966942
+    },
+    {
+      "question_id": "locomo_0_qa83",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa84",
+      "k": 5,
+      "content_overlap_precision": 0.025,
+      "content_overlap_recall": 0.125,
+      "content_overlap_at_k": 0.04166666666666667
+    },
+    {
+      "question_id": "locomo_0_qa85",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa86",
+      "k": 5,
+      "content_overlap_precision": 0.008547008547008548,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.016806722689075633
+    },
+    {
+      "question_id": "locomo_0_qa87",
+      "k": 5,
+      "content_overlap_precision": 0.0546875,
+      "content_overlap_recall": 0.7777777777777778,
+      "content_overlap_at_k": 0.10218978102189781
+    },
+    {
+      "question_id": "locomo_0_qa88",
+      "k": 5,
+      "content_overlap_precision": 0.056910569105691054,
+      "content_overlap_recall": 0.875,
+      "content_overlap_at_k": 0.10687022900763359
+    },
+    {
+      "question_id": "locomo_0_qa89",
+      "k": 5,
+      "content_overlap_precision": 0.06382978723404255,
+      "content_overlap_recall": 0.46153846153846156,
+      "content_overlap_at_k": 0.11214953271028037
+    },
+    {
+      "question_id": "locomo_0_qa90",
+      "k": 5,
+      "content_overlap_precision": 0.07446808510638298,
+      "content_overlap_recall": 0.7,
+      "content_overlap_at_k": 0.13461538461538458
+    },
+    {
+      "question_id": "locomo_0_qa91",
+      "k": 5,
+      "content_overlap_precision": 0.043478260869565216,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08333333333333333
+    },
+    {
+      "question_id": "locomo_0_qa92",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa93",
+      "k": 5,
+      "content_overlap_precision": 0.015151515151515152,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.02985074626865672
+    },
+    {
+      "question_id": "locomo_0_qa94",
+      "k": 5,
+      "content_overlap_precision": 0.02586206896551724,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.050420168067226885
+    },
+    {
+      "question_id": "locomo_0_qa95",
+      "k": 5,
+      "content_overlap_precision": 0.07627118644067797,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.14173228346456693
+    },
+    {
+      "question_id": "locomo_0_qa96",
+      "k": 5,
+      "content_overlap_precision": 0.07954545454545454,
+      "content_overlap_recall": 0.5384615384615384,
+      "content_overlap_at_k": 0.1386138613861386
+    },
+    {
+      "question_id": "locomo_0_qa97",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa98",
+      "k": 5,
+      "content_overlap_precision": 0.06993006993006994,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.13071895424836602
+    },
+    {
+      "question_id": "locomo_0_qa99",
+      "k": 5,
+      "content_overlap_precision": 0.0594059405940594,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.10619469026548671
+    },
+    {
+      "question_id": "locomo_0_qa100",
+      "k": 5,
+      "content_overlap_precision": 0.060240963855421686,
+      "content_overlap_recall": 0.5555555555555556,
+      "content_overlap_at_k": 0.10869565217391304
+    },
+    {
+      "question_id": "locomo_0_qa101",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa102",
+      "k": 5,
+      "content_overlap_precision": 0.10126582278481013,
+      "content_overlap_recall": 0.8888888888888888,
+      "content_overlap_at_k": 0.1818181818181818
+    },
+    {
+      "question_id": "locomo_0_qa103",
+      "k": 5,
+      "content_overlap_precision": 0.025,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.04878048780487806
+    },
+    {
+      "question_id": "locomo_0_qa104",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa105",
+      "k": 5,
+      "content_overlap_precision": 0.021052631578947368,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.0396039603960396
+    },
+    {
+      "question_id": "locomo_0_qa106",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa107",
+      "k": 5,
+      "content_overlap_precision": 0.07352941176470588,
+      "content_overlap_recall": 0.8333333333333334,
+      "content_overlap_at_k": 0.13513513513513514
+    },
+    {
+      "question_id": "locomo_0_qa108",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa109",
+      "k": 5,
+      "content_overlap_precision": 0.008333333333333333,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.01652892561983471
+    },
+    {
+      "question_id": "locomo_0_qa110",
+      "k": 5,
+      "content_overlap_precision": 0.058823529411764705,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.1111111111111111
+    },
+    {
+      "question_id": "locomo_0_qa111",
+      "k": 5,
+      "content_overlap_precision": 0.008547008547008548,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.016949152542372885
+    },
+    {
+      "question_id": "locomo_0_qa112",
+      "k": 5,
+      "content_overlap_precision": 0.019417475728155338,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.037037037037037035
+    },
+    {
+      "question_id": "locomo_0_qa113",
+      "k": 5,
+      "content_overlap_precision": 0.078125,
+      "content_overlap_recall": 0.9090909090909091,
+      "content_overlap_at_k": 0.14388489208633093
+    },
+    {
+      "question_id": "locomo_0_qa114",
+      "k": 5,
+      "content_overlap_precision": 0.03225806451612903,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.0625
+    },
+    {
+      "question_id": "locomo_0_qa115",
+      "k": 5,
+      "content_overlap_precision": 0.125,
+      "content_overlap_recall": 0.9333333333333333,
+      "content_overlap_at_k": 0.2204724409448819
+    },
+    {
+      "question_id": "locomo_0_qa116",
+      "k": 5,
+      "content_overlap_precision": 0.04938271604938271,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.0879120879120879
+    },
+    {
+      "question_id": "locomo_0_qa117",
+      "k": 5,
+      "content_overlap_precision": 0.046296296296296294,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08849557522123894
+    },
+    {
+      "question_id": "locomo_0_qa118",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa119",
+      "k": 5,
+      "content_overlap_precision": 0.07575757575757576,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.14084507042253522
+    },
+    {
+      "question_id": "locomo_0_qa120",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa121",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa122",
+      "k": 5,
+      "content_overlap_precision": 0.039473684210526314,
+      "content_overlap_recall": 0.3,
+      "content_overlap_at_k": 0.0697674418604651
+    },
+    {
+      "question_id": "locomo_0_qa123",
+      "k": 5,
+      "content_overlap_precision": 0.02702702702702703,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.052631578947368425
+    },
+    {
+      "question_id": "locomo_0_qa124",
+      "k": 5,
+      "content_overlap_precision": 0.031914893617021274,
+      "content_overlap_recall": 0.6,
+      "content_overlap_at_k": 0.0606060606060606
+    },
+    {
+      "question_id": "locomo_0_qa125",
+      "k": 5,
+      "content_overlap_precision": 0.014388489208633094,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.02816901408450704
+    },
+    {
+      "question_id": "locomo_0_qa126",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa127",
+      "k": 5,
+      "content_overlap_precision": 0.01282051282051282,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.024390243902439022
+    },
+    {
+      "question_id": "locomo_0_qa128",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa129",
+      "k": 5,
+      "content_overlap_precision": 0.029411764705882353,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.056603773584905655
+    },
+    {
+      "question_id": "locomo_0_qa130",
+      "k": 5,
+      "content_overlap_precision": 0.05172413793103448,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.09836065573770492
+    },
+    {
+      "question_id": "locomo_0_qa131",
+      "k": 5,
+      "content_overlap_precision": 0.014492753623188406,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.028169014084507046
+    },
+    {
+      "question_id": "locomo_0_qa132",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa133",
+      "k": 5,
+      "content_overlap_precision": 0.10309278350515463,
+      "content_overlap_recall": 0.9090909090909091,
+      "content_overlap_at_k": 0.18518518518518517
+    },
+    {
+      "question_id": "locomo_0_qa134",
+      "k": 5,
+      "content_overlap_precision": 0.08552631578947369,
+      "content_overlap_recall": 0.9285714285714286,
+      "content_overlap_at_k": 0.1566265060240964
+    },
+    {
+      "question_id": "locomo_0_qa135",
+      "k": 5,
+      "content_overlap_precision": 0.03508771929824561,
+      "content_overlap_recall": 0.18181818181818182,
+      "content_overlap_at_k": 0.058823529411764705
+    },
+    {
+      "question_id": "locomo_0_qa136",
+      "k": 5,
+      "content_overlap_precision": 0.020833333333333332,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.039603960396039604
+    },
+    {
+      "question_id": "locomo_0_qa137",
+      "k": 5,
+      "content_overlap_precision": 0.05084745762711865,
+      "content_overlap_recall": 0.375,
+      "content_overlap_at_k": 0.08955223880597016
+    },
+    {
+      "question_id": "locomo_0_qa138",
+      "k": 5,
+      "content_overlap_precision": 0.05263157894736842,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.09090909090909091
+    },
+    {
+      "question_id": "locomo_0_qa139",
+      "k": 5,
+      "content_overlap_precision": 0.09401709401709402,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.17187499999999997
+    },
+    {
+      "question_id": "locomo_0_qa140",
+      "k": 5,
+      "content_overlap_precision": 0.009009009009009009,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.017543859649122806
+    },
+    {
+      "question_id": "locomo_0_qa141",
+      "k": 5,
+      "content_overlap_precision": 0.06172839506172839,
+      "content_overlap_recall": 0.8333333333333334,
+      "content_overlap_at_k": 0.1149425287356322
+    },
+    {
+      "question_id": "locomo_0_qa142",
+      "k": 5,
+      "content_overlap_precision": 0.11475409836065574,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.2058823529411765
+    },
+    {
+      "question_id": "locomo_0_qa143",
+      "k": 5,
+      "content_overlap_precision": 0.046296296296296294,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08849557522123894
+    },
+    {
+      "question_id": "locomo_0_qa144",
+      "k": 5,
+      "content_overlap_precision": 0.04201680672268908,
+      "content_overlap_recall": 0.625,
+      "content_overlap_at_k": 0.07874015748031497
+    },
+    {
+      "question_id": "locomo_0_qa145",
+      "k": 5,
+      "content_overlap_precision": 0.06666666666666667,
+      "content_overlap_recall": 0.5555555555555556,
+      "content_overlap_at_k": 0.11904761904761904
+    },
+    {
+      "question_id": "locomo_0_qa146",
+      "k": 5,
+      "content_overlap_precision": 0.037037037037037035,
+      "content_overlap_recall": 0.8,
+      "content_overlap_at_k": 0.07079646017699115
+    },
+    {
+      "question_id": "locomo_0_qa147",
+      "k": 5,
+      "content_overlap_precision": 0.025,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.046511627906976744
+    },
+    {
+      "question_id": "locomo_0_qa148",
+      "k": 5,
+      "content_overlap_precision": 0.03125,
+      "content_overlap_recall": 0.6,
+      "content_overlap_at_k": 0.0594059405940594
+    },
+    {
+      "question_id": "locomo_0_qa149",
+      "k": 5,
+      "content_overlap_precision": 0.013888888888888888,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.026666666666666665
+    },
+    {
+      "question_id": "locomo_0_qa150",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_0_qa151",
+      "k": 5,
+      "content_overlap_precision": 0.029850746268656716,
+      "content_overlap_recall": 0.2857142857142857,
+      "content_overlap_at_k": 0.05405405405405406
+    },
+    {
+      "question_id": "locomo_1_qa0",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa1",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa2",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa3",
+      "k": 5,
+      "content_overlap_precision": 0.02702702702702703,
+      "content_overlap_recall": 0.1,
+      "content_overlap_at_k": 0.0425531914893617
+    },
+    {
+      "question_id": "locomo_1_qa4",
+      "k": 5,
+      "content_overlap_precision": 0.10666666666666667,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.1839080459770115
+    },
+    {
+      "question_id": "locomo_1_qa5",
+      "k": 5,
+      "content_overlap_precision": 0.05813953488372093,
+      "content_overlap_recall": 0.5555555555555556,
+      "content_overlap_at_k": 0.10526315789473685
+    },
+    {
+      "question_id": "locomo_1_qa6",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa7",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa8",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa9",
+      "k": 5,
+      "content_overlap_precision": 0.008,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.015873015873015872
+    },
+    {
+      "question_id": "locomo_1_qa10",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa11",
+      "k": 5,
+      "content_overlap_precision": 0.06779661016949153,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.12698412698412698
+    },
+    {
+      "question_id": "locomo_1_qa12",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa13",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa14",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa15",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa16",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa17",
+      "k": 5,
+      "content_overlap_precision": 0.07446808510638298,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.1217391304347826
+    },
+    {
+      "question_id": "locomo_1_qa18",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa19",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa20",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa21",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa22",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa23",
+      "k": 5,
+      "content_overlap_precision": 0.13725490196078433,
+      "content_overlap_recall": 0.4827586206896552,
+      "content_overlap_at_k": 0.2137404580152672
+    },
+    {
+      "question_id": "locomo_1_qa24",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa25",
+      "k": 5,
+      "content_overlap_precision": 0.02531645569620253,
+      "content_overlap_recall": 0.18181818181818182,
+      "content_overlap_at_k": 0.044444444444444446
+    },
+    {
+      "question_id": "locomo_1_qa26",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa27",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa28",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa29",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa30",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa31",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa32",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa33",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa34",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa35",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa36",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa37",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa38",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa39",
+      "k": 5,
+      "content_overlap_precision": 0.015151515151515152,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.02985074626865672
+    },
+    {
+      "question_id": "locomo_1_qa40",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa41",
+      "k": 5,
+      "content_overlap_precision": 0.047619047619047616,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.08695652173913042
+    },
+    {
+      "question_id": "locomo_1_qa42",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa43",
+      "k": 5,
+      "content_overlap_precision": 0.02666666666666667,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.05128205128205129
+    },
+    {
+      "question_id": "locomo_1_qa44",
+      "k": 5,
+      "content_overlap_precision": 0.009615384615384616,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.018691588785046728
+    },
+    {
+      "question_id": "locomo_1_qa45",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa46",
+      "k": 5,
+      "content_overlap_precision": 0.02,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.0392156862745098
+    },
+    {
+      "question_id": "locomo_1_qa47",
+      "k": 5,
+      "content_overlap_precision": 0.027522935779816515,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.05217391304347826
+    },
+    {
+      "question_id": "locomo_1_qa48",
+      "k": 5,
+      "content_overlap_precision": 0.024691358024691357,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.046511627906976744
+    },
+    {
+      "question_id": "locomo_1_qa49",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa50",
+      "k": 5,
+      "content_overlap_precision": 0.08695652173913043,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.16
+    },
+    {
+      "question_id": "locomo_1_qa51",
+      "k": 5,
+      "content_overlap_precision": 0.027777777777777776,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.051948051948051945
+    },
+    {
+      "question_id": "locomo_1_qa52",
+      "k": 5,
+      "content_overlap_precision": 0.13333333333333333,
+      "content_overlap_recall": 0.9090909090909091,
+      "content_overlap_at_k": 0.2325581395348837
+    },
+    {
+      "question_id": "locomo_1_qa53",
+      "k": 5,
+      "content_overlap_precision": 0.0625,
+      "content_overlap_recall": 0.8333333333333334,
+      "content_overlap_at_k": 0.11627906976744186
+    },
+    {
+      "question_id": "locomo_1_qa54",
+      "k": 5,
+      "content_overlap_precision": 0.06172839506172839,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.11627906976744184
+    },
+    {
+      "question_id": "locomo_1_qa55",
+      "k": 5,
+      "content_overlap_precision": 0.04225352112676056,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.07792207792207793
+    },
+    {
+      "question_id": "locomo_1_qa56",
+      "k": 5,
+      "content_overlap_precision": 0.017543859649122806,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.031746031746031744
+    },
+    {
+      "question_id": "locomo_1_qa57",
+      "k": 5,
+      "content_overlap_precision": 0.029411764705882353,
+      "content_overlap_recall": 0.18181818181818182,
+      "content_overlap_at_k": 0.050632911392405056
+    },
+    {
+      "question_id": "locomo_1_qa58",
+      "k": 5,
+      "content_overlap_precision": 0.02,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.03773584905660377
+    },
+    {
+      "question_id": "locomo_1_qa59",
+      "k": 5,
+      "content_overlap_precision": 0.06315789473684211,
+      "content_overlap_recall": 0.8571428571428571,
+      "content_overlap_at_k": 0.11764705882352942
+    },
+    {
+      "question_id": "locomo_1_qa60",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa61",
+      "k": 5,
+      "content_overlap_precision": 0.02040816326530612,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.039999999999999994
+    },
+    {
+      "question_id": "locomo_1_qa62",
+      "k": 5,
+      "content_overlap_precision": 0.05172413793103448,
+      "content_overlap_recall": 0.17647058823529413,
+      "content_overlap_at_k": 0.08
+    },
+    {
+      "question_id": "locomo_1_qa63",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa64",
+      "k": 5,
+      "content_overlap_precision": 0.08,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.14814814814814814
+    },
+    {
+      "question_id": "locomo_1_qa65",
+      "k": 5,
+      "content_overlap_precision": 0.024390243902439025,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.04545454545454545
+    },
+    {
+      "question_id": "locomo_1_qa66",
+      "k": 5,
+      "content_overlap_precision": 0.008849557522123894,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.017094017094017092
+    },
+    {
+      "question_id": "locomo_1_qa67",
+      "k": 5,
+      "content_overlap_precision": 0.06557377049180328,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.11267605633802817
+    },
+    {
+      "question_id": "locomo_1_qa68",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa69",
+      "k": 5,
+      "content_overlap_precision": 0.015625,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.029411764705882353
+    },
+    {
+      "question_id": "locomo_1_qa70",
+      "k": 5,
+      "content_overlap_precision": 0.03076923076923077,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.05882352941176471
+    },
+    {
+      "question_id": "locomo_1_qa71",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa72",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa73",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa74",
+      "k": 5,
+      "content_overlap_precision": 0.02127659574468085,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.04040404040404041
+    },
+    {
+      "question_id": "locomo_1_qa75",
+      "k": 5,
+      "content_overlap_precision": 0.05405405405405406,
+      "content_overlap_recall": 0.2222222222222222,
+      "content_overlap_at_k": 0.08695652173913043
+    },
+    {
+      "question_id": "locomo_1_qa76",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa77",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_1_qa78",
+      "k": 5,
+      "content_overlap_precision": 0.018518518518518517,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.034482758620689655
+    },
+    {
+      "question_id": "locomo_1_qa80",
+      "k": 5,
+      "content_overlap_precision": 0.06896551724137931,
+      "content_overlap_recall": 0.26666666666666666,
+      "content_overlap_at_k": 0.10958904109589042
+    },
+    {
+      "question_id": "locomo_1_qa81",
+      "k": 5,
+      "content_overlap_precision": 0.10204081632653061,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.1694915254237288
+    },
+    {
+      "question_id": "locomo_2_qa0",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa1",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa2",
+      "k": 5,
+      "content_overlap_precision": 0.025974025974025976,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.05063291139240507
+    },
+    {
+      "question_id": "locomo_2_qa3",
+      "k": 5,
+      "content_overlap_precision": 0.01818181818181818,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.034782608695652174
+    },
+    {
+      "question_id": "locomo_2_qa4",
+      "k": 5,
+      "content_overlap_precision": 0.008695652173913044,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.01652892561983471
+    },
+    {
+      "question_id": "locomo_2_qa5",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa6",
+      "k": 5,
+      "content_overlap_precision": 0.011764705882352941,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.02247191011235955
+    },
+    {
+      "question_id": "locomo_2_qa7",
+      "k": 5,
+      "content_overlap_precision": 0.008928571428571428,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.017241379310344824
+    },
+    {
+      "question_id": "locomo_2_qa8",
+      "k": 5,
+      "content_overlap_precision": 0.01,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.019417475728155338
+    },
+    {
+      "question_id": "locomo_2_qa9",
+      "k": 5,
+      "content_overlap_precision": 0.011235955056179775,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.021978021978021976
+    },
+    {
+      "question_id": "locomo_2_qa10",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa11",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa12",
+      "k": 5,
+      "content_overlap_precision": 0.03225806451612903,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.061855670103092786
+    },
+    {
+      "question_id": "locomo_2_qa13",
+      "k": 5,
+      "content_overlap_precision": 0.0125,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.023255813953488372
+    },
+    {
+      "question_id": "locomo_2_qa14",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa15",
+      "k": 5,
+      "content_overlap_precision": 0.022988505747126436,
+      "content_overlap_recall": 0.6666666666666666,
+      "content_overlap_at_k": 0.044444444444444446
+    },
+    {
+      "question_id": "locomo_2_qa16",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa17",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa18",
+      "k": 5,
+      "content_overlap_precision": 0.009009009009009009,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.01785714285714286
+    },
+    {
+      "question_id": "locomo_2_qa19",
+      "k": 5,
+      "content_overlap_precision": 0.02830188679245283,
+      "content_overlap_recall": 0.6,
+      "content_overlap_at_k": 0.05405405405405406
+    },
+    {
+      "question_id": "locomo_2_qa20",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa21",
+      "k": 5,
+      "content_overlap_precision": 0.019801980198019802,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.03809523809523809
+    },
+    {
+      "question_id": "locomo_2_qa22",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa23",
+      "k": 5,
+      "content_overlap_precision": 0.045454545454545456,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08695652173913045
+    },
+    {
+      "question_id": "locomo_2_qa24",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa25",
+      "k": 5,
+      "content_overlap_precision": 0.010638297872340425,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.020833333333333336
+    },
+    {
+      "question_id": "locomo_2_qa26",
+      "k": 5,
+      "content_overlap_precision": 0.022222222222222223,
+      "content_overlap_recall": 0.2857142857142857,
+      "content_overlap_at_k": 0.04123711340206186
+    },
+    {
+      "question_id": "locomo_2_qa27",
+      "k": 5,
+      "content_overlap_precision": 0.010309278350515464,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.01941747572815534
+    },
+    {
+      "question_id": "locomo_2_qa28",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa29",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa30",
+      "k": 5,
+      "content_overlap_precision": 0.0379746835443038,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.07228915662650602
+    },
+    {
+      "question_id": "locomo_2_qa31",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa32",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa33",
+      "k": 5,
+      "content_overlap_precision": 0.0136986301369863,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.02666666666666666
+    },
+    {
+      "question_id": "locomo_2_qa34",
+      "k": 5,
+      "content_overlap_precision": 0.0125,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.023255813953488372
+    },
+    {
+      "question_id": "locomo_2_qa35",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa36",
+      "k": 5,
+      "content_overlap_precision": 0.03787878787878788,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.07299270072992702
+    },
+    {
+      "question_id": "locomo_2_qa37",
+      "k": 5,
+      "content_overlap_precision": 0.016666666666666666,
+      "content_overlap_recall": 0.2222222222222222,
+      "content_overlap_at_k": 0.031007751937984496
+    },
+    {
+      "question_id": "locomo_2_qa38",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa39",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa40",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa41",
+      "k": 5,
+      "content_overlap_precision": 0.008064516129032258,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.016
+    },
+    {
+      "question_id": "locomo_2_qa42",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa43",
+      "k": 5,
+      "content_overlap_precision": 0.0273972602739726,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.05063291139240506
+    },
+    {
+      "question_id": "locomo_2_qa44",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa45",
+      "k": 5,
+      "content_overlap_precision": 0.04081632653061224,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.07017543859649122
+    },
+    {
+      "question_id": "locomo_2_qa46",
+      "k": 5,
+      "content_overlap_precision": 0.020833333333333332,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.0392156862745098
+    },
+    {
+      "question_id": "locomo_2_qa47",
+      "k": 5,
+      "content_overlap_precision": 0.045454545454545456,
+      "content_overlap_recall": 0.8,
+      "content_overlap_at_k": 0.08602150537634409
+    },
+    {
+      "question_id": "locomo_2_qa48",
+      "k": 5,
+      "content_overlap_precision": 0.01834862385321101,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.034782608695652174
+    },
+    {
+      "question_id": "locomo_2_qa49",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa50",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa51",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa52",
+      "k": 5,
+      "content_overlap_precision": 0.009523809523809525,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.01869158878504673
+    },
+    {
+      "question_id": "locomo_2_qa53",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa54",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa55",
+      "k": 5,
+      "content_overlap_precision": 0.013333333333333334,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.02469135802469136
+    },
+    {
+      "question_id": "locomo_2_qa56",
+      "k": 5,
+      "content_overlap_precision": 0.006622516556291391,
+      "content_overlap_recall": 0.2,
+      "content_overlap_at_k": 0.01282051282051282
+    },
+    {
+      "question_id": "locomo_2_qa57",
+      "k": 5,
+      "content_overlap_precision": 0.012658227848101266,
+      "content_overlap_recall": 0.14285714285714285,
+      "content_overlap_at_k": 0.023255813953488372
+    },
+    {
+      "question_id": "locomo_2_qa58",
+      "k": 5,
+      "content_overlap_precision": 0.022988505747126436,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.04301075268817204
+    },
+    {
+      "question_id": "locomo_2_qa59",
+      "k": 5,
+      "content_overlap_precision": 0.022900763358778626,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.044444444444444446
+    },
+    {
+      "question_id": "locomo_2_qa60",
+      "k": 5,
+      "content_overlap_precision": 0.020833333333333332,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.04081632653061225
+    },
+    {
+      "question_id": "locomo_2_qa61",
+      "k": 5,
+      "content_overlap_precision": 0.009615384615384616,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.018181818181818184
+    },
+    {
+      "question_id": "locomo_2_qa62",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa63",
+      "k": 5,
+      "content_overlap_precision": 0.025,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.04878048780487806
+    },
+    {
+      "question_id": "locomo_2_qa64",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa65",
+      "k": 5,
+      "content_overlap_precision": 0.04395604395604396,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08421052631578947
+    },
+    {
+      "question_id": "locomo_2_qa66",
+      "k": 5,
+      "content_overlap_precision": 0.050505050505050504,
+      "content_overlap_recall": 0.35714285714285715,
+      "content_overlap_at_k": 0.08849557522123894
+    },
+    {
+      "question_id": "locomo_2_qa67",
+      "k": 5,
+      "content_overlap_precision": 0.11290322580645161,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.2028985507246377
+    },
+    {
+      "question_id": "locomo_2_qa68",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa69",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa70",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa71",
+      "k": 5,
+      "content_overlap_precision": 0.025210084033613446,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.049180327868852465
+    },
+    {
+      "question_id": "locomo_2_qa72",
+      "k": 5,
+      "content_overlap_precision": 0.1271186440677966,
+      "content_overlap_recall": 0.9375,
+      "content_overlap_at_k": 0.22388059701492533
+    },
+    {
+      "question_id": "locomo_2_qa73",
+      "k": 5,
+      "content_overlap_precision": 0.01904761904761905,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.03738317757009346
+    },
+    {
+      "question_id": "locomo_2_qa74",
+      "k": 5,
+      "content_overlap_precision": 0.04878048780487805,
+      "content_overlap_recall": 0.4444444444444444,
+      "content_overlap_at_k": 0.08791208791208792
+    },
+    {
+      "question_id": "locomo_2_qa75",
+      "k": 5,
+      "content_overlap_precision": 0.023809523809523808,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.04545454545454545
+    },
+    {
+      "question_id": "locomo_2_qa76",
+      "k": 5,
+      "content_overlap_precision": 0.049019607843137254,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.08928571428571427
+    },
+    {
+      "question_id": "locomo_2_qa77",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa78",
+      "k": 5,
+      "content_overlap_precision": 0.010869565217391304,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.02150537634408602
+    },
+    {
+      "question_id": "locomo_2_qa79",
+      "k": 5,
+      "content_overlap_precision": 0.03418803418803419,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.06611570247933884
+    },
+    {
+      "question_id": "locomo_2_qa80",
+      "k": 5,
+      "content_overlap_precision": 0.05,
+      "content_overlap_recall": 0.8333333333333334,
+      "content_overlap_at_k": 0.09433962264150944
+    },
+    {
+      "question_id": "locomo_2_qa81",
+      "k": 5,
+      "content_overlap_precision": 0.009433962264150943,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.018691588785046728
+    },
+    {
+      "question_id": "locomo_2_qa82",
+      "k": 5,
+      "content_overlap_precision": 0.0196078431372549,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.037383177570093455
+    },
+    {
+      "question_id": "locomo_2_qa83",
+      "k": 5,
+      "content_overlap_precision": 0.03260869565217391,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.06315789473684211
+    },
+    {
+      "question_id": "locomo_2_qa84",
+      "k": 5,
+      "content_overlap_precision": 0.01639344262295082,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.030769230769230767
+    },
+    {
+      "question_id": "locomo_2_qa85",
+      "k": 5,
+      "content_overlap_precision": 0.015625,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.029850746268656716
+    },
+    {
+      "question_id": "locomo_2_qa86",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa87",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa88",
+      "k": 5,
+      "content_overlap_precision": 0.018018018018018018,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.034782608695652174
+    },
+    {
+      "question_id": "locomo_2_qa89",
+      "k": 5,
+      "content_overlap_precision": 0.015267175572519083,
+      "content_overlap_recall": 0.2222222222222222,
+      "content_overlap_at_k": 0.02857142857142857
+    },
+    {
+      "question_id": "locomo_2_qa90",
+      "k": 5,
+      "content_overlap_precision": 0.018018018018018018,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.034482758620689655
+    },
+    {
+      "question_id": "locomo_2_qa91",
+      "k": 5,
+      "content_overlap_precision": 0.009009009009009009,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.017543859649122806
+    },
+    {
+      "question_id": "locomo_2_qa92",
+      "k": 5,
+      "content_overlap_precision": 0.056338028169014086,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.10666666666666667
+    },
+    {
+      "question_id": "locomo_2_qa93",
+      "k": 5,
+      "content_overlap_precision": 0.06422018348623854,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.1206896551724138
+    },
+    {
+      "question_id": "locomo_2_qa94",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa95",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa96",
+      "k": 5,
+      "content_overlap_precision": 0.044444444444444446,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.0851063829787234
+    },
+    {
+      "question_id": "locomo_2_qa97",
+      "k": 5,
+      "content_overlap_precision": 0.10526315789473684,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.1904761904761905
+    },
+    {
+      "question_id": "locomo_2_qa98",
+      "k": 5,
+      "content_overlap_precision": 0.07368421052631578,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.1372549019607843
+    },
+    {
+      "question_id": "locomo_2_qa99",
+      "k": 5,
+      "content_overlap_precision": 0.05154639175257732,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.0980392156862745
+    },
+    {
+      "question_id": "locomo_2_qa100",
+      "k": 5,
+      "content_overlap_precision": 0.00909090909090909,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.018018018018018018
+    },
+    {
+      "question_id": "locomo_2_qa101",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa102",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa103",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa104",
+      "k": 5,
+      "content_overlap_precision": 0.01680672268907563,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.03305785123966942
+    },
+    {
+      "question_id": "locomo_2_qa105",
+      "k": 5,
+      "content_overlap_precision": 0.04716981132075472,
+      "content_overlap_recall": 0.8333333333333334,
+      "content_overlap_at_k": 0.0892857142857143
+    },
+    {
+      "question_id": "locomo_2_qa106",
+      "k": 5,
+      "content_overlap_precision": 0.031914893617021274,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.06185567010309278
+    },
+    {
+      "question_id": "locomo_2_qa107",
+      "k": 5,
+      "content_overlap_precision": 0.04,
+      "content_overlap_recall": 0.375,
+      "content_overlap_at_k": 0.07228915662650602
+    },
+    {
+      "question_id": "locomo_2_qa108",
+      "k": 5,
+      "content_overlap_precision": 0.06976744186046512,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.13043478260869565
+    },
+    {
+      "question_id": "locomo_2_qa109",
+      "k": 5,
+      "content_overlap_precision": 0.04,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.07692307692307693
+    },
+    {
+      "question_id": "locomo_2_qa110",
+      "k": 5,
+      "content_overlap_precision": 0.014084507042253521,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.027027027027027032
+    },
+    {
+      "question_id": "locomo_2_qa111",
+      "k": 5,
+      "content_overlap_precision": 0.01694915254237288,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.03333333333333333
+    },
+    {
+      "question_id": "locomo_2_qa112",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa113",
+      "k": 5,
+      "content_overlap_precision": 0.006944444444444444,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.013793103448275862
+    },
+    {
+      "question_id": "locomo_2_qa114",
+      "k": 5,
+      "content_overlap_precision": 0.045454545454545456,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.08571428571428572
+    },
+    {
+      "question_id": "locomo_2_qa115",
+      "k": 5,
+      "content_overlap_precision": 0.00980392156862745,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.019047619047619046
+    },
+    {
+      "question_id": "locomo_2_qa116",
+      "k": 5,
+      "content_overlap_precision": 0.10843373493975904,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.1894736842105263
+    },
+    {
+      "question_id": "locomo_2_qa117",
+      "k": 5,
+      "content_overlap_precision": 0.020202020202020204,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.03960396039603961
+    },
+    {
+      "question_id": "locomo_2_qa118",
+      "k": 5,
+      "content_overlap_precision": 0.07339449541284404,
+      "content_overlap_recall": 0.8888888888888888,
+      "content_overlap_at_k": 0.13559322033898308
+    },
+    {
+      "question_id": "locomo_2_qa119",
+      "k": 5,
+      "content_overlap_precision": 0.04065040650406504,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.078125
+    },
+    {
+      "question_id": "locomo_2_qa120",
+      "k": 5,
+      "content_overlap_precision": 0.011235955056179775,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.02222222222222222
+    },
+    {
+      "question_id": "locomo_2_qa121",
+      "k": 5,
+      "content_overlap_precision": 0.043478260869565216,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.08333333333333333
+    },
+    {
+      "question_id": "locomo_2_qa122",
+      "k": 5,
+      "content_overlap_precision": 0.015151515151515152,
+      "content_overlap_recall": 0.2,
+      "content_overlap_at_k": 0.028169014084507046
+    },
+    {
+      "question_id": "locomo_2_qa123",
+      "k": 5,
+      "content_overlap_precision": 0.018518518518518517,
+      "content_overlap_recall": 0.14285714285714285,
+      "content_overlap_at_k": 0.03278688524590164
+    },
+    {
+      "question_id": "locomo_2_qa124",
+      "k": 5,
+      "content_overlap_precision": 0.09411764705882353,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.17204301075268816
+    },
+    {
+      "question_id": "locomo_2_qa125",
+      "k": 5,
+      "content_overlap_precision": 0.043478260869565216,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.08
+    },
+    {
+      "question_id": "locomo_2_qa126",
+      "k": 5,
+      "content_overlap_precision": 0.009708737864077669,
+      "content_overlap_recall": 0.25,
+      "content_overlap_at_k": 0.018691588785046728
+    },
+    {
+      "question_id": "locomo_2_qa127",
+      "k": 5,
+      "content_overlap_precision": 0.034482758620689655,
+      "content_overlap_recall": 0.8,
+      "content_overlap_at_k": 0.06611570247933884
+    },
+    {
+      "question_id": "locomo_2_qa128",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa129",
+      "k": 5,
+      "content_overlap_precision": 0.08247422680412371,
+      "content_overlap_recall": 0.6153846153846154,
+      "content_overlap_at_k": 0.14545454545454545
+    },
+    {
+      "question_id": "locomo_2_qa130",
+      "k": 5,
+      "content_overlap_precision": 0.008849557522123894,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.017391304347826087
+    },
+    {
+      "question_id": "locomo_2_qa131",
+      "k": 5,
+      "content_overlap_precision": 0.04054054054054054,
+      "content_overlap_recall": 0.6,
+      "content_overlap_at_k": 0.0759493670886076
+    },
+    {
+      "question_id": "locomo_2_qa132",
+      "k": 5,
+      "content_overlap_precision": 0.12222222222222222,
+      "content_overlap_recall": 0.9166666666666666,
+      "content_overlap_at_k": 0.21568627450980393
+    },
+    {
+      "question_id": "locomo_2_qa133",
+      "k": 5,
+      "content_overlap_precision": 0.031578947368421054,
+      "content_overlap_recall": 0.42857142857142855,
+      "content_overlap_at_k": 0.05882352941176471
+    },
+    {
+      "question_id": "locomo_2_qa134",
+      "k": 5,
+      "content_overlap_precision": 0.027777777777777776,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.05405405405405406
+    },
+    {
+      "question_id": "locomo_2_qa135",
+      "k": 5,
+      "content_overlap_precision": 0.06481481481481481,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.1217391304347826
+    },
+    {
+      "question_id": "locomo_2_qa136",
+      "k": 5,
+      "content_overlap_precision": 0.041237113402061855,
+      "content_overlap_recall": 0.4444444444444444,
+      "content_overlap_at_k": 0.07547169811320753
+    },
+    {
+      "question_id": "locomo_2_qa137",
+      "k": 5,
+      "content_overlap_precision": 0.0851063829787234,
+      "content_overlap_recall": 0.8888888888888888,
+      "content_overlap_at_k": 0.15533980582524273
+    },
+    {
+      "question_id": "locomo_2_qa138",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa139",
+      "k": 5,
+      "content_overlap_precision": 0.017094017094017096,
+      "content_overlap_recall": 0.3333333333333333,
+      "content_overlap_at_k": 0.032520325203252036
+    },
+    {
+      "question_id": "locomo_2_qa140",
+      "k": 5,
+      "content_overlap_precision": 0.026845637583892617,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.05228758169934641
+    },
+    {
+      "question_id": "locomo_2_qa141",
+      "k": 5,
+      "content_overlap_precision": 0.030927835051546393,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.06000000000000001
+    },
+    {
+      "question_id": "locomo_2_qa142",
+      "k": 5,
+      "content_overlap_precision": 0.04,
+      "content_overlap_recall": 0.75,
+      "content_overlap_at_k": 0.07594936708860758
+    },
+    {
+      "question_id": "locomo_2_qa143",
+      "k": 5,
+      "content_overlap_precision": 0.009523809523809525,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.01886792452830189
+    },
+    {
+      "question_id": "locomo_2_qa144",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa145",
+      "k": 5,
+      "content_overlap_precision": 0.02654867256637168,
+      "content_overlap_recall": 1.0,
+      "content_overlap_at_k": 0.05172413793103448
+    },
+    {
+      "question_id": "locomo_2_qa146",
+      "k": 5,
+      "content_overlap_precision": 0.06796116504854369,
+      "content_overlap_recall": 0.875,
+      "content_overlap_at_k": 0.12612612612612614
+    },
+    {
+      "question_id": "locomo_2_qa147",
+      "k": 5,
+      "content_overlap_precision": 0.0,
+      "content_overlap_recall": 0.0,
+      "content_overlap_at_k": 0.0
+    },
+    {
+      "question_id": "locomo_2_qa148",
+      "k": 5,
+      "content_overlap_precision": 0.030534351145038167,
+      "content_overlap_recall": 0.5,
+      "content_overlap_at_k": 0.05755395683453236
+    },
+    {
+      "question_id": "locomo_2_qa149",
+      "k": 5,
+      "content_overlap_precision": 0.009259259259259259,
+      "content_overlap_recall": 0.16666666666666666,
+      "content_overlap_at_k": 0.017543859649122806
+    },
+    {
+      "question_id": "locomo_2_qa150",
+      "k": 5,
+      "content_overlap_precision": 0.05405405405405406,
+      "content_overlap_recall": 0.4,
+      "content_overlap_at_k": 0.09523809523809523
+    },
+    {
+      "question_id": "locomo_2_qa151",
+      "k": 5,
+      "content_overlap_precision": 0.007874015748031496,
+      "content_overlap_recall": 0.2,
+      "content_overlap_at_k": 0.015151515151515152
+    }
+  ],
+  "content_overlap_at_k_mean": 0.04123713850556668,
+  "content_overlap_precision_mean": 0.022467007731219176,
+  "content_overlap_recall_mean": 0.36897760491837306,
+  "unresolved_question_ids": []
+}

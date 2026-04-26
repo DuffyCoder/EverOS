@@ -1,0 +1,187 @@
+{
+  "system": "A-MEM",
+  "dataset": "locomo",
+  "retry_policy": "realistic",
+  "answer_level": {
+    "accuracy": 0.5783549783549783,
+    "f1_mean": 0.4223966403505224,
+    "bleu1_mean": 0.2549391861785076
+  },
+  "retrieval_level": {
+    "content_overlap_at_5": 0.04123713850556668,
+    "content_overlap_precision_at_5": 0.022467007731219176,
+    "content_overlap_recall_at_5": 0.36897760491837306
+  },
+  "adapter_specific_retrieval": {
+    "evidence_hit_at_5": 0.0,
+    "evidence_recall_at_5": 0.0,
+    "mrr": 0.0,
+    "ndcg_at_5": 0.0
+  },
+  "diagnostics": {
+    "add_latency_ms_mean": null,
+    "retrieval_latency_ms_mean": null,
+    "answer_latency_ms_mean": 1370.4846014207915,
+    "final_context_tokens_mean": 782.7116883116884,
+    "add_latency_ms_stats": null,
+    "retrieval_latency_ms_stats": null,
+    "answer_latency_ms_stats": {
+      "n": 385,
+      "mean": 1370.4846014207915,
+      "p50": 1144.9262460000682,
+      "p95": 2784.9410045999284,
+      "max": 3246.8626780000704
+    },
+    "final_context_tokens_stats": {
+      "n": 385,
+      "mean": 782.7116883116884,
+      "p50": 768.0,
+      "p95": 1088.3999999999992,
+      "max": 1286.0
+    },
+    "add_retry_rate": null,
+    "add_fallback_rate": null,
+    "add_failed_rate": null,
+    "add_samples": 0
+  },
+  "latency": {
+    "add": {
+      "n_calls": 1,
+      "wall_ms": {
+        "realistic": {
+          "n": 1,
+          "mean": 4629833.291441999,
+          "p50": 4629833.291441999,
+          "p95": 4629833.291441999,
+          "max": 4629833.291441999
+        },
+        "clean": {
+          "n": 1,
+          "mean": 4629833.291441999,
+          "p50": 4629833.291441999,
+          "p95": 4629833.291441999,
+          "max": 4629833.291441999
+        },
+        "first_attempt": {
+          "n": 1,
+          "mean": 4629833.291441999,
+          "p50": 4629833.291441999,
+          "p95": 4629833.291441999,
+          "max": 4629833.291441999
+        },
+        "successful_attempt": {
+          "n": 1,
+          "mean": 4629833.291441999,
+          "p50": 4629833.291441999,
+          "p95": 4629833.291441999,
+          "max": 4629833.291441999
+        }
+      },
+      "reliability": {
+        "retry_rate": 0.0,
+        "fallback_rate": 0.0,
+        "failed_rate": 0.0,
+        "retry_by_class": {}
+      }
+    },
+    "answer": {
+      "n_calls": 385,
+      "wall_ms": {
+        "realistic": {
+          "n": 385,
+          "mean": 1370.495662548054,
+          "p50": 1144.9353420002808,
+          "p95": 2784.9495716000056,
+          "max": 3246.8724099999235
+        },
+        "clean": {
+          "n": 385,
+          "mean": 1370.495662548054,
+          "p50": 1144.9353420002808,
+          "p95": 2784.9495716000056,
+          "max": 3246.8724099999235
+        },
+        "first_attempt": {
+          "n": 385,
+          "mean": 1370.4846014207915,
+          "p50": 1144.9262460000682,
+          "p95": 2784.9410045999284,
+          "max": 3246.8626780000704
+        },
+        "successful_attempt": {
+          "n": 385,
+          "mean": 1370.4846014207915,
+          "p50": 1144.9262460000682,
+          "p95": 2784.9410045999284,
+          "max": 3246.8626780000704
+        }
+      },
+      "reliability": {
+        "retry_rate": 0.0,
+        "fallback_rate": 0.0,
+        "failed_rate": 0.0,
+        "retry_by_class": {}
+      }
+    },
+    "search": {
+      "n_calls": 385,
+      "wall_ms": {
+        "realistic": {
+          "n": 385,
+          "mean": 109.55840572468888,
+          "p50": 106.19369600044593,
+          "p95": 124.25392599998301,
+          "max": 402.67024700006004
+        },
+        "clean": {
+          "n": 385,
+          "mean": 109.55840572468888,
+          "p50": 106.19369600044593,
+          "p95": 124.25392599998301,
+          "max": 402.67024700006004
+        },
+        "first_attempt": {
+          "n": 385,
+          "mean": 109.54920726751455,
+          "p50": 106.18451000027562,
+          "p95": 124.24742619932655,
+          "max": 402.6591219999318
+        },
+        "successful_attempt": {
+          "n": 385,
+          "mean": 109.54920726751455,
+          "p50": 106.18451000027562,
+          "p95": 124.24742619932655,
+          "max": 402.6591219999318
+        }
+      },
+      "reliability": {
+        "retry_rate": 0.0,
+        "fallback_rate": 0.0,
+        "failed_rate": 0.0,
+        "retry_by_class": {}
+      }
+    },
+    "e2e_query_ms": {
+      "n_calls": 385,
+      "wall_ms": {
+        "realistic": {
+          "n": 385,
+          "mean": 1480.0540682727428,
+          "p50": 1255.4175000004761,
+          "p95": 2897.939422800115,
+          "max": 3359.6918349994667
+        }
+      }
+    }
+  },
+  "latency_invariants": {
+    "count": 0,
+    "by_code": {},
+    "by_severity": {
+      "error": 0,
+      "warning": 0
+    },
+    "items": []
+  }
+}
