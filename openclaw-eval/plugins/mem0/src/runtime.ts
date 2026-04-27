@@ -5,15 +5,15 @@
 // closeAllMemorySearchManagers iterates the map.
 //
 // resolveMemoryBackendConfig returns {backend: "builtin"} via
-// backend-config.ts.
+// backend-config.ts. workspaceDir is resolved per-agent from cfg via
+// resolveAgentWorkspaceDir so readFile() can read session.md files
+// directly (Spike #2 Decision 1 Option A).
+import { resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
 import type {
   MemoryPluginRuntime,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import { resolveMem0BackendConfig } from "./backend-config.js";
-import {
-  Mem0SearchManager,
-  type Mem0SearchManagerParams,
-} from "./search-manager.js";
+import { Mem0SearchManager } from "./search-manager.js";
 
 export interface Mem0RuntimeOptions {
   // Defaults used when constructing per-agent managers. The actual values
@@ -32,13 +32,14 @@ export function createMem0Runtime(opts: Mem0RuntimeOptions = {}): MemoryPluginRu
       if (cached) {
         return { manager: cached };
       }
-      const initParams: Mem0SearchManagerParams = {
+      const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId);
+      const manager = new Mem0SearchManager({
         agentId: params.agentId,
+        workspaceDir,
         sidecarUrl: opts.sidecarUrl,
         sidecarTimeoutMs: opts.sidecarTimeoutMs,
         writeSessionFiles: opts.writeSessionFiles,
-      };
-      const manager = new Mem0SearchManager(initParams);
+      });
       managers.set(params.agentId, manager);
       return { manager };
     },
