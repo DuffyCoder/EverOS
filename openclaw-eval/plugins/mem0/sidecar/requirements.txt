@@ -1,0 +1,9 @@
+# Pinned to versions known to expose Memory.from_config + memory.add/search APIs
+# used by server.py. Heavy deps (torch, transformers) come transitively via
+# sentence-transformers; total install ~1.5 GB.
+mem0ai>=0.1.20,<0.2
+fastapi>=0.110,<0.116
+uvicorn[standard]>=0.27,<0.34
+sentence-transformers>=2.7,<4
+chromadb>=0.4.24,<0.6
+pydantic>=2.6,<3

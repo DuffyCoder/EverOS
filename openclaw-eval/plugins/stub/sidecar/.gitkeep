@@ -1,0 +1,4 @@
+# Empty sidecar dir for plugins without a Python sidecar (stub, memory-core,
+# noop). Dockerfile.eval COPY plugins/${MEMORY_PLUGIN}/sidecar/ /sidecar/
+# requires the source directory to exist. The pip-install RUN step skips
+# when /sidecar/requirements.txt is absent.

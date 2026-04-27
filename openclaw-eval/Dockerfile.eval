@@ -29,13 +29,14 @@ LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
       eval.plugin_rev=${PLUGIN_REV} \
       eval.layer=eval-runtime
 
-# We need root briefly to mkdir + install jq for entrypoint config render.
+# We need root briefly to mkdir + install jq + Python (sidecar runtime).
 USER root
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jq \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      jq python3 python3-venv python3-pip \
  && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /eval /workspace /etc/openclaw \
- && chown -R node:node /eval /workspace /etc/openclaw
+ && mkdir -p /eval /workspace /etc/openclaw /sidecar \
+ && chown -R node:node /eval /workspace /etc/openclaw /sidecar
 
 # Eval-layer assets
 COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
@@ -44,6 +45,27 @@ COPY --chown=node:node container/openclaw_eval_bridge.mjs /eval/openclaw_eval_br
 COPY --chown=node:node container/openclaw_eval_bridge_lib.mjs /eval/openclaw_eval_bridge_lib.mjs
 RUN chmod 755 /eval/entrypoint.sh
 
+# Plugin sidecar (FastAPI server + Python deps). build.py stages the
+# active plugin's sidecar/ into _active_sidecar/ before invoking docker
+# build, or leaves it empty for plugins without a sidecar. The venv
+# setup below is a no-op when requirements.txt is absent.
+COPY --chown=node:node _active_sidecar/ /sidecar/
+
+USER node
+RUN if [ -f /sidecar/requirements.txt ]; then \
+      python3 -m venv /sidecar/venv \
+      && /sidecar/venv/bin/pip install --no-cache-dir --upgrade pip \
+      && /sidecar/venv/bin/pip install --no-cache-dir -r /sidecar/requirements.txt; \
+    fi
+# Pre-cache the default sentence-transformers model so first /search call
+# does not pay the HuggingFace download cost (~80MB). Best-effort: the
+# `|| true` lets the build proceed if the cache fetch fails (model will
+# download lazily at runtime).
+RUN if [ -x /sidecar/venv/bin/python ]; then \
+      /sidecar/venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); print('precached MiniLM')" || true; \
+    fi
+
+USER root
 # Memory plugin id is read by entrypoint.sh to render the right plugin
 # entries / slot config into /workspace/openclaw.json.
 ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
@@ -65,6 +87,12 @@ ENV LLM_MODEL=gpt-4.1-mini
 ENV SOPH_API_KEY=
 ENV SOPH_EMBED_URL=
 ENV SOPH_EMBED_EASYLLM_ID=
+
+# Sidecar defaults. MEM0_PORT must match what the plugin's sidecarUrl
+# points at (default http://localhost:8765 in plugin code).
+ENV MEM0_PORT=8765
+ENV MEM0_INFER=false
+ENV MEM0_DATA_DIR=/workspace/state/mem0
 
 # Drop back to non-root for runtime.
 USER node

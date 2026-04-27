@@ -142,6 +142,38 @@ def build_base(
     return tag
 
 
+def stage_active_sidecar(eval_dir: Path, plugins_dir: Path, memory_plugin: str) -> None:
+    """Stage plugins/<name>/sidecar/ into eval_dir/_active_sidecar/.
+
+    Dockerfile.eval has a single ``COPY _active_sidecar/ /sidecar/`` that
+    works uniformly across plugins. For plugins without a sidecar
+    (memory-core / noop / a stub-only test), we leave the directory empty
+    so the venv setup step skips itself (no requirements.txt present).
+    """
+    dst = eval_dir / "_active_sidecar"
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.mkdir(parents=True)
+
+    if memory_plugin in ("memory-core", "noop"):
+        # Leave _active_sidecar/ empty.
+        return
+
+    src = plugins_dir / memory_plugin / "sidecar"
+    if not src.exists():
+        # Plugin has no sidecar dir at all (e.g. stub before .gitkeep).
+        return
+    # Copy contents (skip cache/test detritus).
+    for entry in src.iterdir():
+        if entry.name in ("__pycache__",) or entry.name.endswith(".pyc"):
+            continue
+        if entry.is_dir():
+            shutil.copytree(entry, dst / entry.name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        else:
+            shutil.copy2(entry, dst / entry.name)
+    print(f"[build] staged sidecar: {src} -> {dst}")
+
+
 def build_eval_layer(
     eval_dir: Path,
     base_tag: str,
@@ -150,8 +182,11 @@ def build_eval_layer(
     plugin_rev: str,
     *,
     variant: str = "slim",
+    plugins_dir: Optional[Path] = None,
 ) -> str:
     """Step 2: layer eval-runtime on top of openclaw-base."""
+    if plugins_dir is not None:
+        stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
     tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
     cmd = [
         "docker", "build",
@@ -212,6 +247,7 @@ def main():
     layer_tag = build_eval_layer(
         here, base_tag, args.memory_plugin, openclaw_sha, plugin_rev,
         variant=args.variant,
+        plugins_dir=here / "plugins",
     )
 
     print()

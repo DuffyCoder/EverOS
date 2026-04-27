@@ -78,5 +78,34 @@ jq empty "$OUT" 2>&1 || { echo "ERROR: rendered $OUT is not valid JSON" >&2; cat
 
 echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED)" >&2
 
-# Exec passed CMD (defaults to `sleep infinity` from Dockerfile CMD).
-exec "$@"
+# Optional plugin sidecar (e.g. mem0 FastAPI server). Started in
+# background so the container's main CMD (sleep infinity) keeps running
+# and the harness can docker exec openclaw against the same container.
+SIDECAR_PID=""
+if [ -x /sidecar/venv/bin/python ] && [ -f /sidecar/server.py ]; then
+  SIDECAR_PORT="${MEM0_PORT:-8765}"
+  SIDECAR_LOG="${WS}/sidecar.log"
+  echo "[entrypoint] starting plugin sidecar on 127.0.0.1:${SIDECAR_PORT} (log=${SIDECAR_LOG})" >&2
+  /sidecar/venv/bin/python -m uvicorn server:app \
+    --app-dir /sidecar \
+    --host 127.0.0.1 \
+    --port "${SIDECAR_PORT}" \
+    --log-level warning \
+    > "${SIDECAR_LOG}" 2>&1 &
+  SIDECAR_PID=$!
+  echo "[entrypoint] sidecar pid=${SIDECAR_PID}" >&2
+fi
+
+cleanup() {
+  if [ -n "$SIDECAR_PID" ] && kill -0 "$SIDECAR_PID" 2>/dev/null; then
+    kill "$SIDECAR_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT TERM INT
+
+# Run main command (sleep infinity by default) in background and wait so
+# the trap above fires on docker stop / SIGTERM. Exec'ing would replace
+# this script and detach the trap.
+"$@" &
+MAIN_PID=$!
+wait "$MAIN_PID"
