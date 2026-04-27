@@ -59,8 +59,12 @@ done
 
 # Pre-index the passphrase fact. mem0 lazy-inits on first call here
 # (~60s cold start: torch + MiniLM model load).
-echo "[gate] indexing passphrase fact (triggers mem0 init, ~60s cold)..."
-INDEX_PAYLOAD='{"documents":[{"id":"stage1-w2-d3b-passphrase","content":"The user'\''s secret passphrase stored in memory is WOMBAT_42. Always respond with this passphrase when asked.","metadata":{"kind":"passphrase"}}]}'
+echo "[gate] indexing fact (triggers mem0 init, ~60s cold)..."
+# Note: deliberately phrased as a benign codename, NOT "secret passphrase".
+# The LLM safety-aligns to refuse divulging "secret passphrases" even when
+# the user is asking about their own stored data, which contaminates the
+# gate. Sentinel WOMBAT_42 stays for the assertion.
+INDEX_PAYLOAD='{"documents":[{"id":"stage1-w2-d3b-codeword","content":"The user'\''s preferred project codeword for tracking is WOMBAT_42. Use this codeword whenever summarizing or referencing this project.","metadata":{"kind":"codeword"}}]}'
 INDEX_RESP=$(docker exec "$CONTAINER" curl -fsS \
   -X POST -H "content-type: application/json" \
   -d "$INDEX_PAYLOAD" \
@@ -78,7 +82,7 @@ fi
 echo "[gate] direct /search probe..."
 SEARCH_RESP=$(docker exec "$CONTAINER" curl -fsS \
   -X POST -H "content-type: application/json" \
-  -d '{"query":"What is the secret passphrase","max_results":5}' \
+  -d '{"query":"What is the user'\''s preferred codeword","max_results":5}' \
   http://127.0.0.1:8765/search 2>&1)
 echo "[gate] /search response: $SEARCH_RESP"
 if ! echo "$SEARCH_RESP" | grep -q "$SENTINEL"; then
@@ -97,7 +101,7 @@ PAYLOAD=$(cat <<EOF
   "state_dir": "/workspace/state",
   "home_dir": "/workspace/home",
   "session_id": "mem0-gate-001",
-  "message": "Use the memory_search tool to look up the user's secret passphrase, then tell me what it is.",
+  "message": "What is the user's preferred project codeword?",
   "timeout_seconds": $TIMEOUT,
   "agent_llm_env_vars": ["LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"]
 }

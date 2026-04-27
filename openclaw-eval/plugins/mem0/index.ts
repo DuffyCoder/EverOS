@@ -195,28 +195,48 @@ export default definePluginEntry({
 
     api.registerMemoryCapability({
       runtime,
-      promptBuilder: ({ availableTools }) => {
+      // Faithful adaptation of mem0's recommended agent prompts. We do
+      // NOT reuse memory-core's wording — that would confound plugin
+      // matrix comparisons by mixing mem0's backend with memory-core's
+      // tuned prompt. Each plugin ships its own prompt as it would be
+      // deployed.
+      //
+      // Sources:
+      //   - mem0 ElevenLabs integration template
+      //     (docs/integrations/elevenlabs.mdx): full system prompt for
+      //     a memory-aware voice assistant.
+      //   - mem0 OpenAI Agents SDK integration
+      //     (skills/mem0/references/integration-patterns.md): concise
+      //     "memory capabilities" instructions.
+      // Tool names are mapped from mem0's native search()/add() to
+      // openclaw's standard memory_search / memory_get.
+      promptBuilder: ({ availableTools, citationsMode }) => {
         const hasSearch = availableTools.has("memory_search");
         const hasGet = availableTools.has("memory_get");
         if (!hasSearch && !hasGet) {
           return [];
         }
-        // Mirror memory-core's directive phrasing — proven on LoCoMo.
-        // The non-directive "use these tools" wording fails on simple
-        // factoid questions because the LLM doesn't probe memory by
-        // default; assertive wording forces the recall step.
-        let guidance: string;
-        if (hasSearch && hasGet) {
-          guidance =
-            "Before answering anything about prior work, decisions, dates, people, preferences, todos, or any user-supplied facts: run memory_search to recall stored memories from mem0; then use memory_get to pull additional lines if needed. If low confidence after search, say you checked.";
-        } else if (hasSearch) {
-          guidance =
-            "Before answering anything about prior work, decisions, dates, people, preferences, todos, or any user-supplied facts: run memory_search to recall stored memories from mem0 and answer from the matching results. If low confidence after search, say you checked.";
-        } else {
-          guidance =
-            "Before answering anything about prior work, decisions, or user-supplied facts that already point to a specific memory entry: run memory_get to pull only the needed lines.";
+        const lines: string[] = [
+          "## Memory",
+          "You have access to a memory of past conversations with this user — their preferences, personal details, decisions, and important things they have shared.",
+        ];
+        if (hasSearch) {
+          lines.push(
+            "Use memory_search to recall relevant context from prior conversations whenever the user asks about people, events, dates, preferences, or things they previously mentioned. Before responding to such questions, always check memory first.",
+          );
         }
-        return ["## Memory Recall (mem0)", guidance, ""];
+        if (hasGet) {
+          lines.push(
+            "Use memory_get to read a specific memory entry in full when memory_search surfaces a snippet you want to expand.",
+          );
+        }
+        if (citationsMode === "off") {
+          lines.push(
+            "Citations are disabled: do not mention memory paths or IDs in replies unless the user explicitly asks.",
+          );
+        }
+        lines.push("");
+        return lines;
       },
       publicArtifacts: { listArtifacts: async () => [] },
     });
