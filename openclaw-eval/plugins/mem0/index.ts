@@ -195,11 +195,29 @@ export default definePluginEntry({
 
     api.registerMemoryCapability({
       runtime,
-      promptBuilder: () => [
-        "## Memory Recall (mem0)",
-        "Memory is delegated to a co-located mem0 sidecar. Use `memory_search` to recall stored facts and `memory_get` to read snippets by path.",
-        "",
-      ],
+      promptBuilder: ({ availableTools }) => {
+        const hasSearch = availableTools.has("memory_search");
+        const hasGet = availableTools.has("memory_get");
+        if (!hasSearch && !hasGet) {
+          return [];
+        }
+        // Mirror memory-core's directive phrasing — proven on LoCoMo.
+        // The non-directive "use these tools" wording fails on simple
+        // factoid questions because the LLM doesn't probe memory by
+        // default; assertive wording forces the recall step.
+        let guidance: string;
+        if (hasSearch && hasGet) {
+          guidance =
+            "Before answering anything about prior work, decisions, dates, people, preferences, todos, or any user-supplied facts: run memory_search to recall stored memories from mem0; then use memory_get to pull additional lines if needed. If low confidence after search, say you checked.";
+        } else if (hasSearch) {
+          guidance =
+            "Before answering anything about prior work, decisions, dates, people, preferences, todos, or any user-supplied facts: run memory_search to recall stored memories from mem0 and answer from the matching results. If low confidence after search, say you checked.";
+        } else {
+          guidance =
+            "Before answering anything about prior work, decisions, or user-supplied facts that already point to a specific memory entry: run memory_get to pull only the needed lines.";
+        }
+        return ["## Memory Recall (mem0)", guidance, ""];
+      },
       publicArtifacts: { listArtifacts: async () => [] },
     });
 

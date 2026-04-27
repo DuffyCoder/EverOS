@@ -1,6 +1,13 @@
 # Pinned to versions known to expose Memory.from_config + memory.add/search APIs
-# used by server.py. Heavy deps (torch, transformers) come transitively via
-# sentence-transformers; total install ~1.5 GB.
+# used by server.py. Total install ~600 MB after CPU-only torch wheel.
+#
+# Without --extra-index-url, pip would resolve torch to the default PyPI
+# wheel which pulls ~2 GB of CUDA NVIDIA libs (cublas, cusolver, cufft,
+# triton, etc.). This container is CPU-only so we pin torch to the +cpu
+# variant from the PyTorch CPU index.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.5.1+cpu
 mem0ai>=0.1.20,<0.2
 fastapi>=0.110,<0.116
 uvicorn[standard]>=0.27,<0.34

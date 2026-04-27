@@ -182,7 +182,11 @@ def index(req: IndexRequest):
 @app.post("/search")
 def search(req: SearchRequest):
     memory = _get_memory()
-    user_id = req.session_key or os.getenv("MEM0_DEFAULT_USER_ID", "openclaw")
+    # Use a single user_id for all memories. session_key from openclaw is
+    # per-agent-session and would partition mem0 storage in a way that
+    # makes /index (which has no session) invisible to /search. Cross-
+    # conversation isolation is handled by separate containers/workspaces.
+    user_id = os.getenv("MEM0_DEFAULT_USER_ID", "openclaw")
     limit = req.max_results or 10
     try:
         result = memory.search(query=req.query, user_id=user_id, limit=limit)
