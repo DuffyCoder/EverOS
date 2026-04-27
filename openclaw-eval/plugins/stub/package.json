@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/stub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Stub memory plugin — returns a sentinel passphrase for Stage 1 Week 2 Day 0 plugin-discovery gate tests.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

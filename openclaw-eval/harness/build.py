@@ -35,14 +35,26 @@ def short_sha(path: Path, ref: str = "HEAD") -> str:
 
 
 def plugin_content_hash(plugin_dir: Path) -> str:
-    """Hash of plugin source files for tag reproducibility."""
+    """Hash of plugin source files for tag reproducibility.
+
+    Skips dot-prefixed entries (relative to ``plugin_dir``) and the standard
+    build/dep dirs. Earlier version inspected ``p.parts`` of the absolute
+    path, which always rejected files when the plugin lived under
+    ``.claude/worktrees/...`` — every file got filtered, leaving the empty
+    sha256 prefix ``e3b0c44`` as the rev for any plugin in a worktree.
+    """
     if not plugin_dir.exists():
         return "0000000"
     h = hashlib.sha256()
+    skip_names = {"node_modules", "dist"}
     for p in sorted(plugin_dir.rglob("*")):
-        if p.is_file() and not any(part.startswith(".") for part in p.parts):
-            h.update(str(p.relative_to(plugin_dir)).encode())
-            h.update(p.read_bytes())
+        if not p.is_file():
+            continue
+        rel_parts = p.relative_to(plugin_dir).parts
+        if any(part.startswith(".") or part in skip_names for part in rel_parts):
+            continue
+        h.update("/".join(rel_parts).encode())
+        h.update(p.read_bytes())
     return h.hexdigest()[:7]
 
 
@@ -63,6 +75,36 @@ def run_step(label: str, cmd: list[str], cwd: Optional[Path] = None) -> None:
         sys.exit(res.returncode)
 
 
+def stage_external_plugin(
+    plugins_dir: Path,
+    plugin_name: str,
+    openclaw_repo: Path,
+) -> None:
+    """Sync ``openclaw-eval/plugins/<name>/`` into ``<openclaw_repo>/extensions/<name>/``.
+
+    External plugins (anything other than ``memory-core``/``noop``) live in
+    *our* eval repo. The openclaw build pipeline only sees plugins under its
+    own ``extensions/`` directory, so we stage the source there before
+    invoking ``docker build`` and rely on ``OPENCLAW_EXTENSIONS`` to opt them
+    in.
+
+    The staging directory is overwritten on every build so the plugin source
+    of truth stays in our repo. We don't delete after build because the
+    openclaw repo may be re-used across builds; the staged dir is
+    idempotent.
+    """
+    src = plugins_dir / plugin_name
+    if not src.exists():
+        raise SystemExit(
+            f"[build] ERROR: external plugin source {src} not found"
+        )
+    dst = openclaw_repo / "extensions" / plugin_name
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("node_modules", "dist", "*.tsbuildinfo"))
+    print(f"[build] staged plugin source: {src} -> {dst}")
+
+
 def build_base(
     openclaw_repo: Path,
     memory_plugin: str,
@@ -70,6 +112,7 @@ def build_base(
     *,
     variant: str = "slim",
     skip_if_exists: bool = True,
+    plugins_dir: Optional[Path] = None,
 ) -> str:
     """Step 1: build openclaw-base with OPENCLAW_EXTENSIONS opt-in."""
     tag = f"openclaw-base:{openclaw_sha}-{memory_plugin}-{variant}"
@@ -79,6 +122,11 @@ def build_base(
 
     extensions = "memory-core"
     if memory_plugin not in ("memory-core", "noop"):
+        if plugins_dir is None:
+            raise SystemExit(
+                f"[build] ERROR: external plugin '{memory_plugin}' requires plugins_dir"
+            )
+        stage_external_plugin(plugins_dir, memory_plugin, openclaw_repo)
         # External plugin still needs memory-core in the image (used as fallback
         # baseline for the harness comparison).
         extensions = f"memory-core {memory_plugin}"
@@ -159,6 +207,7 @@ def main():
         openclaw_repo, args.memory_plugin, openclaw_sha,
         variant=args.variant,
         skip_if_exists=not args.rebuild_base,
+        plugins_dir=here / "plugins",
     )
     layer_tag = build_eval_layer(
         here, base_tag, args.memory_plugin, openclaw_sha, plugin_rev,
