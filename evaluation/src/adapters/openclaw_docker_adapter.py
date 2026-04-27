@@ -378,13 +378,25 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         }])
         return (resp.get("reply") or "").strip()
 
-    # NOTE: search() and add()'s memory index step also need to route
-    # through docker exec for the "shared_llm" answer mode. Stage 1
-    # Week 2 task: route those too. For now, agent_local mode is the
-    # primary use case (Path B), and search() returns skipped in that
-    # mode (inherited from base), so this works for Path B end-to-end.
-    # When we add Path A docker support, we'll route the memory-search
-    # bridge command through docker exec as well.
+    async def _invoke_bridge(
+        self, sandbox: dict, payload: dict, timeout: float
+    ) -> dict:
+        """Override base impl so index/status/build_flush_plan all run
+        inside the container. Form B plugins (mem0/evermemos/zep) ship a
+        sidecar HTTP server bound to 127.0.0.1 inside the container —
+        host-side bridge would not see it, and ``openclaw memory index``
+        fails on host because memory-core's plugin entry is disabled in
+        Form B mode.
+        """
+        conv_id = sandbox["conversation_id"]
+        return await self._arun_bridge_via_docker(
+            conv_id, payload, timeout=timeout,
+        )
+
+    # NOTE: search() bridge command (Path A direct memory-search) is not
+    # yet routed through docker exec. agent_local mode (Path B) is the
+    # primary use case; search() returns skipped in that mode (inherited
+    # from base). Path A docker support is a follow-up.
 
     async def _prebootstrap_workspace(self, sandbox: dict) -> None:
         """Override base impl to route prebootstrap through the container.

@@ -12,11 +12,64 @@
 // callers. Smoke validation against the native path is documented in
 // docs/plans/2026-04-13-openclaw-benchmark-a.md Task 8 Step 4.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+// --------------------------------------------------------------------
+// Form B sidecar routing (mem0/evermemos/zep): when the container ships
+// /sidecar/server.py, the bridge bypasses memory-core's CLI for index/
+// status because memory-core's plugin entry is disabled in those modes
+// and `openclaw memory ...` would fail with "plugin not found". Instead
+// we POST to the sidecar's HTTP API directly.
+// --------------------------------------------------------------------
+const SIDECAR_SCRIPT = "/sidecar/server.py";
+const SIDECAR_BASE_URL = process.env.MEM0_SIDECAR_URL || "http://127.0.0.1:8765";
+const SIDECAR_TIMEOUT_MS = Number(process.env.MEM0_SIDECAR_TIMEOUT_MS || 90000);
+// Long calls: /sync (mem0 cold init ~60s + N×add for N session files).
+// Default sized for full LoCoMo conv (10–20 sessions × messages worth of
+// text → up to ~5–10min including embedding throughput on CPU MiniLM).
+const SIDECAR_INDEX_TIMEOUT_MS = Number(process.env.MEM0_INDEX_TIMEOUT_MS || 900000);
+
+function hasSidecar() {
+  return existsSync(SIDECAR_SCRIPT);
+}
+
+async function sidecarRequest(method, urlPath, body, timeoutMs = SIDECAR_TIMEOUT_MS) {
+  const url = SIDECAR_BASE_URL + (urlPath.startsWith("/") ? urlPath : `/${urlPath}`);
+  const init = {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+  const res = await fetch(url, init);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`sidecar ${method} ${urlPath} returned ${res.status}: ${text.slice(0, 256)}`);
+  }
+  return text ? JSON.parse(text) : {};
+}
+
+async function waitForSidecarReady(maxWaitMs = 60000) {
+  // /healthz responds fast (no mem0 init). When the bridge is invoked
+  // immediately after container start, uvicorn may not yet be bound to
+  // the port. Poll healthz until it answers OR maxWaitMs elapses.
+  const deadline = Date.now() + maxWaitMs;
+  let lastError = "not yet polled";
+  while (Date.now() < deadline) {
+    try {
+      const res = await sidecarRequest("GET", "/healthz", undefined, 2000);
+      if (res?.ok === true) return;
+    } catch (err) {
+      lastError = err?.message || String(err);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`sidecar /healthz did not respond within ${maxWaitMs}ms: ${lastError}`);
+}
 
 import {
   stripAnsi,
@@ -130,6 +183,47 @@ function extractJsonTail(stdout) {
   }
 }
 
+async function handleIndexViaSidecar(input) {
+  // Walk <workspace>/memory/*.md and POST the relative paths to the
+  // sidecar's /sync. The sidecar reads each file and pushes it through
+  // the upstream memory SDK (mem0 / evermemos / zep). This replaces the
+  // memory-core CLI ingest path for Form B plugins.
+  const workspaceDir = input.workspace_dir;
+  const memoryDir = path.join(workspaceDir, "memory");
+  let sessionFiles = [];
+  try {
+    sessionFiles = readdirSync(memoryDir)
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `memory/${name}`)
+      .sort();
+  } catch {
+    // memory dir absent — nothing to ingest, sidecar /sync should still ok
+  }
+  try {
+    await waitForSidecarReady();
+    const data = await sidecarRequest("POST", "/sync", {
+      reason: "eval_index",
+      force: true,
+      session_files: sessionFiles,
+    }, SIDECAR_INDEX_TIMEOUT_MS);
+    return {
+      ok: true,
+      command: "index",
+      flush_epoch: epochSeconds(),
+      index_epoch: epochSeconds(),
+      input_artifacts: sessionFiles,
+      output_artifacts: [],
+      sidecar: { ingested: data?.ingested ?? null },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      command: "index",
+      error: `sidecar index failed: ${err?.message || err}`,
+    };
+  }
+}
+
 async function handleIndex(input, launcher) {
   if (!launcher) {
     return {
@@ -140,6 +234,9 @@ async function handleIndex(input, launcher) {
       input_artifacts: [],
       output_artifacts: [],
     };
+  }
+  if (hasSidecar()) {
+    return await handleIndexViaSidecar(input);
   }
   const env = envForSandbox(input);
   const cwd = cwdForSandbox(input);
@@ -170,6 +267,28 @@ async function handleFlush(input, launcher) {
   return { ...result, command: "flush" };
 }
 
+async function handleStatusViaSidecar(input) {
+  try {
+    await waitForSidecarReady();
+    const stats = await sidecarRequest("GET", "/stats");
+    return {
+      ok: true,
+      command: "status",
+      settled: stats?.dirty === false,
+      files: Number(stats?.files || 0),
+      chunks: Number(stats?.chunks || 0),
+      backend: stats?.provider || "mem0",
+      active_artifacts: [],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      command: "status",
+      error: `sidecar status failed: ${err?.message || err}`,
+    };
+  }
+}
+
 async function handleStatus(input, launcher) {
   if (!launcher) {
     return {
@@ -180,6 +299,9 @@ async function handleStatus(input, launcher) {
       index_epoch: 0,
       active_artifacts: [],
     };
+  }
+  if (hasSidecar()) {
+    return await handleStatusViaSidecar(input);
   }
   const env = envForSandbox(input);
   const cwd = cwdForSandbox(input);

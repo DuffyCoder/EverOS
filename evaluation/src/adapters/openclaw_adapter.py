@@ -604,6 +604,23 @@ class OpenClawAdapter(BaseAdapter):
     def _bridge_script_path(self) -> Path:
         return Path(__file__).parent.parent.parent / "scripts" / "openclaw_eval_bridge.mjs"
 
+    async def _invoke_bridge(
+        self, sandbox: dict, payload: dict, timeout: float
+    ) -> dict:
+        """Run a bridge command via the host node + script.
+
+        Subclasses (e.g. ``OpenClawDockerAdapter``) override this to route
+        through ``docker exec`` so the bridge runs INSIDE the container
+        where plugin sidecars (mem0/evermemos/zep) live. Form B plugins
+        disable memory-core's CLI, so the host's ``openclaw memory index``
+        path won't work — only the in-container sidecar HTTP path does.
+        """
+        return await arun_bridge(
+            self._bridge_script_path(),
+            payload,
+            timeout=timeout,
+        )
+
     def _bridge_base_payload(self, sandbox: dict) -> dict:
         """Fields every BridgeCommand needs: where OpenClaw lives, where the
         sandbox lives, and which config to read. repo_path comes from the
@@ -787,8 +804,10 @@ class OpenClawAdapter(BaseAdapter):
         self._append_events(sandbox, [{"event": "session_ingested", **r} for r in rows])
 
         # Drive the real OpenClaw index build so search has something to hit.
-        index_resp = await arun_bridge(
-            self._bridge_script_path(),
+        # Routed via _invoke_bridge so subclasses (e.g. docker) can run the
+        # bridge inside the container where the sidecar / plugin lives.
+        index_resp = await self._invoke_bridge(
+            sandbox,
             {
                 **self._bridge_base_payload(sandbox),
                 "command": "index",
@@ -818,8 +837,8 @@ class OpenClawAdapter(BaseAdapter):
             sandbox["visibility_state"] = "indexed"
             return
 
-        status_resp = await arun_bridge(
-            self._bridge_script_path(),
+        status_resp = await self._invoke_bridge(
+            sandbox,
             {**self._bridge_base_payload(sandbox), "command": "status"},
             timeout=self._status_timeout(),
         )
