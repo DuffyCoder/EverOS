@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/evermemos",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Form B memory plugin: registers MemoryPluginRuntime + memory_search/memory_get tools that delegate to the host EverMemOS HTTP API. No Python sidecar — plugin TS fetches host.docker.internal:1995 directly.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

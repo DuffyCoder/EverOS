@@ -58,6 +58,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 "openclaw_docker.image is required (e.g. "
                 "openclaw-eval:7da23c3-memory-core-0000000-slim)"
             )
+        self._docker_cfg: dict = cfg
         self._image: str = cfg["image"]
         self._max_concurrent: int = int(cfg.get("max_concurrent_containers", 4))
         self._mem_limit: str = cfg.get("mem_limit", "2g")
@@ -105,6 +106,19 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "--label", f"eval.conv_id={conv_id}",
             "-v", f"{volume_dir}:/workspace:rw",
         ]
+        # Plugins that talk to a host-side service (e.g. evermemos plugin
+        # fetching the EverMemOS HTTP API at host's :1995) need
+        # host.docker.internal to resolve to the host machine. Docker
+        # 20.10+ on Linux supports this via the host-gateway alias —
+        # without --add-host the container can't reach the host's
+        # localhost. yaml ``openclaw_docker.add_host_gateway: true`` opts
+        # in; defaults true for memory_mode=evermemos.
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        add_host_gateway = bool(
+            self._docker_cfg.get("add_host_gateway", memory_mode == "evermemos")
+        )
+        if add_host_gateway:
+            cmd.extend(["--add-host", "host.docker.internal:host-gateway"])
         for name, value in env_pairs:
             if value is not None:
                 cmd.extend(["-e", f"{name}={value}"])

@@ -94,6 +94,15 @@ ENV MEM0_PORT=8765
 ENV MEM0_INFER=false
 ENV MEM0_DATA_DIR=/workspace/state/mem0
 
+# EverMemOS plugin defaults (memory_mode=evermemos). Plugin reads
+# EVERMEMOS_API_URL/KEY at registration; OpenClawDockerAdapter forwards
+# them via -e when memory_mode=evermemos. host.docker.internal resolves
+# to the host machine when the container is started with
+# --add-host=host.docker.internal:host-gateway (also handled by
+# OpenClawDockerAdapter for this memory_mode).
+ENV EVERMEMOS_API_URL=http://host.docker.internal:1995
+ENV EVERMEMOS_API_KEY=
+
 # Drop back to non-root for runtime.
 USER node
 

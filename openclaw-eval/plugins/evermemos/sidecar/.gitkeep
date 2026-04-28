@@ -1,0 +1,4 @@
+# EverMemOS plugin has no Python sidecar — the plugin TS calls the host
+# EverMemOS HTTP API directly via host.docker.internal:1995. This empty
+# directory exists so build.py's stage_active_sidecar() can run uniformly
+# across plugins without conditional logic.
