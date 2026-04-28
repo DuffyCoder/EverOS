@@ -51,7 +51,7 @@ class OpenAIProvider(LLMProvider):
             enable_stats: Enable usage statistics accumulation (default: False)
             **kwargs: Additional arguments (ignored for now)
         """
-        self.model = model
+        self.model = os.getenv("LLM_MODEL")
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.enable_stats = enable_stats  # New

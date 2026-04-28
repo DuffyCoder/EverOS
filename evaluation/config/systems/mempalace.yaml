@@ -1,10 +1,10 @@
 # EverMemOS System Configuration
 
-name: "evermemos"
+name: "mempalace"
 version: "1.0"
-description: "EverMemOS"
+description: "MemPalace"
 
-adapter: "evermemos"
+adapter: "mempalace"
 
 # LLM configuration
 llm:
@@ -14,8 +14,15 @@ llm:
   base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   max_tokens: 16384
 
+add:
+  build_closets: true
+
 search:
-  mode: "agentic"  # agentic | lightweight
+  mode: "agentic" # agentic | lightweight
+  top_k: 10
+  response_top_k: 10
+  use_closet_boost: false
+  use_keyword_predicate_boost: true
   # When mode="lightweight", the search method defaults to "bm25_only".
   # Uncomment and set the following to override:
   # lightweight_search_mode: "hybrid"   # BM25 + Embedding + RRF fusion
