@@ -113,6 +113,14 @@ def get_closets_collection(palace_path: str, create: bool = True):
     return get_collection(palace_path, collection_name="mempalace_closets", create=create)
 
 
+def get_room_summaries_collection(palace_path: str, create: bool = True):
+    return get_collection(
+        palace_path,
+        collection_name="mempalace_room_summaries",
+        create=create,
+    )
+
+
 def _candidate_entity_words(text: str) -> list[str]:
     """Extract simple proper-noun candidates without extra i18n dependencies."""
     return re.findall(r"\b[A-Z][A-Za-z][A-Za-z'_-]*\b", text)

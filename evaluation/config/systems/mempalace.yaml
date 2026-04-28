@@ -16,13 +16,23 @@ llm:
 
 add:
   build_closets: true
+  build_palace_room_summaries: false # palace mode will force this on automatically
+  palace_use_llm_summary: true
+  palace_use_llm_room_assignment: true
 
 search:
   mode: "agentic" # agentic | lightweight
   top_k: 10
   response_top_k: 10
+
+
+  retrieval_mode: "hybrid" # raw | hybrid | palace
+  use_bm25_rerank: false
   use_closet_boost: false
-  use_keyword_predicate_boost: true
+  palace_room_top_k: 3
+  # raw: optional closet boost + optional BM25 rerank
+  # hybrid: benchmark-style keyword/predicate v5 rerank
+  # palace: room-summary routing then benchmark-style v5 rerank
   # When mode="lightweight", the search method defaults to "bm25_only".
   # Uncomment and set the following to override:
   # lightweight_search_mode: "hybrid"   # BM25 + Embedding + RRF fusion

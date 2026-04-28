@@ -4,11 +4,12 @@ MemPalace adapter - integrate local MemPalace retrieval into the evaluation fram
 This adapter intentionally keeps its MemPalace integration thin and internal:
 conversation add uses the vendored ``evaluation.src.adapters.mempalace.convo_miner``
 implementation and retrieval uses the vendored
-``evaluation.src.adapters.mempalace.searcher`` implementation so evaluation
+``evaluation.src.adapters.mempalace.runtime_searcher`` implementation so evaluation
 behavior stays aligned with the MemPalace pipeline used in this repository.
 """
 
 import asyncio
+import hashlib
 import re
 import shutil
 import time
@@ -17,11 +18,12 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
-from evaluation.src.adapters.mempalace.convo_miner import mine_convos
+from evaluation.src.adapters.mempalace.convo_miner import detect_convo_room, mine_convos
 from evaluation.src.adapters.mempalace.convo_closet_miner import (
     mine_convos_with_closets,
 )
-from evaluation.src.adapters.mempalace.searcher import search_memories
+from evaluation.src.adapters.mempalace.palace import get_room_summaries_collection
+from evaluation.src.adapters.mempalace.runtime_searcher import search_memories
 from evaluation.src.adapters.online_base import OnlineAPIAdapter
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, Message, SearchResult
@@ -31,8 +33,27 @@ from evaluation.src.core.data_models import Conversation, Message, SearchResult
 class MemPalaceAdapter(OnlineAPIAdapter):
     """MemPalace local adapter."""
 
+    PALACE_ROOMS = [
+        "identity_sexuality",
+        "career_education",
+        "relationships_romance",
+        "family_children",
+        "health_wellness",
+        "hobbies_creativity",
+        "social_community",
+        "home_living",
+        "travel_places",
+        "food_cooking",
+        "money_finance",
+        "emotions_mood",
+        "media_entertainment",
+        "general",
+    ]
+
     def __init__(self, config: dict, output_dir: Path = None):
         super().__init__(config, output_dir)
+        search_cfg = config.get("search", {})
+        add_cfg = config.get("add", {})
 
         palace_path = config.get("palace_path")
         if palace_path:
@@ -43,12 +64,25 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         self.agent_name = config.get("agent_name", "evaluation_mempalace")
         self.extract_mode = config.get("extract_mode", "exchange")
         self.clean_before_add = config.get("clean_before_add", False)
-        self.use_closet_boost = config.get("search", {}).get("use_closet_boost", True)
-        self.use_keyword_predicate_boost = config.get("search", {}).get(
-            "use_keyword_predicate_boost", False
-        )
-        self.build_closets = config.get("add", {}).get(
+        raw_mode = search_cfg.get("retrieval_mode", search_cfg.get("locomo_search_mode", "raw"))
+        self.retrieval_mode = str(raw_mode or "raw").strip().lower()
+        if self.retrieval_mode not in {"raw", "hybrid", "palace"}:
+            raise ValueError(
+                "search.retrieval_mode must be one of: raw, hybrid, palace"
+            )
+        self.use_closet_boost = bool(search_cfg.get("use_closet_boost", False))
+        self.use_bm25_rerank = bool(search_cfg.get("use_bm25_rerank", False))
+        self.palace_room_top_k = int(search_cfg.get("palace_room_top_k", 3) or 3)
+        self.build_closets = add_cfg.get(
             "build_closets", self.use_closet_boost
+        )
+        self.build_palace_room_summaries = bool(
+            add_cfg.get("build_palace_room_summaries", False) or self.retrieval_mode == "palace"
+        )
+        self.palace_use_llm_summary = add_cfg.get("palace_use_llm_summary", True)
+        self.palace_use_llm_room_assignment = add_cfg.get(
+            "palace_use_llm_room_assignment",
+            True,
         )
         self._mine_convos = (
             mine_convos_with_closets if self.build_closets else mine_convos
@@ -57,27 +91,49 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         self.transcript_root = self.output_dir / "mempalace_convo_inputs"
         self._search_observations: Dict[str, Dict[str, Any]] = {}
         self.console = Console()
+        self._search_options = {
+            "retrieval_mode": self.retrieval_mode,
+            "use_bm25_rerank": self.use_bm25_rerank,
+            "use_closet_boost": self.use_closet_boost,
+            "max_distance": search_cfg.get("max_distance", 0.0),
+            "palace_room_top_k": self.palace_room_top_k,
+        }
 
         self.console.print(f"   Palace Path: {self.palace_path}", style="dim")
         self.console.print(f"   Transcript Staging: {self.transcript_root}", style="dim")
         self.console.print(f"   Agent Name: {self.agent_name}", style="dim")
         self.console.print(f"   Extract Mode: {self.extract_mode}", style="dim")
+        self.console.print(f"   Retrieval Mode: {self.retrieval_mode}", style="dim")
         self.console.print(f"   Closet Boost: {'enabled' if self.use_closet_boost else 'disabled'}", style="dim")
         self.console.print(
-            f"   Keyword/Predicate Boost: {'enabled' if self.use_keyword_predicate_boost else 'disabled'}",
+            f"   BM25 Re-rank: {'enabled' if self.use_bm25_rerank else 'disabled'}",
             style="dim",
         )
         self.console.print(
             f"   Build Closets On Add: {'enabled' if self.build_closets else 'disabled'}",
             style="dim",
         )
+        self.console.print(
+            f"   Build Palace Room Summaries: {'enabled' if self.build_palace_room_summaries else 'disabled'}",
+            style="dim",
+        )
+        if self.build_palace_room_summaries:
+            self.console.print(
+                f"   Palace LLM Summary: {'enabled' if self.palace_use_llm_summary else 'disabled'}",
+                style="dim",
+            )
+            self.console.print(
+                "   Palace LLM Room Assignment: "
+                f"{'enabled' if self.palace_use_llm_room_assignment else 'disabled'}",
+                style="dim",
+            )
         add_pipeline_name = (
             "convo_closet_miner.mine_convos_with_closets()"
             if self.build_closets
             else "convo_miner.mine_convos()"
         )
         self.console.print(f"   Add Pipeline: {add_pipeline_name}", style="dim")
-        self.console.print("   Search Pipeline: searcher.search_memories()", style="dim")
+        self.console.print("   Search Pipeline: runtime_searcher.search_memories()", style="dim")
 
     async def prepare(self, conversations: List[Conversation], **kwargs) -> None:
         """Optionally clear the local palace before re-indexing."""
@@ -127,21 +183,34 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         interface; MemPalace instead uses the original conversation object.
         """
         _ = messages, speaker, kwargs
-        await asyncio.to_thread(self._index_conversation_sync, conv)
+        session_records: List[Dict[str, Any]] = []
+        if self.retrieval_mode == "palace":
+            session_records = self._build_session_records(conv)
+            if self.build_palace_room_summaries:
+                await self._enrich_session_records_for_palace(session_records)
+        await asyncio.to_thread(self._index_conversation_sync, conv, session_records)
         return None
 
-    def _index_conversation_sync(self, conv: Conversation) -> None:
+    def _index_conversation_sync(self, conv: Conversation, session_records: List[Dict[str, Any]]) -> None:
         wing = self._conversation_to_wing(conv.conversation_id)
-        transcript_path = self._conversation_transcript_path(conv.conversation_id)
-        self._write_conversation_transcript(conv, transcript_path)
+        transcript_dir = self._conversation_input_dir(conv.conversation_id)
+        if self.retrieval_mode == "palace":
+            self._write_session_transcripts(session_records, transcript_dir)
+        else:
+            transcript_path = self._conversation_transcript_path(conv.conversation_id)
+            self._write_conversation_transcript_file(conv, transcript_path)
         self.console.print(
-            f"   📥 MemPalace add: conv={conv.conversation_id} wing={wing} file={transcript_path.name}",
+            (
+                f"   📥 MemPalace add: conv={conv.conversation_id} wing={wing} sessions={len(session_records)}"
+                if self.retrieval_mode == "palace"
+                else f"   📥 MemPalace add: conv={conv.conversation_id} wing={wing} file={self._conversation_transcript_path(conv.conversation_id).name}"
+            ),
             style="dim",
         )
 
         try:
             self._mine_convos(
-                convo_dir=str(transcript_path.parent),
+                convo_dir=str(transcript_dir),
                 palace_path=str(self.palace_path),
                 wing=wing,
                 agent=self.agent_name,
@@ -156,6 +225,8 @@ class MemPalaceAdapter(OnlineAPIAdapter):
                     "or pre-warm the Chroma ONNX model cache before running evaluation."
                 ) from exc
             raise
+        if self.retrieval_mode == "palace" and self.build_palace_room_summaries:
+            self._upsert_palace_room_docs_sync(wing, session_records)
         self.console.print(
             f"   ✅ MemPalace add complete: conv={conv.conversation_id} via mine_convos(extract_mode={self.extract_mode})",
             style="green",
@@ -174,11 +245,12 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         """
         _ = user_id, kwargs
         wing = self._conversation_to_wing(conversation_id)
-        room = self.config.get("search", {}).get("room")
-        max_distance = self.config.get("search", {}).get("max_distance", 0.0)
+        search_cfg = self.config.get("search", {})
+        room = search_cfg.get("room")
         question_id = str(kwargs.get("question_id") or f"{conversation_id}:{query}")
         self.console.print(
-            f"   🔎 MemPalace search: conv={conversation_id} wing={wing} top_k={top_k} room={room or '*'}",
+            f"   🔎 MemPalace search: conv={conversation_id} wing={wing} top_k={top_k} "
+            f"room={room or '*'} mode={self.retrieval_mode}",
             style="dim",
         )
 
@@ -190,9 +262,7 @@ class MemPalaceAdapter(OnlineAPIAdapter):
             wing,
             room,
             top_k,
-            max_distance,
-            self.use_closet_boost,
-            self.use_keyword_predicate_boost,
+            self._search_options,
         )
         retrieval_latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -204,8 +274,8 @@ class MemPalaceAdapter(OnlineAPIAdapter):
             self._search_observations[question_id] = {
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "scheduler_wait_ms": 0.0,
-                "retrieval_route": "search_memories",
-                "backend_mode": self._backend_mode_label(),
+                "retrieval_route": raw_results.get("retrieval_route", "search_memories"),
+                "backend_mode": raw_results.get("backend_mode", self._backend_mode_label()),
             }
             return []
 
@@ -225,14 +295,138 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         self._search_observations[question_id] = {
             "retrieval_latency_ms": retrieval_latency_ms,
             "scheduler_wait_ms": 0.0,
-            "retrieval_route": "search_memories",
-            "backend_mode": self._backend_mode_label(),
+            "retrieval_route": raw_results.get("retrieval_route", "search_memories"),
+            "backend_mode": raw_results.get("backend_mode", self._backend_mode_label()),
         }
         self.console.print(
             f"   ✅ MemPalace search returned {len(converted)} result(s) via search_memories",
             style="green",
         )
         return converted
+
+    def _build_session_records(self, conv: Conversation) -> List[Dict[str, Any]]:
+        session_records: List[Dict[str, Any]] = []
+        for session_id, session_messages in self._group_messages_by_session(conv):
+            transcript_path = self._session_transcript_path(conv.conversation_id, session_id)
+            transcript_text = self._build_transcript_from_messages(session_messages)
+            routing_text = self._render_session_text(session_messages)
+            if not transcript_text.strip():
+                continue
+            session_records.append(
+                {
+                    "session_id": session_id,
+                    "messages": session_messages,
+                    "transcript_path": transcript_path,
+                    "transcript_text": transcript_text,
+                    "routing_text": routing_text,
+                    "message_count": len(session_messages),
+                }
+            )
+        return session_records
+
+    async def _enrich_session_records_for_palace(self, session_records: List[Dict[str, Any]]) -> None:
+        for record in session_records:
+            session_text = record.get("routing_text", "")
+            if not session_text.strip():
+                record["summary"] = ""
+                record["room"] = "general"
+                continue
+            summary = await self._summarize_session_for_palace(session_text)
+            room = await self._assign_palace_room(summary, session_text)
+            record["summary"] = summary
+            record["room"] = room
+
+    def _group_messages_by_session(self, conv: Conversation) -> List[tuple[str, List[Message]]]:
+        grouped: Dict[str, List[Message]] = {}
+        order: List[str] = []
+        for idx, msg in enumerate(conv.messages):
+            session_id = str(msg.metadata.get("session") or f"session_{idx:04d}")
+            if session_id not in grouped:
+                grouped[session_id] = []
+                order.append(session_id)
+            grouped[session_id].append(msg)
+        return [(session_id, grouped[session_id]) for session_id in order]
+
+    def _render_session_text(self, messages: List[Message]) -> str:
+        lines = []
+        for msg in messages:
+            speaker = msg.speaker_name or msg.speaker_id or "Unknown"
+            content = " ".join((msg.content or "").split())
+            if content:
+                lines.append(f'{speaker} said, "{content}"')
+        return "\n".join(lines)
+
+    async def _summarize_session_for_palace(self, session_text: str) -> str:
+        fallback = self._fallback_session_summary(session_text)
+        if not self.palace_use_llm_summary:
+            return fallback
+        prompt = (
+            "Summarize the following conversation session for retrieval routing. "
+            "Focus on concrete facts, people, events, plans, preferences, places, and time cues. "
+            "Return one compact paragraph under 120 words.\n\n"
+            f"Conversation:\n{session_text[:5000]}"
+        )
+        try:
+            summary = (await self.llm_provider.generate(prompt=prompt, temperature=0)).strip()
+            return summary or fallback
+        except Exception:
+            return fallback
+
+    async def _assign_palace_room(self, summary: str, session_text: str) -> str:
+        fallback = detect_convo_room(session_text)
+        if not self.palace_use_llm_room_assignment:
+            return fallback
+        room_list = "\n".join(f"- {room}" for room in self.PALACE_ROOMS)
+        prompt = (
+            "Read this conversation summary and assign it to exactly one room from the list below. "
+            "Reply with only the room name.\n\n"
+            f"Rooms:\n{room_list}\n\n"
+            f"Summary:\n{summary[:2000]}"
+        )
+        try:
+            raw = (await self.llm_provider.generate(prompt=prompt, temperature=0)).strip().lower()
+        except Exception:
+            return fallback
+        for room in self.PALACE_ROOMS:
+            if raw == room or room in raw:
+                return room
+        return fallback
+
+    def _fallback_session_summary(self, session_text: str) -> str:
+        compact = " ".join(session_text.split())
+        return compact[:600]
+
+    def _upsert_palace_room_docs_sync(self, wing: str, session_records: List[Dict[str, Any]]) -> None:
+        summaries_col = get_room_summaries_collection(str(self.palace_path))
+        try:
+            summaries_col.delete(where={"wing": wing})
+        except Exception:
+            pass
+
+        documents = []
+        ids = []
+        metadatas = []
+        for entry in session_records:
+            summary = str(entry.get("summary") or "").strip()
+            if not summary:
+                continue
+            documents.append(summary)
+            session_id = str(entry["session_id"])
+            ids.append(
+                "room_summary_"
+                + hashlib.sha256(f"{wing}:{session_id}".encode()).hexdigest()[:24]
+            )
+            metadatas.append(
+                {
+                    "wing": wing,
+                    "room": entry.get("room", "general"),
+                    "session_id": session_id,
+                    "message_count": entry["message_count"],
+                    "source_file": str(entry["transcript_path"]),
+                }
+            )
+        if documents:
+            summaries_col.upsert(documents=documents, ids=ids, metadatas=metadatas)
 
     def _build_single_search_result(
         self,
@@ -317,14 +511,20 @@ class MemPalaceAdapter(OnlineAPIAdapter):
             "adapter": "MemPalaceAdapter",
             "palace_path": str(self.palace_path),
             "build_closets": self.build_closets,
+            "retrieval_mode": self.retrieval_mode,
             "use_closet_boost": self.use_closet_boost,
-            "use_keyword_predicate_boost": self.use_keyword_predicate_boost,
+            "use_bm25_rerank": self.use_bm25_rerank,
+            "build_palace_room_summaries": self.build_palace_room_summaries,
         }
 
     def _backend_mode_label(self) -> str:
-        base = "drawer+closet+bm25" if self.use_closet_boost else "drawer+bm25"
-        if self.use_keyword_predicate_boost:
-            return f"{base}+kw_predicate_v5"
+        base = self.retrieval_mode
+        if self.retrieval_mode == "raw" and self.use_closet_boost:
+            base = f"{base}+closet"
+        if self.retrieval_mode in {"hybrid", "palace"}:
+            base = f"{base}+v5"
+        if self.retrieval_mode == "raw" and self.use_bm25_rerank:
+            base = f"{base}+bm25"
         return base
 
     def _conversation_to_wing(self, conversation_id: str) -> str:
@@ -344,13 +544,30 @@ class MemPalaceAdapter(OnlineAPIAdapter):
         wing = self._conversation_to_wing(conversation_id)
         return self._conversation_input_dir(conversation_id) / f"{wing}.txt"
 
-    def _write_conversation_transcript(self, conv: Conversation, transcript_path: Path) -> None:
+    def _session_transcript_path(self, conversation_id: str, session_id: str) -> Path:
+        safe_session = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session_id)).strip("_.-") or "session"
+        return self._conversation_input_dir(conversation_id) / f"{safe_session}.txt"
+
+    def _write_session_transcripts(self, session_records: List[Dict[str, Any]], transcript_dir: Path) -> None:
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        for stale_file in transcript_dir.glob("*.txt"):
+            stale_file.unlink(missing_ok=True)
+        for record in session_records:
+            transcript_path = record["transcript_path"]
+            transcript_path.parent.mkdir(parents=True, exist_ok=True)
+            transcript_path.write_text(record["transcript_text"], encoding="utf-8")
+
+    def _write_conversation_transcript_file(self, conv: Conversation, transcript_path: Path) -> None:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript = self._build_transcript(conv)
-        transcript_path.write_text(transcript, encoding="utf-8")
+        for stale_file in transcript_path.parent.glob("*.txt"):
+            stale_file.unlink(missing_ok=True)
+        transcript_path.write_text(self._build_transcript(conv), encoding="utf-8")
 
     def _build_transcript(self, conv: Conversation) -> str:
-        turns = self._render_turns(conv)
+        return self._build_transcript_from_messages(conv.messages)
+
+    def _build_transcript_from_messages(self, messages: List[Message]) -> str:
+        turns = self._render_turns(messages)
         if not turns:
             return ""
 
@@ -366,15 +583,15 @@ class MemPalaceAdapter(OnlineAPIAdapter):
             lines.append("")
         return "\n".join(lines).strip() + "\n"
 
-    def _render_turns(self, conv: Conversation) -> List[str]:
-        if not conv.messages:
+    def _render_turns(self, messages: List[Message]) -> List[str]:
+        if not messages:
             return []
 
         turns: List[str] = []
         current_speaker = None
         current_lines: List[str] = []
 
-        for msg in conv.messages:
+        for msg in messages:
             rendered = self._render_message(msg)
             if current_speaker is None or msg.speaker_name == current_speaker:
                 current_speaker = msg.speaker_name

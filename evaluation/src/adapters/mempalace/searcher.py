@@ -559,15 +559,85 @@ def _hybrid_rank(
     return results
 
 
-def build_where_filter(wing: str = None, room: str = None) -> dict:
+def build_where_filter(wing: str = None, room=None) -> dict:
     """Build ChromaDB where filter for wing/room filtering."""
-    if wing and room:
-        return {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        return {"wing": wing}
-    elif room:
-        return {"room": room}
-    return {}
+    clauses = []
+    if wing:
+        clauses.append({"wing": wing})
+    if room:
+        if isinstance(room, (list, tuple, set)):
+            rooms = [value for value in room if value]
+            if len(rooms) == 1:
+                clauses.append({"room": rooms[0]})
+            elif rooms:
+                clauses.append({"room": {"$in": rooms}})
+        else:
+            clauses.append({"room": room})
+    if not clauses:
+        return {}
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
+def _collect_room_texts(drawers_col, closets_col, wing: str = None) -> dict[str, str]:
+    """Build room summary text, preferring closets over raw drawers."""
+    room_chunks: dict[str, list[str]] = {}
+    base_where = build_where_filter(wing=wing)
+
+    if closets_col is not None:
+        try:
+            closet_kwargs = {"include": ["documents", "metadatas"]}
+            if base_where:
+                closet_kwargs["where"] = base_where
+            closet_results = closets_col.get(**closet_kwargs)
+            for doc, meta in zip(closet_results.documents, closet_results.metadatas):
+                meta = meta or {}
+                room_name = meta.get("room")
+                if room_name and doc:
+                    room_chunks.setdefault(room_name, []).append(doc)
+        except Exception:
+            room_chunks = {}
+
+    if not room_chunks:
+        try:
+            drawer_kwargs = {"include": ["documents", "metadatas"]}
+            if base_where:
+                drawer_kwargs["where"] = base_where
+            drawer_results = drawers_col.get(**drawer_kwargs)
+            for doc, meta in zip(drawer_results.documents, drawer_results.metadatas):
+                meta = meta or {}
+                room_name = meta.get("room")
+                if room_name and doc:
+                    room_chunks.setdefault(room_name, []).append(doc)
+        except Exception:
+            return {}
+
+    return {room_name: " ".join(chunks) for room_name, chunks in room_chunks.items() if chunks}
+
+
+def _select_locomo_target_rooms(
+    drawers_col,
+    closets_col,
+    wing: str,
+    predicate_kws: list[str],
+) -> list[str]:
+    """Approximate locomo_bench palace routing using room-level summary text."""
+    room_texts = _collect_room_texts(drawers_col, closets_col, wing=wing)
+    if not room_texts:
+        return []
+
+    room_kw_scores = []
+    for room_name, room_text in room_texts.items():
+        overlap = _kw_overlap(predicate_kws, room_text) if predicate_kws else 0.0
+        room_kw_scores.append((overlap, room_name))
+    room_kw_scores.sort(reverse=True)
+
+    if not room_kw_scores:
+        return []
+    if room_kw_scores[0][0] == 0.0:
+        return [room_name for _, room_name in room_kw_scores]
+    return [room_name for _, room_name in room_kw_scores[:3]]
 
 
 def _extract_drawer_ids_from_closet(closet_doc: str) -> list:
@@ -722,6 +792,8 @@ def search_memories(
     max_distance: float = 0.0,
     use_closet_boost: bool = True,
     use_keyword_predicate_boost: bool = False,
+    locomo_search_mode: str = None,
+    use_bm25_rerank: bool = True,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -747,12 +819,45 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
+    search_mode = (locomo_search_mode or "legacy").strip().lower()
+    if search_mode not in {"legacy", "session", "hybrid", "palace"}:
+        return {"error": f"Unsupported locomo_search_mode: {locomo_search_mode}"}
+
+    if search_mode == "session":
+        keyword_boost_enabled = False
+    elif search_mode in {"hybrid", "palace"}:
+        keyword_boost_enabled = True
+    else:
+        keyword_boost_enabled = use_keyword_predicate_boost
+
     where = build_where_filter(wing, room)
-    names = _person_names(query) if use_keyword_predicate_boost else []
+    names = _person_names(query) if keyword_boost_enabled else []
     name_words = {name.lower() for name in names}
-    all_kws = _kw(query) if use_keyword_predicate_boost else []
+    all_kws = _kw(query) if keyword_boost_enabled else []
     predicate_kws = [kw for kw in all_kws if kw not in name_words]
-    quoted = _quoted_phrases(query) if use_keyword_predicate_boost else []
+    quoted = _quoted_phrases(query) if keyword_boost_enabled else []
+    retrieval_route = f"locomo_{search_mode}" if search_mode != "legacy" else "search_memories"
+    target_rooms: list[str] = []
+
+    closets_col = None
+    if use_closet_boost or search_mode == "palace":
+        try:
+            closets_col = get_closets_collection(palace_path, create=False)
+        except Exception:
+            closets_col = None
+
+    if search_mode == "palace" and not room:
+        target_rooms = _select_locomo_target_rooms(
+            drawers_col,
+            closets_col,
+            wing=wing,
+            predicate_kws=predicate_kws,
+        )
+        if target_rooms:
+            where = build_where_filter(wing, target_rooms)
+            retrieval_route = "locomo_palace_room_route"
+        else:
+            retrieval_route = "locomo_palace_no_room_signal"
 
     # Hybrid retrieval: always query drawers directly (the floor), then use
     # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
@@ -764,7 +869,11 @@ def search_memories(
     try:
         dkwargs = {
             "query_texts": [query],
-            "n_results": n_results * 3,  # over-fetch for re-ranking
+            "n_results": (
+                n_results
+                if search_mode == "session" and not use_closet_boost
+                else max(n_results * 3, n_results)
+            ),
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -775,9 +884,8 @@ def search_memories(
 
     # Gather closet hits (best-per-source) to build a boost lookup.
     closet_boost_by_source: dict = {}  # source_file -> (rank, closet_dist, preview)
-    if use_closet_boost:
+    if use_closet_boost and closets_col is not None:
         try:
-            closets_col = get_closets_collection(palace_path, create=False)
             ckwargs = {
                 "query_texts": [query],
                 "n_results": n_results * 2,
@@ -833,7 +941,7 @@ def search_memories(
         predicate_overlap = 0.0
         quoted_match = 0.0
         name_match = 0.0
-        if use_keyword_predicate_boost:
+        if keyword_boost_enabled:
             predicate_overlap = _kw_overlap(predicate_kws, doc)
             fused_dist = fused_dist * (1.0 - 0.50 * predicate_overlap)
             quoted_match = _quoted_boost(quoted, doc)
@@ -865,7 +973,7 @@ def search_memories(
             "_source_file_full": source,
             "_chunk_index": meta.get("chunk_index"),
         }
-        if use_keyword_predicate_boost:
+        if keyword_boost_enabled:
             entry["predicate_overlap"] = round(predicate_overlap, 3)
             entry["quoted_boost"] = round(quoted_match, 3)
             entry["name_boost"] = round(name_match, 3)
@@ -931,16 +1039,29 @@ def search_memories(
         h["drawer_index"] = best_idx
         h["total_drawers"] = len(ordered_docs)
 
-    # BM25 hybrid re-rank within the final candidate set.
-    hits = _hybrid_rank(hits, query)
+    # Optional BM25 re-rank. locomo_bench's session/hybrid/palace paths do not
+    # apply this by default, so the adapter exposes it as a separate switch.
+    if use_bm25_rerank:
+        hits = _hybrid_rank(hits, query)
     for h in hits:
         h.pop("_sort_key", None)
         h.pop("_source_file_full", None)
         h.pop("_chunk_index", None)
 
+    backend_parts = [search_mode]
+    if use_closet_boost:
+        backend_parts.append("closet")
+    if keyword_boost_enabled:
+        backend_parts.append("kw_predicate_v5")
+    if use_bm25_rerank:
+        backend_parts.append("bm25")
+
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
+        "retrieval_route": retrieval_route,
+        "backend_mode": "+".join(backend_parts),
+        "target_rooms": target_rooms,
         "results": hits,
     }

@@ -12,6 +12,6 @@ runtime behavior of the MemPalace paths used by the adapter.
 
 from .convo_miner import mine_convos
 from .convo_closet_miner import mine_convos_with_closets
-from .searcher import search_memories
+from .runtime_searcher import search_memories
 
 __all__ = ["mine_convos", "mine_convos_with_closets", "search_memories"]
