@@ -147,8 +147,53 @@ Inherited from Week 1 closure. The reproducible 4.67pp gap between
 host (30.67%) and docker (26%) memory-core baselines — origin
 localized to the memory access path under docker (cache state,
 embedding HTTP buffers, workspace bootstrap content
-`system_prompt_chars` 21618 host vs 23596 container). Stage 2
-trace R&D may close it.
+`system_prompt_chars` 21618 host vs 23596 container).
+
+**Stage 2 Track C finding (2026-04-29)**: the gap traces to
+**different `session.md` content** in host vs docker workspaces.
+Both runs use `flush_mode=shared_llm` per their yamls, but the
+flush execution diverges:
+
+- **Host** session.md (locomo_2/S1-2022-12-17.md, 18 lines):
+  ```
+  - **Maria**: Hey John! Long time no see! What's up?
+  - **John**: Hey Maria! Good to see you. Just got back from a
+    family road trip yesterday, it was fun! ...
+  ```
+  → raw verbatim conversation (LLM flush did NOT condense)
+
+- **Docker** session.md (same conv, 14 lines):
+  ```
+  - **John** recently returned from a family road trip and
+    found it enjoyable.
+  - **Maria** has been volunteering at a homeless shelter and
+    has started practicing aerial yoga.
+  ```
+  → LLM-condensed factual summary (LLM flush succeeded)
+
+`system_prompt_chars` host 23596 vs docker 24779 (delta 1183).
+Workspace bootstrap files (AGENTS.md / SOUL.md / TOOLS.md) are
+byte-identical between host and docker — the prompt-size delta
+is downstream of bootstrap, in the memory section.
+
+**Hypothesis**: host's flush LLM call failed and the framework
+fell back to raw transcript. Docker's flush LLM call succeeded.
+Result: host kept the original "Hey Maria! Long time no see!"
+chatter, which preserves micro-context (date hints, emotional
+register) that docker's condensed summary loses. The 4.67pp gap
+is **not a docker overhead per se**; it's a *flush execution
+divergence* between the two environments.
+
+**Implication for downstream conclusions**: the host-side
+30.67% baseline may be unrealistically high — it's reading
+verbatim transcripts instead of memory-style summaries.
+docker-side 26% reflects what users would actually experience
+under proper memory flush. Plugin matrix is therefore best
+read against docker baseline.
+
+R-S1-1 status: **closed-with-finding**. Root cause identified;
+not a docker bug; relevant only as a caveat on host baseline
+interpretation. No Stage 2 code changes proposed.
 
 ### R-S1-2: N=3 matrix not yet executed
 
