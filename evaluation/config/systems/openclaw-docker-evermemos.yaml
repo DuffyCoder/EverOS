@@ -50,6 +50,7 @@ openclaw:
       - "EVERMEMOS_API_URL"
       - "EVERMEMOS_API_KEY"
       - "EVERMEMOS_GROUP_ID"   # per-conv group_id (bridge envForSandbox whitelist)
+      - "OPENCLAW_PROMPT_STYLE" # Track B ablation: native | memory-core | mem0
     model:
       id: "gpt-4.1-mini"
       name: "GPT 4.1 Mini (sophnet)"

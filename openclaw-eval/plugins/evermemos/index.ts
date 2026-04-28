@@ -21,6 +21,7 @@ import {
   type MemoryPluginRuntime,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { buildMemoryPromptSection } from "./src/prompt-builders.js";
 import {
   createEverMemosRuntime,
   type EverMemosRuntimeOptions,
@@ -230,33 +231,17 @@ export default definePluginEntry({
     const opts = resolveOptions(api.pluginConfig);
     const runtime = createEverMemosRuntime(opts);
 
+    // Stage 2 Track B: env-driven prompt override for ablation. See
+    // openclaw-eval/plugins/evermemos/src/prompt-builders.ts. Default
+    // is "evermemos" (this plugin's native prompt); override via
+    // OPENCLAW_PROMPT_STYLE env var ("memory-core" | "mem0" | "native").
+    const promptStyle = (process.env.OPENCLAW_PROMPT_STYLE || "evermemos").trim();
     api.registerMemoryCapability({
       runtime,
       promptBuilder: ({ availableTools, citationsMode }) => {
-        const hasSearch = availableTools.has("memory_search");
-        const hasGet = availableTools.has("memory_get");
-        if (!hasSearch && !hasGet) return [];
-        const lines: string[] = [
-          "## Memory (EverMemOS)",
-          "You have access to the prior conversation history of this group, along with extracted events, decisions, and profile facts. Memory is retrieved by querying the EverMemOS index.",
-        ];
-        if (hasSearch) {
-          lines.push(
-            "Use memory_search whenever the user asks about earlier turns of the conversation, what someone said, decisions made, dates and people mentioned, or facts the user previously shared. Run memory_search before answering such questions and use the returned snippets to ground your reply.",
-          );
-        }
-        if (hasGet) {
-          lines.push(
-            "Use memory_get to read the full text of a specific memory entry (e.g. when memory_search surfaces a snippet you want to expand).",
-          );
-        }
-        if (citationsMode === "off") {
-          lines.push(
-            "Citations are disabled: do not mention message_ids in replies unless the user explicitly asks.",
-          );
-        }
-        lines.push("");
-        return lines;
+        // For evermemos plugin, "native" alias = "evermemos" prompt.
+        const effective = promptStyle.toLowerCase() === "native" ? "evermemos" : promptStyle;
+        return buildMemoryPromptSection(effective, availableTools, citationsMode);
       },
       publicArtifacts: { listArtifacts: async () => [] },
     });
