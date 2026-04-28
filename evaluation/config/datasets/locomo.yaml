@@ -16,10 +16,15 @@ data:
 evaluation:
   type: "llm_judge"  # llm_judge | exact_match
   
-  # LLM Judge settings
+  # LLM Judge settings.
+  # NOTE: gpt-4o-mini is NOT supported on sophnet (returns 20004
+  # "Model gpt-4o-mini does not support apiType:openai.chat parameter").
+  # Stage 1 plugin matrix runs use sophnet for both agent and judge LLM,
+  # so judge model must be sophnet-compatible. gpt-4.1-mini works on
+  # both sophnet and openrouter.
   llm:
     provider: "openai"
-    model: "gpt-4o-mini"
+    model: "gpt-4.1-mini"
     api_key: "${LLM_API_KEY}"
     base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
   

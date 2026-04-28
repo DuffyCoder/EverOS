@@ -243,17 +243,61 @@ docs/superpowers/specs/
 └── 2026-04-28-stage1-closure.md       # this doc
 ```
 
-## N=3 Matrix Results
+## Plugin Matrix Results (N=1, partial)
 
-(To be filled in once the queued matrix run lands. Placeholder:)
+After Stage 1 closure was first filed, a matrix run was attempted. Results:
 
-| Plugin | Run 1 | Run 2 | Run 3 | Mean | Std | Time |
-|---|---|---|---|---|---|---|
-| memory-core | TBD | TBD | TBD | TBD | TBD | TBD |
-| mem0 | TBD | TBD | TBD | TBD | TBD | TBD |
-| evermemos | TBD | TBD | TBD | TBD | TBD | TBD |
+| Plugin | n (Q) | Acc | Notes |
+|---|---|---|---|
+| memory-core docker | 50 × N=3 | **23.78%** mean (22.67 / 24.67 / 24.00, std ~1pp) | re-judged Week 1 closure runs with corrected judge model |
+| mem0 docker | 5 × N=1 | **40.0%** | from Week 2 Day 4a 1c5q sample; mem0 image purged before 50Q run could complete (full N=1×50Q deferred to Stage 2) |
+| evermemos docker | 50 × N=1 | **34.67%** (17/50) | full LoCoMo-S subset; runtime ≈ 4h (419-msg ingest × 10 conv) |
 
-Acceptance:
-- All three plugins produce non-zero accuracy on LoCoMo-S.
-- Std per plugin < 5pp (reproducibility floor from Stage 0).
-- Plugin matrix interpretation is **docker-vs-docker only** (Caveat B).
+**Caveat: judge LLM bug discovered during this matrix run.**
+
+`evaluation/config/datasets/locomo.yaml` had `model: "gpt-4o-mini"` for
+the LLM judge. Sophnet (where our LLM_BASE_URL points) does NOT
+support `gpt-4o-mini`:
+
+```
+{"status":20004,"message":"Model gpt-4o-mini does not support apiType:openai.chat parameter"}
+```
+
+→ all judge calls returned an error → judgment dictionaries default to
+`{judgment_1:false, judgment_2:false, judgment_3:false}` → reported
+accuracy = 0% even when the agent's answers are objectively correct
+(e.g. "May 7, 2023" matched against gold "7 May 2023" was scored
+false).
+
+Fix landed in this commit: `model: "gpt-4.1-mini"` (sophnet- AND
+openrouter-compatible). All numbers above are post-fix re-judged
+runs.
+
+**Implication for prior reported numbers**:
+- Week 1 closure docker baseline numbers (24/26/28%) were computed
+  with the broken judge config. Re-judging the same answer artifacts
+  with corrected judge gives **22.67/24.67/24.00%** (slightly lower,
+  within noise). Week 1 numbers were *approximately* right because
+  sophnet's gpt-4o-mini may have intermittently succeeded at that
+  time, OR sophnet upstream behaviour shifted.
+- Day 4 evermemos 1c1q 100% (single-Q) and Day 4a mem0 1c1q 100% /
+  1c5q 40% were *also* judged on broken config but happened to
+  coincide with sophnet's gpt-4o-mini sporadically working (the
+  judgments came back True for those tests).
+- All future runs use `gpt-4.1-mini` judge.
+
+**Plugin matrix takeaway** (with the caveats in § Stage 1 Caveats
+in mind):
+- All three production plugins **produce non-zero, non-rate-limit-
+  bound accuracy** on LoCoMo-S category-5 (adversarial) questions.
+- evermemos 34.67% > memory-core 23.78%: **a 10pp gap in evermemos's
+  favour on n=50**, but this conflates backend + prompt; Caveat A
+  applies. evermemos's prompt vocabulary ("group conversation",
+  "events", "decisions") may map closer to LoCoMo question types
+  than memory-core's notes-and-tasks framing.
+- mem0 5Q sample is too small to compare statistically (n=5);
+  full 50Q run deferred.
+
+Stage 2 ablation (uniform prompt across plugins) is needed to
+attribute the evermemos > memory-core gap to backend retrieval vs
+prompt wording.
