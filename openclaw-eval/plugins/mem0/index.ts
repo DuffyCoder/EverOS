@@ -21,6 +21,7 @@ import {
   type MemoryPluginRuntime,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { buildMemoryPromptSection } from "./src/prompt-builders.js";
 import { createMem0Runtime, type Mem0RuntimeOptions } from "./src/runtime.js";
 
 interface Mem0PluginConfigShape {
@@ -193,50 +194,17 @@ export default definePluginEntry({
     const opts = resolveMem0Options(api.pluginConfig);
     const runtime = createMem0Runtime(opts);
 
+    // Stage 2 Track B: env-driven prompt override for ablation.
+    // OPENCLAW_PROMPT_STYLE selects one of the three pre-baked
+    // promptBuilders. "native" = mem0's own (default). "memory-core"
+    // borrows memory-core's upstream prompt. "evermemos" borrows
+    // evermemos's. Used to separate backend retrieval from prompt
+    // contribution in the plugin matrix.
+    const promptStyle = (process.env.OPENCLAW_PROMPT_STYLE || "native").trim();
     api.registerMemoryCapability({
       runtime,
-      // Faithful adaptation of mem0's recommended agent prompts. We do
-      // NOT reuse memory-core's wording — that would confound plugin
-      // matrix comparisons by mixing mem0's backend with memory-core's
-      // tuned prompt. Each plugin ships its own prompt as it would be
-      // deployed.
-      //
-      // Sources:
-      //   - mem0 ElevenLabs integration template
-      //     (docs/integrations/elevenlabs.mdx): full system prompt for
-      //     a memory-aware voice assistant.
-      //   - mem0 OpenAI Agents SDK integration
-      //     (skills/mem0/references/integration-patterns.md): concise
-      //     "memory capabilities" instructions.
-      // Tool names are mapped from mem0's native search()/add() to
-      // openclaw's standard memory_search / memory_get.
       promptBuilder: ({ availableTools, citationsMode }) => {
-        const hasSearch = availableTools.has("memory_search");
-        const hasGet = availableTools.has("memory_get");
-        if (!hasSearch && !hasGet) {
-          return [];
-        }
-        const lines: string[] = [
-          "## Memory",
-          "You have access to a memory of past conversations with this user — their preferences, personal details, decisions, and important things they have shared.",
-        ];
-        if (hasSearch) {
-          lines.push(
-            "Use memory_search to recall relevant context from prior conversations whenever the user asks about people, events, dates, preferences, or things they previously mentioned. Before responding to such questions, always check memory first.",
-          );
-        }
-        if (hasGet) {
-          lines.push(
-            "Use memory_get to read a specific memory entry in full when memory_search surfaces a snippet you want to expand.",
-          );
-        }
-        if (citationsMode === "off") {
-          lines.push(
-            "Citations are disabled: do not mention memory paths or IDs in replies unless the user explicitly asks.",
-          );
-        }
-        lines.push("");
-        return lines;
+        return buildMemoryPromptSection(promptStyle, availableTools, citationsMode);
       },
       publicArtifacts: { listArtifacts: async () => [] },
     });

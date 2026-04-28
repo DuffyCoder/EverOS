@@ -53,6 +53,7 @@ openclaw:
       - "LLM_API_KEY"
       - "LLM_BASE_URL"
       - "LLM_MODEL"
+      - "OPENCLAW_PROMPT_STYLE"   # Track B ablation: native | memory-core | evermemos
     model:
       id: "gpt-4.1-mini"
       name: "GPT 4.1 Mini (sophnet)"
