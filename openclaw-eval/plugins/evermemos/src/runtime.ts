@@ -16,6 +16,7 @@ export interface EverMemosRuntimeOptions {
   retrieveMethod?: string;
   scope?: "personal" | "group";
   memoryTypes?: string[];
+  groupId?: string;
 }
 
 export function createEverMemosRuntime(
@@ -31,6 +32,8 @@ export function createEverMemosRuntime(
       const manager = new EverMemosSearchManager({
         agentId: params.agentId,
         workspaceDir,
+        // Spread opts (including groupId from EVERMEMOS_GROUP_ID env)
+        // AFTER agentId so explicit groupId wins over agentId fallback.
         ...opts,
       });
       managers.set(params.agentId, manager);

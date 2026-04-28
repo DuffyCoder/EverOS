@@ -34,6 +34,11 @@ export interface EverMemosSearchManagerParams {
   retrieveMethod?: string;
   scope?: "personal" | "group";
   memoryTypes?: string[];
+  // Optional explicit group_id; when set, overrides the agentId-based
+  // default. Used in eval mode to scope search to a specific LoCoMo
+  // conversation (passed via EVERMEMOS_GROUP_ID env var by the
+  // OpenClawDockerAdapter).
+  groupId?: string;
 }
 
 const DEFAULT_API_URL = "http://host.docker.internal:1995";
@@ -68,8 +73,11 @@ export class EverMemosSearchManager implements MemorySearchManager {
     this.retrieveMethod = params.retrieveMethod ?? "keyword";
     this.scope = params.scope ?? "group";
     this.memoryTypes = params.memoryTypes ?? [];
-    // Use agentId as group_id so /index and /search share partition.
-    this.groupId = params.agentId || "openclaw";
+    // Precedence: explicit groupId > agentId > "openclaw" default.
+    // The runtime layer threads EVERMEMOS_GROUP_ID env var into
+    // groupId when present, so per-container LoCoMo conversations
+    // each get their own evermemos group partition.
+    this.groupId = params.groupId || params.agentId || "openclaw";
     this.client = new EverMemosApiClient({
       baseUrl: params.apiUrl ?? DEFAULT_API_URL,
       apiKey: params.apiKey,

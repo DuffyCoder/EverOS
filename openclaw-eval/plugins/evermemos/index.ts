@@ -50,6 +50,12 @@ function resolveOptions(pluginConfig: unknown): EverMemosRuntimeOptions {
   } else if (typeof process.env.EVERMEMOS_API_KEY === "string" && process.env.EVERMEMOS_API_KEY.length > 0) {
     out.apiKey = process.env.EVERMEMOS_API_KEY;
   }
+  // EVERMEMOS_GROUP_ID env var lets the OpenClawDockerAdapter scope
+  // memory_search to the active LoCoMo conversation_id, since openclaw
+  // agentId is "main" for every conv (one container per conv).
+  if (typeof process.env.EVERMEMOS_GROUP_ID === "string" && process.env.EVERMEMOS_GROUP_ID.trim()) {
+    out.groupId = process.env.EVERMEMOS_GROUP_ID.trim();
+  }
   if (typeof cfg.apiTimeoutMs === "number" && cfg.apiTimeoutMs >= 100) {
     out.apiTimeoutMs = cfg.apiTimeoutMs;
   }

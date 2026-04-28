@@ -49,6 +49,7 @@ openclaw:
       - "LLM_MODEL"
       - "EVERMEMOS_API_URL"
       - "EVERMEMOS_API_KEY"
+      - "EVERMEMOS_GROUP_ID"   # per-conv group_id (bridge envForSandbox whitelist)
     model:
       id: "gpt-4.1-mini"
       name: "GPT 4.1 Mini (sophnet)"
@@ -63,7 +64,7 @@ openclaw:
     answer_mode: "shared"
 
 openclaw_docker:
-  image: "openclaw-eval:7da23c3-evermemos-PLUGIN_REV-slim"   # filled by build
+  image: "openclaw-eval:7da23c3-evermemos-66f8292-slim"
   max_concurrent_containers: 4
   mem_limit: "2g"        # no Python sidecar, lighter than mem0
   network: "bridge"

@@ -89,7 +89,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         volume_dir = Path(sandbox["workspace_dir"]).resolve()
         volume_dir.mkdir(parents=True, exist_ok=True)
 
-        env_pairs = self._docker_env_for_container()
+        env_pairs = self._docker_env_for_container(conv_id=conv_id)
 
         # --user matches host UID so the mounted /workspace volume is
         # writable to the container. Without this, files created by host
@@ -141,9 +141,16 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         logger.info("container %s started for %s", cid[:12], conv_id)
         return cid
 
-    def _docker_env_for_container(self) -> list[tuple[str, Optional[str]]]:
+    def _docker_env_for_container(
+        self, conv_id: Optional[str] = None
+    ) -> list[tuple[str, Optional[str]]]:
         """Compute -e flags for `docker run`. Mirrors bridge envForSandbox
-        whitelist semantics: only forwards yaml-declared env_vars."""
+        whitelist semantics: only forwards yaml-declared env_vars.
+
+        ``conv_id`` (when provided) is propagated as ``EVERMEMOS_GROUP_ID``
+        so the evermemos plugin scopes its memory_search to the active
+        LoCoMo conversation. Other plugins ignore the var.
+        """
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
         embedding = self._openclaw_cfg.get("embedding") or {}
         env_vars: list[str] = list(agent_llm.get("env_vars") or [])
@@ -162,6 +169,9 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             ("LLM_MODEL", agent_llm.get("model", {}).get("id")
                           or os.environ.get("LLM_MODEL")),
         ]
+        # Per-conv group_id for evermemos plugin (one container per conv).
+        if memory_mode == "evermemos" and conv_id:
+            pairs.append(("EVERMEMOS_GROUP_ID", conv_id))
         # Pass-through secret + endpoint env vars from process env, only if
         # the yaml whitelist contains them (defense-in-depth: container only
         # ever receives env vars its config explicitly opted into).
@@ -401,11 +411,133 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         host-side bridge would not see it, and ``openclaw memory index``
         fails on host because memory-core's plugin entry is disabled in
         Form B mode.
+
+        For ``memory_mode == evermemos`` the bridge ``index`` and
+        ``status`` commands are short-circuited to no-ops because the
+        adapter ingests directly to the host EverMemOS API (see
+        ``_ingest_via_evermemos_api``); the in-container plugin is
+        retrieval-only.
         """
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        if memory_mode == "evermemos":
+            cmd = payload.get("command")
+            if cmd == "index":
+                return {
+                    "ok": True,
+                    "command": "index",
+                    "flush_epoch": int(time.time()),
+                    "index_epoch": int(time.time()),
+                    "input_artifacts": [],
+                    "output_artifacts": [],
+                    "note": "evermemos: ingest done by adapter; bridge index is no-op",
+                }
+            if cmd == "status":
+                return {
+                    "ok": True,
+                    "command": "status",
+                    "settled": True,
+                    "files": 0,
+                    "chunks": 0,
+                    "backend": "evermemos",
+                    "active_artifacts": [],
+                }
         conv_id = sandbox["conversation_id"]
         return await self._arun_bridge_via_docker(
             conv_id, payload, timeout=timeout,
         )
+
+    async def _ingest_conversation(self, sandbox: dict, conv: Conversation) -> None:
+        """Override for evermemos memory_mode: ingest directly via host
+        EverMemOS HTTP API (one POST per message). Boundary detection
+        on the server fires naturally with hundreds of LoCoMo messages.
+        For other memory_modes (memory-core, mem0), defer to parent.
+        """
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        if memory_mode != "evermemos":
+            return await super()._ingest_conversation(sandbox, conv)
+        await self._ingest_via_evermemos_api(sandbox, conv)
+
+    async def _ingest_via_evermemos_api(
+        self, sandbox: dict, conv: Conversation
+    ) -> None:
+        """POST each message in the conversation to the host EverMemOS
+        ``/api/v1/memories`` endpoint. The last message uses
+        ``?sync_mode=true`` so the server waits for boundary detection
+        before returning, ensuring the index is queryable when add()
+        finishes.
+        """
+        import aiohttp
+        from common_utils.datetime_utils import to_iso_format
+
+        api_url = (
+            os.environ.get("EVERMEMOS_API_URL")
+            or "http://localhost:1995"
+        ).rstrip("/")
+        api_key = os.environ.get("EVERMEMOS_API_KEY") or ""
+        memories_url = f"{api_url}/api/v1/memories"
+
+        conv_id = conv.conversation_id
+        speaker_a = conv.metadata.get("speaker_a") or "speaker_a"
+        speaker_b = conv.metadata.get("speaker_b") or "speaker_b"
+
+        payloads: list[dict] = []
+        for idx, msg in enumerate(conv.messages):
+            sender_id = (
+                msg.speaker_id
+                or f"{msg.speaker_name.lower().replace(' ', '_')}_{conv_id}"
+            )
+            ts = to_iso_format(msg.timestamp) if msg.timestamp else None
+            payloads.append({
+                "group_id": conv_id,
+                "group_name": conv_id,
+                "message_id": msg.metadata.get("message_id")
+                              or msg.metadata.get("dia_id")
+                              or f"{conv_id}_{idx}",
+                "create_time": ts or "",
+                "sender": sender_id,
+                "sender_name": msg.speaker_name,
+                "role": "user",
+                "content": msg.content,
+                "refer_list": msg.metadata.get("refer_list") or [],
+            })
+
+        if not payloads:
+            sandbox["last_index_epoch"] = int(time.time())
+            sandbox["visibility_state"] = "ingested"
+            return
+
+        headers = {"content-type": "application/json"}
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+
+        timeout = aiohttp.ClientTimeout(total=600)
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            for i, body in enumerate(payloads):
+                # last one with sync_mode=true so we know flush completed
+                params = {"sync_mode": "true"} if i == len(payloads) - 1 else None
+                try:
+                    async with session.post(memories_url, json=body, params=params) as resp:
+                        await resp.text()
+                        if resp.status >= 400:
+                            logger.warning(
+                                "evermemos ingest non-200 for %s/msg-%s: %s",
+                                conv_id, i, resp.status,
+                            )
+                except Exception as err:
+                    logger.warning(
+                        "evermemos ingest failed for %s/msg-%s: %s",
+                        conv_id, i, err,
+                    )
+
+        self._append_events(
+            sandbox,
+            [{"event": "evermemos_ingest_complete",
+              "conversation_id": conv_id,
+              "messages_posted": len(payloads),
+              "api_url": memories_url}],
+        )
+        sandbox["last_index_epoch"] = int(time.time())
+        sandbox["visibility_state"] = "ingested"
 
     # NOTE: search() bridge command (Path A direct memory-search) is not
     # yet routed through docker exec. agent_local mode (Path B) is the
