@@ -68,7 +68,7 @@ openclaw:
     answer_mode: "shared"
 
 openclaw_docker:
-  image: "openclaw-eval:7da23c3-mem0-4ececb3-slim"
+  image: "openclaw-eval:7da23c3-mem0-46c0029-slim"
   max_concurrent_containers: 4
   mem_limit: "3g"        # mem0 sidecar (chromadb + MiniLM) needs more than memory-core
   network: "bridge"

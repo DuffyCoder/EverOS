@@ -346,3 +346,54 @@ in mind):
 Stage 2 ablation (uniform prompt across plugins) is needed to
 attribute the evermemos > memory-core gap to backend retrieval vs
 prompt wording.
+
+## Stage 2 Updates (2026-04-29, in-flight)
+
+### Track A: N=2 statistical fill-in
+
+| Plugin | N | n (Q) | Acc | Notes |
+|---|---|---|---|---|
+| memory-core docker | 3 | 50 | 23.78% mean | Stage 1 (re-judged) |
+| mem0 docker | **2** | 50 | **50.67%** mean | Stage 2 Track A.2-3 (image rev `4ececb3`) |
+| evermemos docker | **1** | 50 | 34.67% | r2 was killed mid-run; N=2 deferred or accepted-as-N=1 |
+
+Image revs used:
+- mem0: `openclaw-eval:7da23c3-mem0-4ececb3-slim` (Track A), then
+  rebuilt to `46c0029` for Track B.
+- evermemos: `openclaw-eval:7da23c3-evermemos-66f8292-slim` (Track A),
+  rebuild to `74363c1` for Track B in progress.
+
+### Track B: prompt ablation (mem0)
+
+**Run**: `s2-track-b-mem0-mc-prompt-50q` · 2026-04-29 · n=50 · N=1
+· image `7da23c3-mem0-46c0029-slim` (with env-driven prompt swap)
+· `OPENCLAW_PROMPT_STYLE=memory-core`
+
+| Backend | Prompt | Acc | Δ vs reference |
+|---|---|---|---|
+| memory-core | memory-core (native) | 23.78% | reference |
+| mem0 | mem0 (native) | 50.67% | +26.89pp (backend swap) |
+| **mem0** | **memory-core (Track B)** | **56.00%** | **+32.22pp** vs memory-core; **+5.33pp** vs mem0-native-prompt |
+
+**Finding**: the **27pp memory-core → mem0 gap is dominated by
+backend retrieval**, not prompt. Within the same backend (mem0),
+swapping prompts moves accuracy by only ~5pp; switching backends
+moves it by ~27pp. memory-core's directive prompt is even slightly
+*more* effective on mem0 backend than mem0's native prompt.
+
+**Implication**: when comparing plugins on LoCoMo-S, plugin choice
+is primarily a backend-retrieval choice; prompt is secondary. The
+"ecological validity" stance (each plugin runs with its own
+developer's prompt) holds for end-user comparison, but for
+isolated backend benchmarking the prompt confound is now
+quantified at ~5pp.
+
+**Track B remaining**: evermemos memory-core-prompt run pending
+(image rebuild in progress at time of writing).
+
+### Updated open risks
+
+- **R-S1-2**: mem0 N=2 + evermemos N=1 landed; full N=2 across all
+  three plugins still pending evermemos r2.
+- **R-S1-3**: prompt confound now quantified for mem0 (≤5.33pp).
+  evermemos prompt ablation still TODO.
