@@ -7,7 +7,7 @@
     "rewrite": "If the system defaults to local LLM / embedding inference, force-rewrite its config to use the fairness baseline via LLM_BASE_URL + LLM_API_KEY (Sophnet, model openai/gpt-4.1-mini) before benchmarking.",
     "reject": "Any system whose memory operations require calling a vendor-hosted endpoint (e.g. *.mem0.ai, api.getzep.com cloud-only mode) is rejected, even if a self-hosted version is theoretically possible but not packaged."
   },
-  "last_updated": "2026-04-22",
+  "last_updated": "2026-04-29",
   "systems": [
     {
       "name": "evermemos",
@@ -63,6 +63,29 @@
       "tier": "saas-only",
       "memory_backend": "saas",
       "rejection_reason": "Community Edition deprecated; only Graphiti engine remains open source. No clean self-hosted memory path that matches upstream evaluation conditions."
+    },
+    {
+      "name": "simplemem",
+      "display_name": "SimpleMem",
+      "github": "aiming-lab/SimpleMem",
+      "first_seen": "2026-04-29",
+      "status": "failed",
+      "tier": "local-with-cloud-llm",
+      "memory_backend": "local",
+      "adapter_path": "evaluation/src/adapters/simplemem_adapter.py",
+      "config_path": "evaluation/config/systems/simplemem.yaml",
+      "infra_required": ["lancedb", "sqlite"],
+      "estimated_ram_gb": 1,
+      "rejection_reason": "ephemeral install failed: repository v0.2.0 root is not a Python project (no top-level pyproject.toml or setup.py); SDK is exposed only via 'from main import SimpleMemSystem' after a manual clone. PyPI publishes simplemem==0.1.0 (Jan 2026), which lacks the v0.2.0 add_dialogue/add_text/finalize/query API used by this adapter.",
+      "last_run": {
+        "date": "2026-04-29",
+        "smoke_result": "fail",
+        "full_result": "skipped",
+        "batch_mode": false,
+        "overall_score": null,
+        "last_error": "uv run --with 'simplemem @ git+https://github.com/aiming-lab/SimpleMem.git@v0.2.0': Failed to download and build — does not appear to be a Python project, as neither pyproject.toml nor setup.py are present in the directory.",
+        "notes": "Adapter file is left in place targeting the documented v0.2.0 API surface (add_text/finalize/query with tag-based user isolation). To make this benchmarkable, upstream needs to package the repo (add a top-level pyproject.toml exposing 'simplemem' as a real Python package) OR we need to switch the adapter to a clone+sys.path strategy and import 'from main import SimpleMemSystem' directly. Marking [install-failed] per auto-bench rules."
+      }
     }
   ],
   "deny_keywords": [
