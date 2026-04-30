@@ -8,7 +8,9 @@
 > validated against upstream and incorporated. Codex r2 review caught
 > 4 more (session-routing under-specification, option-C scope creep,
 > dual-kind asymmetry, smoke-gate vagueness); all validated and
-> folded in.
+> folded in. Codex r3 review caught 3 more (config/env integration
+> incompleteness, R2 scorecard comparability, smoke-gate vacuous-pass
+> risk); all validated and folded in.
 
 ---
 
@@ -245,7 +247,7 @@ image at `/app/extensions/<name>/`), accepts string or array.
 non-empty string as an engine id and throws if it isn't registered.
 Either omit the field or set it to `"legacy"`.
 
-### 3. System YAML new field
+### 3. System YAML new field — and the 4 downstream code paths it must reach
 
 `evaluation/config/systems/openclaw-docker-<name>.yaml`:
 
@@ -254,6 +256,23 @@ openclaw:
   context_engine_mode: "<plugin id>"   # NEW (parallel to memory_mode)
   memory_mode: "noop"                  # set when plugin is pure context-engine
 ```
+
+**Codex r3 finding (2026-04-30)**: a yaml field alone changes nothing.
+The current eval pipeline routes `memory_mode` through 4 places and
+**none** of them currently understand `context_engine_mode`. Stage 3
+must wire each:
+
+| # | File / function | Current state | Stage 3 change |
+|---|---|---|---|
+| **3a** | `openclaw_resolved_config.py:40` `build_openclaw_resolved_config(...)` | only takes `memory_mode` | add `context_engine_mode` parameter |
+| **3b** | `openclaw_resolved_config.py:145, 221-240` `_build_plugins_section(memory_mode)` emits `slots: {memory: ...}` only | no `slots.contextEngine`; allow/entries keyed off `memory_mode` only | rewrite to compose `allow + slots + entries` from BOTH modes (memory plugin + context-engine plugin can co-exist) |
+| **3c** | `openclaw_docker_adapter.py:157-167` env emit | only emits `MEMORY_PLUGIN_ID` / `MEMORY_MODE` | add `CONTEXT_ENGINE_PLUGIN_ID` / `CONTEXT_ENGINE_MODE` to docker env pairs |
+| **3d** | `openclaw-eval/container/entrypoint.sh:65` `jq` template render | only renders `.plugins.slots.memory` | conditionally render `.plugins.slots.contextEngine` (omit when env unset → openclaw falls back to `legacy`) |
+
+Without all 4, the yaml field is silently dropped. **Each change
+needs unit-test coverage** parallel to the existing `memory_mode`
+tests in `tests/evaluation/test_openclaw_resolved_config.py` and
+`tests/evaluation/test_openclaw_bridge_payload.py`.
 
 ### 4. Adapter dispatch — **ingestion path is unresolved**
 
@@ -309,9 +328,25 @@ the option-C/A/B selection:
 | **R2. Conversation-level session** | All QA share `session_id = conv_id`; ingest once, no replay | Simplest; but answers from earlier QA pollute the engine state for later QA — questions are no longer independent |
 | **R3. Engine-supported clone/link** | Engine exposes a "fork session" primitive; eval calls it per QA | Cleanest semantically; requires the engine to support it (not in current `ContextEngine` interface) |
 
-Recommendation: **R2 for first plugin** (simple, validates the chain),
-document the QA-pollution risk, then iterate to R1 if scorecard
-quality demands isolation. R3 is a Stage 3+ proposal to upstream.
+Recommendation: **R2 ONLY as a wiring/prototype scorecard, NOT as the
+Stage 3 benchmark**. The current Path B baseline uses
+`session_id = f"{conv_id}__{qid}"` for deliberate per-QA isolation
+(`openclaw_adapter.py:414`, "v0.6: per-QA isolation"). R2 violates
+that contract — earlier QA answers become priors for later QA. So
+R2-derived numbers are **not directly comparable** with our existing
+memory-plugin scorecards (memory-core 23.78%, mem0 50.67%, evermemos
+34.67%) and must not be reported in the same table.
+
+**Codex r3 finding (2026-04-30)**: this comparability gap is a
+reporting hazard, not just a scientific one. Concretely:
+
+1. R2 first runs publish a "wiring/prototype" scorecard for context-
+   engine plugins, clearly labelled and isolated from the memory
+   matrix.
+2. Stage 3+ work upgrades to R1 (replication) or R3 (engine
+   fork) before any side-by-side comparison with memory plugins.
+3. Closure docs MUST distinguish R1/R2/R3 in scorecard footnotes;
+   never silently average across them.
 
 - `search()` — return skipped (context-engine has no callable
   retrieve; assemble happens transparently inside agent run).
@@ -349,14 +384,23 @@ shape (assuming Option C + R2):
    `session_id = "smoke_gate_conv"`.
 3. Issue an `agent_run` with `session_id = "smoke_gate_conv"` (same
    id) and message "What's the passphrase from the conversation?".
-4. Pass criterion: reply contains "WOMBAT_42" AND the engine
-   instrumentation (afterTurn callback or trace event) shows
-   `assemble()` was called and returned non-empty messages.
+4. **Pass criteria (all 3 must hold)**:
+   - **4a.** `resolveContextEngine()` returns the expected plugin id
+     (assert via trace event or instrumentation hook). This proves
+     the slot wiring resolved correctly.
+   - **4b.** WOMBAT_42 appears in either `assemble().messages` (the
+     engine injected it from its store) OR
+     `assemble().systemPromptAddition` (engine surfaced it via
+     prompt). Just "non-empty messages" is **insufficient**:
+     `assemble()` receives current active session messages and a
+     no-op engine that echoes its input back trivially produces
+     non-empty output. (Codex r3 finding 2026-04-30.)
+   - **4c.** Reply contains "WOMBAT_42".
 
-Step 4's assemble-was-called check is what distinguishes a real
-context-engine pass from a "agent guessed correctly" coincidence.
-Without it, the gate passes vacuously when the engine is broken
-but the LLM happens to know "WOMBAT_42" from training data.
+4c alone (reply contains the string) is also insufficient — the LLM
+may know "WOMBAT_42" from training data or guess from the question
+shape. 4a + 4b together prove the engine actually injected the
+passphrase context. 4c is the end-to-end success criterion.
 
 This validates the engine wired through end-to-end, the same way
 `stub_passphrase_gate.sh` validates memory plugin wiring.
@@ -373,7 +417,10 @@ ingestion-path open question (item 4) flagged by Codex review.
 | **0. Upstream openclaw normalization + activation hash patch** | 0.5 day |
 | 1. Manifest schema convention docs | 0.1 day |
 | 2. Template + entrypoint contextEngine slot rendering | 0.3 day |
-| 3. System YAML new field | 0.1 day |
+| 3a. `build_openclaw_resolved_config` accept `context_engine_mode` + tests | 0.3 day |
+| 3b. `_build_plugins_section` compose memory + contextEngine plugins together + tests | 0.5 day |
+| 3c. Docker adapter env emit `CONTEXT_ENGINE_PLUGIN_ID` / `CONTEXT_ENGINE_MODE` + bridge payload tests | 0.3 day |
+| 3d. Entrypoint conditional jq render of `slots.contextEngine` | 0.2 day |
 | 4. Adapter ingest path — **option C bridge RPC** (embedded openclaw runtime) | **2.5-3 days** (was 1.5; r2 review showed this is "build a small in-process engine resolver", not a thin RPC) |
 | 4a. Session-routing strategy — implement R2 (single conv-level session) | 0.5 day |
 | 4-extension. Adapter ingest path — **option A real replay** (later) | 2-3 days |
@@ -381,7 +428,13 @@ ingestion-path open question (item 4) flagged by Codex review.
 | 6. Metrics adjustments + new diagnostic group | 0.5 day |
 | 7. New smoke gate template (bound to chosen ingest route + session id) | 0.5 day |
 | Stage 3 docs + first context-engine plugin onboarding | 1-2 days |
-| **Total to first scorecard** | **~6.5 days** (was 5 after r1; r2 surfaced more in option-C scope) |
+| **Total to first scorecard** | **~7.5 days** (was 6.5 after r2; r3 surfaced 4 additional integration tasks for `context_engine_mode` routing through resolved-config / docker env / entrypoint) |
+
+**Reminder on what "first scorecard" means after r3**: the first
+scorecard will be R2-routed (conv-level session) and is a
+**wiring/prototype** result, NOT comparable with the existing memory
+plugin matrix. Comparable Stage 3 numbers require R1 (replication)
+or R3 (engine fork primitive), which adds another 1-2 days.
 
 Subsequent context-engine plugins after the first reuse the path;
 ~0.5-1 day each.
