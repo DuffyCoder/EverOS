@@ -5,7 +5,10 @@
 > **Trigger**: Survey of openclaw plugin types prompted by user question
 > "对于 openclaw plugin 支持的是 memory 还是 context engine"
 > **Revision**: 2026-04-30 — Codex r1 review caught 4 issues; all
-> validated against upstream and incorporated below.
+> validated against upstream and incorporated. Codex r2 review caught
+> 4 more (session-routing under-specification, option-C scope creep,
+> dual-kind asymmetry, smoke-gate vagueness); all validated and
+> folded in.
 
 ---
 
@@ -72,11 +75,26 @@ A plugin manifest declares one of these (or both for dual-kind plugins).
 
 ### Dual-kind plugins
 
-A plugin can declare `kind: ["memory", "context-engine"]`. Both
-capabilities only activate if the plugin is selected in BOTH slots.
-`registry.ts` repeatedly logs `"dual-kind plugin not selected for
-memory slot; skipping memory capability registration"` (and the
-analog for context-engine) — selection is per-slot, not per-plugin.
+A plugin can declare `kind: ["memory", "context-engine"]`. **Memory
+and context-engine sides activate via different mechanisms** (verified
+in registry.ts):
+
+- **Memory side** (`registry.ts:~1336`): `registerMemoryCapability`
+  is gated by `record.memorySlotSelected`. Dual-kind plugins not
+  selected in `slots.memory` log `"dual-kind plugin not selected for
+  memory slot; skipping memory capability registration"` and skip the
+  memory wiring at registration time.
+- **Context-engine side** (`registry.ts:1286`): `registerContextEngine`
+  has **no slot-selected gate**. The factory always registers (subject
+  only to reserved-id and duplicate-registration checks). Selection
+  happens later, when `resolveContextEngine()` reads
+  `slots.contextEngine` and looks up the engine id in the registry.
+
+Practical implication for evaluation: a dual-kind plugin's
+context-engine factory will be registered even when the eval system
+isn't testing the context-engine side. Don't design scorecards
+around a (false) symmetry of skip-logs — instead, observe which
+engine id `resolveContextEngine()` returns at runtime.
 
 ---
 
@@ -266,10 +284,34 @@ not arbitrary markdown.
 |---|---|---|---|
 | **A. Real session replay** | Drive 419 turns through openclaw agent loop with a stub LLM that returns "ok"; engine ingests via normal turn path | Most faithful to production | Wall-clock 30+ min/conv even with stub LLM; need stub-LLM hook |
 | **B. Bootstrap import format** | Use `engine.bootstrap({sessionFile})` — write the LoCoMo transcript into the session DAG file format openclaw expects | Single bootstrap call instead of N turns | Need to reverse-engineer session DAG file format; some engines may not implement bootstrap |
-| **C. Custom bridge command** | Add bridge RPC `engine_ingest_batch` that calls `engine.ingestBatch(messages)` directly | Cleanest semantically | Bypasses the production code path entirely; defeats some of the point of the eval |
+| **C. Custom bridge command** | Add bridge RPC `engine_ingest_batch` that calls `engine.ingestBatch(messages)` directly | Conceptually cleanest | **Substantial engineering**: bridge currently only spawns CLI subcommands + a single `memory-core` direct-import for flush plans (`bridge.mjs:469` switch); a new in-process path needs config load + plugin loader run + `resolveContextEngine()` + env/cwd plumbing + lifecycle dispose |
 
-Recommendation: **start with C** (cheapest, fastest to validate the
-plugin chain) and add A in a later iteration once the chain works.
+Recommendation: **start with C** (still the cheapest path to
+something testable), but treat it as building a small embedded
+openclaw runtime. The 1.5-day estimate previously listed was too
+optimistic — reset to **2.5-3 days** (see Estimated Effort).
+
+#### Critical: session-id routing must be specified
+
+`ContextEngine.ingest()` and `assemble()` are both **session-keyed**
+(`types.ts:179, 224`). The eval adapter answers each question with
+`session_id = f"{conv_id}__{qid}"` (per-QA isolation, see
+`openclaw_adapter.py:414`). If `add()` ingests history under
+`conv_id` (or some source-data-derived id), then the per-QA `assemble()`
+runs against an empty engine store and the agent retrieves nothing.
+
+Three viable session-routing strategies; **must pick one** as part of
+the option-C/A/B selection:
+
+| Strategy | What | Trade-off |
+|---|---|---|
+| **R1. Replicate per QA** | After ingesting under a base id, replay/copy state into each `conv__qid` session before its run | Most isolated; engine state copy may be expensive (50× per conv) and engine-specific |
+| **R2. Conversation-level session** | All QA share `session_id = conv_id`; ingest once, no replay | Simplest; but answers from earlier QA pollute the engine state for later QA — questions are no longer independent |
+| **R3. Engine-supported clone/link** | Engine exposes a "fork session" primitive; eval calls it per QA | Cleanest semantically; requires the engine to support it (not in current `ContextEngine` interface) |
+
+Recommendation: **R2 for first plugin** (simple, validates the chain),
+document the QA-pollution risk, then iterate to R1 if scorecard
+quality demands isolation. R3 is a Stage 3+ proposal to upstream.
 
 - `search()` — return skipped (context-engine has no callable
   retrieve; assemble happens transparently inside agent run).
@@ -296,11 +338,25 @@ from `assemble().systemPromptAddition` instead.
 
 ### 7. Smoke gate
 
-A new `<name>_engine_passphrase_gate.sh` template:
-- Inject a transcript with the passphrase
-- Run a fresh agent turn asking for it
-- Assert the engine's `assemble()` carried the relevant context
-- Pass criterion: reply contains the passphrase
+A new `<name>_engine_passphrase_gate.sh` template. **The gate must
+bind to the chosen ingestion route + chosen session strategy** (see
+item 4) — otherwise it can pass/fail for the wrong reason. Concrete
+shape (assuming Option C + R2):
+
+1. Compose a 3-message transcript containing the passphrase
+   "WOMBAT_42".
+2. Drive `engine_ingest_batch` bridge RPC with
+   `session_id = "smoke_gate_conv"`.
+3. Issue an `agent_run` with `session_id = "smoke_gate_conv"` (same
+   id) and message "What's the passphrase from the conversation?".
+4. Pass criterion: reply contains "WOMBAT_42" AND the engine
+   instrumentation (afterTurn callback or trace event) shows
+   `assemble()` was called and returned non-empty messages.
+
+Step 4's assemble-was-called check is what distinguishes a real
+context-engine pass from a "agent guessed correctly" coincidence.
+Without it, the gate passes vacuously when the engine is broken
+but the LLM happens to know "WOMBAT_42" from training data.
 
 This validates the engine wired through end-to-end, the same way
 `stub_passphrase_gate.sh` validates memory plugin wiring.
@@ -318,13 +374,14 @@ ingestion-path open question (item 4) flagged by Codex review.
 | 1. Manifest schema convention docs | 0.1 day |
 | 2. Template + entrypoint contextEngine slot rendering | 0.3 day |
 | 3. System YAML new field | 0.1 day |
-| 4. Adapter ingest path — **option C bridge RPC** (recommended start) | 1.5 days |
+| 4. Adapter ingest path — **option C bridge RPC** (embedded openclaw runtime) | **2.5-3 days** (was 1.5; r2 review showed this is "build a small in-process engine resolver", not a thin RPC) |
+| 4a. Session-routing strategy — implement R2 (single conv-level session) | 0.5 day |
 | 4-extension. Adapter ingest path — **option A real replay** (later) | 2-3 days |
 | 5. Prompt-builders gating sanity (no change, just verify) | 0.1 day |
 | 6. Metrics adjustments + new diagnostic group | 0.5 day |
-| 7. New smoke gate template | 0.5 day |
+| 7. New smoke gate template (bound to chosen ingest route + session id) | 0.5 day |
 | Stage 3 docs + first context-engine plugin onboarding | 1-2 days |
-| **Total to first scorecard** | **~5 days** (was 3-4 in pre-review draft) |
+| **Total to first scorecard** | **~6.5 days** (was 5 after r1; r2 surfaced more in option-C scope) |
 
 Subsequent context-engine plugins after the first reuse the path;
 ~0.5-1 day each.
