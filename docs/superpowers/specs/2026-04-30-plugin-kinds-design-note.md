@@ -10,7 +10,9 @@
 > dual-kind asymmetry, smoke-gate vagueness); all validated and
 > folded in. Codex r3 review caught 3 more (config/env integration
 > incompleteness, R2 scorecard comparability, smoke-gate vacuous-pass
-> risk); all validated and folded in.
+> risk); all validated and folded in. Codex r4 caught 1 more
+> (`ingestBatch` is the wrong universal write hook — `afterTurn`
+> takes precedence in production); validated and folded in.
 
 ---
 
@@ -303,12 +305,19 @@ not arbitrary markdown.
 |---|---|---|---|
 | **A. Real session replay** | Drive 419 turns through openclaw agent loop with a stub LLM that returns "ok"; engine ingests via normal turn path | Most faithful to production | Wall-clock 30+ min/conv even with stub LLM; need stub-LLM hook |
 | **B. Bootstrap import format** | Use `engine.bootstrap({sessionFile})` — write the LoCoMo transcript into the session DAG file format openclaw expects | Single bootstrap call instead of N turns | Need to reverse-engineer session DAG file format; some engines may not implement bootstrap |
-| **C. Custom bridge command** | Add bridge RPC `engine_ingest_batch` that calls `engine.ingestBatch(messages)` directly | Conceptually cleanest | **Substantial engineering**: bridge currently only spawns CLI subcommands + a single `memory-core` direct-import for flush plans (`bridge.mjs:469` switch); a new in-process path needs config load + plugin loader run + `resolveContextEngine()` + env/cwd plumbing + lifecycle dispose |
+| **C. Custom bridge command** | Add bridge RPC `engine_import_history` that mirrors openclaw's turn-finalization precedence: `afterTurn()` if present, else `ingestBatch()`, else per-message `ingest()` | Conceptually cleanest; faithful to production write hook | **Substantial engineering**: bridge currently only spawns CLI subcommands + a single `memory-core` direct-import for flush plans (`bridge.mjs:469` switch); a new in-process path needs config load + plugin loader run + `resolveContextEngine()` + env/cwd plumbing + lifecycle dispose. Plus `afterTurn` payload composition (sessionFile, prePromptMessageCount, tokenBudget) is engine-facing, not eval-facing, so the bridge fakes a turn shape rather than calling a clean ingest. (Codex r4 finding 2026-04-30.) |
 
 Recommendation: **start with C** (still the cheapest path to
 something testable), but treat it as building a small embedded
-openclaw runtime. The 1.5-day estimate previously listed was too
-optimistic — reset to **2.5-3 days** (see Estimated Effort).
+openclaw runtime that **faithfully reproduces the turn-finalization
+write-hook precedence** (`afterTurn` ▶ `ingestBatch` ▶ per-message
+`ingest`, per `attempt.context-engine-helpers.ts:110`). Naively
+calling `ingestBatch` directly would be a no-op for any engine that
+implements canonical persistence in `afterTurn` — many production
+context engines do exactly that. The 1.5-day estimate from the
+original draft was too optimistic — reset to **3-3.5 days** (was
+2.5-3 in r2; r4 added ~0.5 day for `afterTurn` payload composition,
+see Estimated Effort).
 
 #### Critical: session-id routing must be specified
 
@@ -380,8 +389,10 @@ shape (assuming Option C + R2):
 
 1. Compose a 3-message transcript containing the passphrase
    "WOMBAT_42".
-2. Drive `engine_ingest_batch` bridge RPC with
-   `session_id = "smoke_gate_conv"`.
+2. Drive `engine_import_history` bridge RPC with
+   `session_id = "smoke_gate_conv"`. Bridge dispatches in production
+   precedence: `afterTurn()` if engine implements it, else
+   `ingestBatch()`, else per-message `ingest()`.
 3. Issue an `agent_run` with `session_id = "smoke_gate_conv"` (same
    id) and message "What's the passphrase from the conversation?".
 4. **Pass criteria (all 3 must hold)**:
@@ -421,14 +432,14 @@ ingestion-path open question (item 4) flagged by Codex review.
 | 3b. `_build_plugins_section` compose memory + contextEngine plugins together + tests | 0.5 day |
 | 3c. Docker adapter env emit `CONTEXT_ENGINE_PLUGIN_ID` / `CONTEXT_ENGINE_MODE` + bridge payload tests | 0.3 day |
 | 3d. Entrypoint conditional jq render of `slots.contextEngine` | 0.2 day |
-| 4. Adapter ingest path — **option C bridge RPC** (embedded openclaw runtime) | **2.5-3 days** (was 1.5; r2 review showed this is "build a small in-process engine resolver", not a thin RPC) |
+| 4. Adapter ingest path — **option C bridge RPC** (embedded openclaw runtime + write-hook precedence) | **3-3.5 days** (was 2.5-3 after r2; r4 added afterTurn payload composition + per-engine fallback dispatch) |
 | 4a. Session-routing strategy — implement R2 (single conv-level session) | 0.5 day |
 | 4-extension. Adapter ingest path — **option A real replay** (later) | 2-3 days |
 | 5. Prompt-builders gating sanity (no change, just verify) | 0.1 day |
 | 6. Metrics adjustments + new diagnostic group | 0.5 day |
 | 7. New smoke gate template (bound to chosen ingest route + session id) | 0.5 day |
 | Stage 3 docs + first context-engine plugin onboarding | 1-2 days |
-| **Total to first scorecard** | **~7.5 days** (was 6.5 after r2; r3 surfaced 4 additional integration tasks for `context_engine_mode` routing through resolved-config / docker env / entrypoint) |
+| **Total to first scorecard** | **~8 days** (r1: 5; r2: 6.5; r3: 7.5; r4: +0.5 day for afterTurn precedence in option C) |
 
 **Reminder on what "first scorecard" means after r3**: the first
 scorecard will be R2-routed (conv-level session) and is a
