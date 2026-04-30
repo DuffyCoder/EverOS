@@ -24,9 +24,19 @@ FROM ${BASE_IMAGE}
 ARG MEMORY_PLUGIN=memory-core
 ARG OPENCLAW_COMMIT=unknown
 ARG PLUGIN_REV=unknown
+# Optional install-mode args (build.py --install-spec). When INSTALL_SPEC
+# is non-empty, this layer runs `openclaw plugins install $INSTALL_SPEC`
+# at build time and the plugin lands at $OPENCLAW_HOME/extensions/$INSTALL_PLUGIN_ID/.
+# entrypoint.sh injects that path into plugins.load.paths of the rendered
+# openclaw config so the runtime sees the installed plugin alongside any
+# bundled ones. See openclaw-eval/harness/build.py for orchestration.
+ARG INSTALL_SPEC=""
+ARG INSTALL_PLUGIN_ID=""
 LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
       eval.openclaw_commit=${OPENCLAW_COMMIT} \
       eval.plugin_rev=${PLUGIN_REV} \
+      eval.install_spec=${INSTALL_SPEC} \
+      eval.install_plugin_id=${INSTALL_PLUGIN_ID} \
       eval.layer=eval-runtime
 
 # We need root briefly to mkdir + install jq + Python (sidecar runtime).
@@ -66,9 +76,35 @@ RUN if [ -x /sidecar/venv/bin/python ]; then \
     fi
 
 USER root
+
+# OPENCLAW_HOME pins where openclaw stores its config + extensions on this
+# image. Both build-time `plugins install` and runtime `openclaw agent`
+# resolve this same dir, so install-mode plugins land at a stable,
+# documented location: /opt/openclaw/extensions/<plugin_id>/.
+ENV OPENCLAW_HOME=/opt/openclaw
+RUN mkdir -p /opt/openclaw && chown -R node:node /opt/openclaw
+
+# Install-mode: when INSTALL_SPEC is non-empty, run openclaw plugins install
+# at build time. --force lets re-builds overwrite without prompting.
+# --pin records exact npm version for reproducibility (no-op for non-npm
+# specs). The dangerously-force-unsafe-install flag bypasses the safety
+# scan; we accept this trade-off because the eval framework only installs
+# specs explicitly listed in build commands by an operator. If you prefer
+# safety scanning, drop the flag and let install fail noisily on flagged
+# plugins.
+USER node
+RUN if [ -n "${INSTALL_SPEC}" ]; then \
+      echo "[Dockerfile.eval] installing plugin: ${INSTALL_SPEC} (id=${INSTALL_PLUGIN_ID})"; \
+      OPENCLAW_HOME=/opt/openclaw openclaw plugins install "${INSTALL_SPEC}" --force --pin --dangerously-force-unsafe-install; \
+      ls -la /opt/openclaw/extensions/ || true; \
+    fi
+USER root
+
 # Memory plugin id is read by entrypoint.sh to render the right plugin
-# entries / slot config into /workspace/openclaw.json.
+# entries / slot config into /workspace/openclaw.json. INSTALL_PLUGIN_ID
+# is also surfaced so entrypoint can add the install path to plugins.load.paths.
 ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
+ENV INSTALL_PLUGIN_ID=${INSTALL_PLUGIN_ID}
 
 # Per-conv mounted at /workspace by the harness.
 # Use a docker-specific config path so we don't collide with the

@@ -66,6 +66,51 @@ def docker_image_exists(tag: str) -> bool:
     return res.returncode == 0
 
 
+def install_spec_hash(spec: str) -> str:
+    """Stable 7-char hash of the install spec for image tag rev.
+
+    Replaces ``plugin_content_hash`` when a plugin is loaded via
+    ``openclaw plugins install <spec>`` rather than staged from
+    ``openclaw-eval/plugins/<name>/``. Keeping a content-derived rev
+    ensures different specs (e.g. v1.2.0 vs v1.2.1) produce different
+    image tags so cached images don't drift.
+    """
+    return hashlib.sha256(spec.encode("utf-8")).hexdigest()[:7]
+
+
+def derive_plugin_id_from_spec(spec: str) -> Optional[str]:
+    """Best-effort plugin id derivation from an install spec.
+
+    Cases handled:
+      - ``npm:@scope/name@version`` -> ``name``
+      - ``npm:name@version``         -> ``name``
+      - ``clawhub:owner/name``       -> ``name``
+      - ``marketplace:name``         -> ``name``
+
+    Returns ``None`` for raw paths/archives or any spec we can't
+    confidently parse. Caller should fall back to ``--install-plugin-id``.
+    """
+    s = spec.strip()
+    if s.startswith("npm:"):
+        rest = s[len("npm:"):]
+        if rest.startswith("@"):
+            slash = rest.find("/")
+            if slash < 0:
+                return None
+            after_scope = rest[slash + 1:]
+            at = after_scope.find("@")
+            return after_scope[:at] if at > 0 else after_scope
+        at = rest.find("@")
+        return rest[:at] if at > 0 else rest
+    if s.startswith("clawhub:"):
+        rest = s[len("clawhub:"):]
+        slash = rest.find("/")
+        return rest[slash + 1:] if slash >= 0 else rest
+    if s.startswith("marketplace:"):
+        return s[len("marketplace:"):]
+    return None
+
+
 def run_step(label: str, cmd: list[str], cwd: Optional[Path] = None) -> None:
     print(f"\n[build] {label}")
     print(f"[build]  $ {' '.join(cmd)}")
@@ -183,11 +228,26 @@ def build_eval_layer(
     *,
     variant: str = "slim",
     plugins_dir: Optional[Path] = None,
+    install_spec: Optional[str] = None,
+    install_plugin_id: Optional[str] = None,
 ) -> str:
-    """Step 2: layer eval-runtime on top of openclaw-base."""
+    """Step 2: layer eval-runtime on top of openclaw-base.
+
+    When ``install_spec`` is set, the eval layer Dockerfile runs
+    ``openclaw plugins install <install_spec>`` at build time. The
+    plugin lands at ``$OPENCLAW_HOME/extensions/<install_plugin_id>``
+    inside the image (see Dockerfile.eval) and entrypoint.sh injects
+    that path into ``plugins.load.paths`` of the rendered openclaw
+    config at runtime. ``memory_plugin`` is still the slot id (must
+    match ``install_plugin_id`` when slot is the installed plugin).
+    """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
-    tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
+    if install_spec:
+        # install-mode rev replaces source-content rev
+        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}-{plugin_rev}-{variant}"
+    else:
+        tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
     cmd = [
         "docker", "build",
         "-f", str(eval_dir / "Dockerfile.eval"),
@@ -195,9 +255,13 @@ def build_eval_layer(
         "--build-arg", f"MEMORY_PLUGIN={memory_plugin}",
         "--build-arg", f"OPENCLAW_COMMIT={openclaw_sha}",
         "--build-arg", f"PLUGIN_REV={plugin_rev}",
-        "-t", tag,
-        str(eval_dir),
     ]
+    if install_spec:
+        cmd += [
+            "--build-arg", f"INSTALL_SPEC={install_spec}",
+            "--build-arg", f"INSTALL_PLUGIN_ID={install_plugin_id}",
+        ]
+    cmd += ["-t", tag, str(eval_dir)]
     run_step(f"Step 2: openclaw-eval ({memory_plugin})", cmd)
     return tag
 
@@ -212,9 +276,60 @@ def main():
     parser.add_argument("--variant", default="slim", choices=["slim", "default"])
     parser.add_argument("--rebuild-base", action="store_true",
                         help="force rebuild base image even if cached")
+    parser.add_argument("--install-spec",
+                        default=None,
+                        help=("Install plugin via 'openclaw plugins install <spec>' "
+                              "inside the eval-layer image instead of staging from "
+                              "openclaw-eval/plugins/. Examples: "
+                              "'npm:@mem0/openclaw-plugin@1.2.0', "
+                              "'clawhub:owner/name', 'marketplace:foo'. When set, "
+                              "--memory-plugin must equal the installed plugin id "
+                              "(or the slot will not bind). See "
+                              "docs/superpowers/specs/2026-04-30-plugin-kinds-design-note.md"))
+    parser.add_argument("--install-plugin-id",
+                        default=None,
+                        help=("Plugin id used in plugins.allow / slots.memory + the "
+                              "install destination directory name. Required with "
+                              "--install-spec when the spec doesn't reveal the id "
+                              "(e.g. raw paths). For npm/clawhub/marketplace specs "
+                              "this is auto-derived if omitted."))
     parser.add_argument("--manifest-out",
                         help="optional path to write build-manifest JSON")
     args = parser.parse_args()
+
+    # Validate install-spec mode early.
+    if args.install_spec:
+        derived_id = derive_plugin_id_from_spec(args.install_spec)
+        plugin_id = args.install_plugin_id or derived_id
+        if not plugin_id:
+            print(
+                f"[build] ERROR: --install-spec '{args.install_spec}' could not "
+                f"derive a plugin id; pass --install-plugin-id explicitly.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Memory plugin slot must match installed id (entrypoint reads
+        # MEMORY_PLUGIN_ID for slot wiring; mismatch = silent slot bind
+        # to a non-existent plugin).
+        if args.memory_plugin != plugin_id:
+            print(
+                f"[build] ERROR: --memory-plugin '{args.memory_plugin}' must "
+                f"match installed plugin id '{plugin_id}' when --install-spec "
+                f"is set. Re-run with --memory-plugin {plugin_id}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Disallow install-mode for memory-core / noop (they're bundled,
+        # not installable specs).
+        if plugin_id in ("memory-core", "noop"):
+            print(
+                f"[build] ERROR: --install-spec is not supported for "
+                f"'{plugin_id}' (bundled plugin, not an install target).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Stash resolved id back so downstream code uses it uniformly.
+        args.install_plugin_id = plugin_id
 
     if shutil.which("docker") is None:
         print("[build] ERROR: docker not in PATH", file=sys.stderr)
@@ -232,22 +347,46 @@ def main():
 
     openclaw_sha = short_sha(openclaw_repo)
     plugin_rev = "0000000"
-    if args.memory_plugin not in ("memory-core", "noop"):
+    if args.install_spec:
+        # rev derived from spec (different versions => different images)
+        plugin_rev = install_spec_hash(args.install_spec)
+    elif args.memory_plugin not in ("memory-core", "noop"):
         plugin_dir = here / "plugins" / args.memory_plugin
         plugin_rev = plugin_content_hash(plugin_dir)
 
-    print(f"[build] openclaw_sha={openclaw_sha}  plugin={args.memory_plugin}  rev={plugin_rev}")
+    if args.install_spec:
+        print(
+            f"[build] openclaw_sha={openclaw_sha}  install_spec={args.install_spec}  "
+            f"plugin_id={args.install_plugin_id}  rev={plugin_rev} (install mode)"
+        )
+    else:
+        print(f"[build] openclaw_sha={openclaw_sha}  plugin={args.memory_plugin}  rev={plugin_rev}")
 
-    base_tag = build_base(
-        openclaw_repo, args.memory_plugin, openclaw_sha,
-        variant=args.variant,
-        skip_if_exists=not args.rebuild_base,
-        plugins_dir=here / "plugins",
-    )
+    # In install mode the eval-layer Dockerfile runs `openclaw plugins install`,
+    # so we don't stage source from openclaw-eval/plugins/ for the base. We
+    # also don't need to OPENCLAW_EXTENSIONS-include the plugin at base
+    # layer (it's installed at eval layer). Reuse the memory-core base image
+    # tag — it's shared across all install-mode plugins.
+    if args.install_spec:
+        base_tag = build_base(
+            openclaw_repo, "memory-core", openclaw_sha,
+            variant=args.variant,
+            skip_if_exists=not args.rebuild_base,
+            plugins_dir=None,
+        )
+    else:
+        base_tag = build_base(
+            openclaw_repo, args.memory_plugin, openclaw_sha,
+            variant=args.variant,
+            skip_if_exists=not args.rebuild_base,
+            plugins_dir=here / "plugins",
+        )
     layer_tag = build_eval_layer(
         here, base_tag, args.memory_plugin, openclaw_sha, plugin_rev,
         variant=args.variant,
         plugins_dir=here / "plugins",
+        install_spec=args.install_spec,
+        install_plugin_id=args.install_plugin_id,
     )
 
     print()

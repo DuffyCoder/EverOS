@@ -56,16 +56,33 @@ mkdir -p "$WS" "$WS/state/memory" "$WS/home" "$WS/memory"
 # We deliberately leave ${LLM_API_KEY} / ${SOPH_API_KEY} / ${LLM_BASE_URL} /
 # ${SOPH_EMBED_URL} / ${SOPH_EMBED_EASYLLM_ID} as ${VAR} templates so openclaw
 # resolves them from process env at CLI time. This keeps secrets off disk.
+# Install-mode (build.py --install-spec): if INSTALL_PLUGIN_ID is set
+# and the install dir exists, register it via plugins.load.paths so the
+# runtime can find the installed plugin alongside any bundled ones.
+# Empty/missing -> jq emits no load section (default behavior).
+INSTALL_LOAD_PATHS='[]'
+if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
+  INSTALL_DIR="${OPENCLAW_HOME:-/opt/openclaw}/extensions/${INSTALL_PLUGIN_ID}"
+  if [ -d "$INSTALL_DIR" ]; then
+    INSTALL_LOAD_PATHS=$(jq -n --arg p "$INSTALL_DIR" '[$p]')
+    echo "[entrypoint] install-mode: plugins.load.paths += $INSTALL_DIR" >&2
+  else
+    echo "[entrypoint] WARN: INSTALL_PLUGIN_ID=$INSTALL_PLUGIN_ID set but $INSTALL_DIR not found" >&2
+  fi
+fi
+
 jq \
   --argjson allow "$PLUGIN_ALLOW" \
   --arg slot "$MEMORY_SLOT" \
   --argjson entries "$PLUGIN_ENTRIES" \
   --argjson enabled "$MEMORY_SEARCH_ENABLED" \
+  --argjson loadPaths "$INSTALL_LOAD_PATHS" \
   '
   .plugins.allow = $allow
   | .plugins.slots.memory = $slot
   | .plugins.entries = $entries
   | .agents.defaults.memorySearch.enabled = $enabled
+  | (if ($loadPaths | length) > 0 then .plugins.load.paths = $loadPaths else . end)
   ' "$TPL" \
   | sed -e "s|\${LLM_MODEL_ID}|$LLM_MODEL_ID|g" \
         -e "s|\${LLM_MODEL_NAME}|$LLM_MODEL_NAME|g" \
