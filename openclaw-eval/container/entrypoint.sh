@@ -35,6 +35,22 @@ else
   PLUGIN_ENTRIES='{"memory-core": {"enabled": false}, "'$PLUGIN'": {"enabled": true}}'
 fi
 
+# Stage 3 Phase 1: optionally splice in the context-engine plugin.
+# When CONTEXT_ENGINE_PLUGIN_ID is set, we (a) add it to plugins.allow,
+# (b) register an enabled entry, (c) emit slots.contextEngine via jq below.
+# When unset, no behavioral change vs bundled memory mode (Phase 0
+# re-audit confirmed openclaw resolves slots.contextEngine to "legacy"
+# default when the slot key is absent from the rendered config).
+CONTEXT_ENGINE_PLUGIN="${CONTEXT_ENGINE_PLUGIN_ID:-}"
+if [ -n "$CONTEXT_ENGINE_PLUGIN" ]; then
+  # Splice ce plugin id into PLUGIN_ALLOW (jq makes the union safe).
+  PLUGIN_ALLOW=$(echo "$PLUGIN_ALLOW" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" '. + [$ce] | unique')
+  # Add entry to PLUGIN_ENTRIES — enabled so the loader actually runs
+  # the plugin's register() and registerContextEngine() fires.
+  PLUGIN_ENTRIES=$(echo "$PLUGIN_ENTRIES" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" \
+    '.[$ce] = {"enabled": true}')
+fi
+
 # memorySearch.enabled boolean as JSON literal (not a string).
 if [ "$MODE" = "noop" ]; then
   MEMORY_SEARCH_ENABLED='false'
@@ -77,12 +93,14 @@ jq \
   --argjson entries "$PLUGIN_ENTRIES" \
   --argjson enabled "$MEMORY_SEARCH_ENABLED" \
   --argjson loadPaths "$INSTALL_LOAD_PATHS" \
+  --arg ceSlot "$CONTEXT_ENGINE_PLUGIN" \
   '
   .plugins.allow = $allow
   | .plugins.slots.memory = $slot
   | .plugins.entries = $entries
   | .agents.defaults.memorySearch.enabled = $enabled
   | (if ($loadPaths | length) > 0 then .plugins.load.paths = $loadPaths else . end)
+  | (if ($ceSlot | length) > 0 then .plugins.slots.contextEngine = $ceSlot else . end)
   ' "$TPL" \
   | sed -e "s|\${LLM_MODEL_ID}|$LLM_MODEL_ID|g" \
         -e "s|\${LLM_MODEL_NAME}|$LLM_MODEL_NAME|g" \
