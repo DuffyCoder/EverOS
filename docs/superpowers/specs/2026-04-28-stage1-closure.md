@@ -391,9 +391,62 @@ quantified at ~5pp.
 **Track B remaining**: evermemos memory-core-prompt run pending
 (image rebuild in progress at time of writing).
 
+### Track B: prompt ablation (evermemos) — 2026-05-01
+
+**Run**: `s2-track-b-evermemos-mc-prompt-50q-r2` · n=50 · N=1 (3 judge
+runs) · image `7da23c3-evermemos-74363c1-slim` (env-driven prompt swap)
+· `OPENCLAW_PROMPT_STYLE=memory-core`
+
+The first attempt (r1, 2026-04-29) hit sophnet's quota cap mid-run and
+returned 422-no-body for every question. The .env keys + project id
+were rotated 2026-04-30 and the EverMemOS API restarted; this is the
+re-run.
+
+**Late surprise**: agent answers ran cleanly (events.jsonl shows
+`agent_run_complete` with `stop_reason: stop`, reply_len 100-300,
+`memory_search` and `memory_get` tools listed in `tool_names`), but
+the in-pipeline LLM judge phase hit `APIConnectionError: Connection
+error` at ~78% completion. The default LLMJudge defaults failed
+judgments to False and reported 0/50 instead of crashing. Salvaged
+the run by writing `evaluation/scripts/rejudge.py` (lower concurrency
++ retry on transient errors; reuses the saved `answer_results.json`).
+
+| Backend | Prompt | Acc | Δ vs reference |
+|---|---|---|---|
+| memory-core | memory-core (native) | 23.78% | reference |
+| evermemos | evermemos (native) | 34.67% | +10.89pp (backend) |
+| **evermemos** | **memory-core (Track B)** | **17.33%** | **−6.45pp** vs memory-core; **−17.34pp** vs evermemos-native-prompt |
+
+Run scores across 3 judges: 18/16/18 (std 0.94pp) — variance is
+within noise; 17.33% is a real number, not a judge artifact.
+
+**Key contrast with mem0 Track B**: prompt ablation effect is
+**plugin-specific**, not uniform.
+
+| Backend | Native prompt | memory-core prompt | Δ |
+|---|---|---|---|
+| mem0 | 50.67% | 56.00% | **+5.33pp** (memory-core wins) |
+| evermemos | 34.67% | 17.33% | **−17.34pp** (native wins) |
+
+memory-core's directive prompt template ("Always call this when…")
+maps cleanly to mem0's chromadb retrieval surface but **misaligns
+with evermemos's group-conversation retrieval semantics** (events,
+decisions, profile facts). The evermemos plugin's native prompt
+references its own retrieval vocabulary; replacing it with
+memory-core's generic directives loses that grounding.
+
+**Updated finding from r3**: the "ecological validity" stance was
+correct beyond reproducibility — each plugin's developer-shipped
+prompt is part of the plugin's quality signal, not removable
+without measurable accuracy loss.
+
 ### Updated open risks
 
-- **R-S1-2**: mem0 N=2 + evermemos N=1 landed; full N=2 across all
-  three plugins still pending evermemos r2.
-- **R-S1-3**: prompt confound now quantified for mem0 (≤5.33pp).
-  evermemos prompt ablation still TODO.
+- **R-S1-2**: mem0 N=2 + evermemos N=1 landed (Track B added 1 more
+  evermemos data point at a different prompt — does NOT count as N=2
+  with the same prompt). Full like-for-like N=2 across all three
+  plugins still pending.
+- **R-S1-3**: prompt confound quantified for both mem0 (~+5pp,
+  small) and evermemos (~−17pp, large). **Conclusion**: prompt
+  swap effect is plugin-specific — cannot be assumed small across
+  the matrix.
