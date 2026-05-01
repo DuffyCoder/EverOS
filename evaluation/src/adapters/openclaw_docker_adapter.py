@@ -172,6 +172,13 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # Per-conv group_id for evermemos plugin (one container per conv).
         if memory_mode == "evermemos" and conv_id:
             pairs.append(("EVERMEMOS_GROUP_ID", conv_id))
+        # Stage 3 Phase 2: forward context-engine plugin id when set so
+        # entrypoint.sh's Phase 1 jq render injects slots.contextEngine.
+        # Empty string treated as unset (defensive — yaml ${VAR:default}
+        # expansion yields "" when neither var nor default is set).
+        ce_mode = self._openclaw_cfg.get("context_engine_mode")
+        if isinstance(ce_mode, str) and ce_mode.strip():
+            pairs.append(("CONTEXT_ENGINE_PLUGIN_ID", ce_mode.strip()))
         # Pass-through secret + endpoint env vars from process env, only if
         # the yaml whitelist contains them (defense-in-depth: container only
         # ever receives env vars its config explicitly opted into).

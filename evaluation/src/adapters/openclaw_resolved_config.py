@@ -44,6 +44,7 @@ def build_openclaw_resolved_config(
     backend_mode: str,
     flush_mode: str,
     memory_mode: str = "memory-core",
+    context_engine_mode: Optional[str] = None,
     agent_llm: Optional[dict] = None,
     embedding: Optional[dict] = None,
 ) -> dict:
@@ -142,7 +143,7 @@ def build_openclaw_resolved_config(
         resolved["agents"]["defaults"]["model"] = model_ref
 
     # === plugins (allow + slots + entries) (v0.7) ========================
-    resolved["plugins"] = _build_plugins_section(memory_mode)
+    resolved["plugins"] = _build_plugins_section(memory_mode, context_engine_mode)
 
     return resolved
 
@@ -218,29 +219,57 @@ def _build_agent_provider(agent_llm: dict) -> tuple[str, dict[str, Any], str]:
     return pid, provider_cfg, model_ref
 
 
-def _build_plugins_section(memory_mode: str) -> dict[str, Any]:
-    """Build plugins.allow / slots / entries based on memory_mode.
+def _build_plugins_section(
+    memory_mode: str,
+    context_engine_mode: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build plugins.allow / slots / entries from memory + context-engine modes.
 
+    Memory side (legacy):
     - memory-core or noop: only memory-core in allow + slot, enabled
       (noop disables memorySearch via its enabled flag, not via plugin
       removal, so memory-core stays loaded but has nothing to do)
     - other plugin id: memory-core in allow (still required as plugin
       slot fallback for some openclaw paths) but its entry disabled;
       target plugin allowed + slot owner + entry enabled
+
+    Context-engine side (Stage 3 Phase 2):
+    - When ``context_engine_mode`` is a non-empty string, splice the engine
+      id into ``allow`` + register an enabled ``entries[<id>]`` + emit
+      ``slots.contextEngine``. Empty/None leaves the slot absent so
+      openclaw resolves to its default ``"legacy"`` engine.
+    - The two modes compose freely: a plugin can be in the memory slot
+      while a different plugin sits in the context-engine slot.
+
+    Phase 0 re-audit (2026-05-01) confirmed that omitting
+    ``slots.contextEngine`` when unused is the correct disable mechanism;
+    do NOT use sentinels like "__none__" (Codex r1: resolveContextEngine
+    throws on unregistered ids).
     """
     if memory_mode in ("memory-core", "noop"):
-        return {
+        section: dict[str, Any] = {
             "allow": ["memory-core"],
             "slots": {"memory": "memory-core"},
             "entries": {"memory-core": {"enabled": True}},
         }
+    else:
+        plugin_id = memory_mode
+        section = {
+            "allow": ["memory-core", plugin_id],
+            "slots": {"memory": plugin_id},
+            "entries": {
+                "memory-core": {"enabled": False},
+                plugin_id: {"enabled": True},
+            },
+        }
 
-    plugin_id = memory_mode
-    return {
-        "allow": ["memory-core", plugin_id],
-        "slots": {"memory": plugin_id},
-        "entries": {
-            "memory-core": {"enabled": False},
-            plugin_id: {"enabled": True},
-        },
-    }
+    # Compose context-engine plugin into the same section. Empty string is
+    # treated as unset (defensive — yaml ${VAR:default} expansion can yield "").
+    if context_engine_mode and context_engine_mode.strip():
+        ce_id = context_engine_mode.strip()
+        if ce_id not in section["allow"]:
+            section["allow"].append(ce_id)
+        section["entries"][ce_id] = {"enabled": True}
+        section["slots"]["contextEngine"] = ce_id
+
+    return section
