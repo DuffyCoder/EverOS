@@ -13,6 +13,20 @@
 > risk); all validated and folded in. Codex r4 caught 1 more
 > (`ingestBatch` is the wrong universal write hook — `afterTurn`
 > takes precedence in production); validated and folded in.
+> **Phase 0 re-audit (2026-05-01)**: Codex r1's normalize / activation
+> hash findings ARE technically accurate but **do NOT block our use
+> case**. Empirical evidence:
+> 1. `resolveContextEngine` reads raw config (`loadConfig()` doesn't
+>    normalize). Upstream test `context-engine.test.ts:configWithSlot`
+>    passes a raw `{plugins:{slots:{contextEngine:engineId}}}` and the
+>    resolution works. Normalize drop doesn't reach the resolver.
+> 2. Activation hash omits `contextEngineSlot`, but our per-conversation
+>    containers spawn fresh openclaw processes each time — cache
+>    lifetime < slot lifetime, so cache invalidation isn't needed.
+>
+> Phase 0 of the Stage 3 plan is therefore **downgraded from blocker to
+> nice-to-have** (an upstream PR for ecosystem hygiene, not a Stage 3
+> prerequisite). Stage 3 proceeds directly to Phase 1.
 
 ---
 
