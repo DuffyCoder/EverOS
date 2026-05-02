@@ -343,6 +343,28 @@ Stub out a yaml that demonstrates the new `context_engine_mode` field. Used in P
 
 **Why this is the biggest phase**: The bridge currently only spawns CLI subcommands and has one direct-import path (memory-core flush plan). Context-engine ingestion needs an in-process plugin loader that can `resolveContextEngine()` and dispatch the production turn-finalization precedence. Codex r2 + r4: budget 3-3.5 days.
 
+### Empirical finding (2026-05-02): native path blocked, scope reduced
+
+Surveying openclaw `dist/` revealed:
+
+- `dist/index.js` exposes `loadConfig` publicly, but **NOT** `resolveContextEngine` or `resolveRuntimePluginRegistry` — both live in hashed bundles (e.g. `dist/registry-D4L8wbCo.js`) under munged names (`r`, `t`, `n`).
+- The `package.json` `exports` map enumerates 255 paths, all `./plugin-sdk/*` subpaths; no path reaches `context-engine/registry`.
+
+In-process loading therefore requires either:
+
+1. **Upstream patch** — add stable `./context-engine` or `./eval-harness/import-history` exports (a Phase 0-style upstream change; was deferred for Phase 0 normalization, would have to be revisited).
+2. **Hash-discovery import** — glob `dist/registry-*.js`, import the munged `r` symbol; brittle across openclaw rebuilds.
+3. **CLI replay** — feed conversation messages through `agent_run` per-turn; engine's `afterTurn`/`ingestBatch` fires natively, but burns LLM tokens (~50 turns/conv).
+
+**Phase 3 scope (revised)**:
+
+- ✅ Task 3.2 **dispatcher**: `dispatchEngineImport(engine, params)` in `openclaw_eval_bridge_lib.mjs` — pure, fully unit-tested precedence (afterTurn ▶ ingestBatch ▶ ingest), 11 cases.
+- ✅ Task 3.2 **bridge handler**: `handleEngineImportHistory` wired into bridge dispatch with **stub mode** (no launcher → ok:true contract response). Native mode returns `ok:false` with explicit "not yet wired" marker; adapters can branch deterministically.
+- ⏸ Task 3.1 **production loader** (`openclaw_engine_loader.mjs`): deferred. The right path is upstream stable exports (#1 above). Tracked as Stage 3 follow-up.
+- ⏸ Task 3.3 **adapter R2 dispatch**: deferred until a production path exists. Phase 4 smoke gate doesn't need it (it routes through `agent_run`, not `engine_import_history`).
+
+**Net effect**: Phase 3 went from 3-3.5 days → ~half day for the dispatcher + bridge handler. Phase 4's smoke gate becomes the next executable step and routes around the blocked native path entirely (the slot wiring from Phase 0-2 is sufficient for `agent_run` to load + use the context engine).
+
 ### Task 3.1: In-process plugin loader
 
 **Files**:

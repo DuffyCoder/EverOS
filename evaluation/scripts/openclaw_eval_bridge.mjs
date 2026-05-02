@@ -22,6 +22,7 @@ import {
   stripAnsi,
   extractJsonObject,
   extractErrorTail,
+  dispatchEngineImport,
 } from "./openclaw_eval_bridge_lib.mjs";
 
 function respond(obj) {
@@ -428,6 +429,61 @@ async function handleBuildFlushPlan(input, launcher) {
   };
 }
 
+// Stage 3 Phase 3: engine_import_history bridge handler.
+//
+// Stub mode (no launcher): returns a deterministic shape so contract tests
+// can pass without the openclaw runtime. This is also the path used when
+// OPENCLAW_REPO_PATH is unset (e.g. CI without the repo cloned).
+//
+// Native mode (launcher present): production wiring is intentionally
+// deferred. Empirical finding (2026-05-02): openclaw's compiled `dist/` is
+// a flat hashed bundle (e.g. registry-D4L8wbCo.js) and does NOT expose
+// `resolveContextEngine` / `resolveRuntimePluginRegistry` via the public
+// `exports` map (255 exports surveyed; only `loadConfig` is reachable from
+// `dist/index.js`). To run the engine in-process we'd need either:
+//   (a) an upstream patch adding stable `./context-engine` or
+//       `./eval-harness/import-history` exports, or
+//   (b) brittle hash-discovery (glob `dist/registry-*.js` and import the
+//       munged `r` symbol — rebuild-fragile),
+// or (c) ingest by replaying messages through the existing `agent_run`
+// CLI pipeline (each message becomes a turn, engine's afterTurn fires
+// natively — but burns LLM tokens).
+//
+// Path (a) is the right answer; tracked in plan Phase 3 follow-up. Until
+// then, native mode returns ok:false with a clear marker so adapters can
+// branch. The dispatcher unit tests still cover the precedence contract.
+async function handleEngineImportHistory(input, launcher) {
+  const sessionId = String(input.session_id ?? "");
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+
+  if (!launcher) {
+    // Stub path — used by Phase 4 smoke gate where the engine is loaded
+    // by openclaw's normal CLI startup (not via this RPC). Returning
+    // ok:true with method_used=stub keeps the wire shape contract.
+    return {
+      ok: true,
+      command: "engine_import_history",
+      native: false,
+      method_used: "stub",
+      message_count: messages.length,
+      session_id: sessionId,
+    };
+  }
+
+  // Native production path is deferred (see header comment). Surface the
+  // status explicitly so adapters/tests don't silently assume success.
+  return {
+    ok: false,
+    command: "engine_import_history",
+    native: true,
+    method_used: null,
+    error:
+      "engine_import_history native path not yet wired — openclaw " +
+      "dist/ does not expose resolveContextEngine via stable exports. " +
+      "Consider replaying messages via agent_run in the meantime.",
+  };
+}
+
 async function handleGet(input) {
   // OpenClaw has no get command; read the markdown file range directly.
   const locator = input.artifact_locator || {};
@@ -487,6 +543,9 @@ const command = input.command;
         break;
       case "agent_run":
         resp = await handleAgentRun(input, launcher);
+        break;
+      case "engine_import_history":
+        resp = await handleEngineImportHistory(input, launcher);
         break;
       default:
         return fail(`unknown command: ${command}`, command);
