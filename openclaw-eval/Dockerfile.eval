@@ -32,11 +32,18 @@ ARG PLUGIN_REV=unknown
 # bundled ones. See openclaw-eval/harness/build.py for orchestration.
 ARG INSTALL_SPEC=""
 ARG INSTALL_PLUGIN_ID=""
+# Stage 3 Phase 5: auxiliary plugins installed alongside the primary one.
+# Space-separated lists of specs/ids used by context-engine plugins paired
+# with a memory plugin (e.g. hypercompositor with hypermem).
+ARG EXTRA_INSTALL_SPECS=""
+ARG EXTRA_INSTALL_PLUGIN_IDS=""
 LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
       eval.openclaw_commit=${OPENCLAW_COMMIT} \
       eval.plugin_rev=${PLUGIN_REV} \
       eval.install_spec=${INSTALL_SPEC} \
       eval.install_plugin_id=${INSTALL_PLUGIN_ID} \
+      eval.extra_install_specs=${EXTRA_INSTALL_SPECS} \
+      eval.extra_install_plugin_ids=${EXTRA_INSTALL_PLUGIN_IDS} \
       eval.layer=eval-runtime
 
 # We need root briefly to mkdir + install jq + Python (sidecar runtime).
@@ -98,6 +105,13 @@ RUN if [ -n "${INSTALL_SPEC}" ]; then \
       OPENCLAW_HOME=/opt/openclaw openclaw plugins install "${INSTALL_SPEC}" --force --pin --dangerously-force-unsafe-install; \
       ls -la /opt/openclaw/extensions/ || true; \
     fi
+RUN if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
+      for spec in ${EXTRA_INSTALL_SPECS}; do \
+        echo "[Dockerfile.eval] installing extra plugin: $spec"; \
+        OPENCLAW_HOME=/opt/openclaw openclaw plugins install "$spec" --force --pin --dangerously-force-unsafe-install; \
+      done; \
+      ls -la /opt/openclaw/extensions/ || true; \
+    fi
 USER root
 
 # Memory plugin id is read by entrypoint.sh to render the right plugin
@@ -105,6 +119,7 @@ USER root
 # is also surfaced so entrypoint can add the install path to plugins.load.paths.
 ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
 ENV INSTALL_PLUGIN_ID=${INSTALL_PLUGIN_ID}
+ENV EXTRA_INSTALL_PLUGIN_IDS=${EXTRA_INSTALL_PLUGIN_IDS}
 
 # Per-conv mounted at /workspace by the harness.
 # Use a docker-specific config path so we don't collide with the

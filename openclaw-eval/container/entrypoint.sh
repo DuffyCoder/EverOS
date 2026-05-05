@@ -77,14 +77,28 @@ mkdir -p "$WS" "$WS/state/memory" "$WS/home" "$WS/memory"
 # runtime can find the installed plugin alongside any bundled ones.
 # Empty/missing -> jq emits no load section (default behavior).
 INSTALL_LOAD_PATHS='[]'
+OPENCLAW_HOME_DIR="${OPENCLAW_HOME:-/opt/openclaw}"
 if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
-  INSTALL_DIR="${OPENCLAW_HOME:-/opt/openclaw}/extensions/${INSTALL_PLUGIN_ID}"
+  INSTALL_DIR="${OPENCLAW_HOME_DIR}/extensions/${INSTALL_PLUGIN_ID}"
   if [ -d "$INSTALL_DIR" ]; then
     INSTALL_LOAD_PATHS=$(jq -n --arg p "$INSTALL_DIR" '[$p]')
     echo "[entrypoint] install-mode: plugins.load.paths += $INSTALL_DIR" >&2
   else
     echo "[entrypoint] WARN: INSTALL_PLUGIN_ID=$INSTALL_PLUGIN_ID set but $INSTALL_DIR not found" >&2
   fi
+fi
+# Stage 3 Phase 5: append each EXTRA_INSTALL_PLUGIN_IDS dir (space-separated)
+# so paired plugins (e.g. context-engine + memory) both load.
+if [ -n "${EXTRA_INSTALL_PLUGIN_IDS:-}" ]; then
+  for extra_id in ${EXTRA_INSTALL_PLUGIN_IDS}; do
+    EXTRA_DIR="${OPENCLAW_HOME_DIR}/extensions/${extra_id}"
+    if [ -d "$EXTRA_DIR" ]; then
+      INSTALL_LOAD_PATHS=$(echo "$INSTALL_LOAD_PATHS" | jq --arg p "$EXTRA_DIR" '. + [$p]')
+      echo "[entrypoint] install-mode: plugins.load.paths += $EXTRA_DIR" >&2
+    else
+      echo "[entrypoint] WARN: extra plugin id '$extra_id' set but $EXTRA_DIR not found" >&2
+    fi
+  done
 fi
 
 jq \

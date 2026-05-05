@@ -230,6 +230,7 @@ def build_eval_layer(
     plugins_dir: Optional[Path] = None,
     install_spec: Optional[str] = None,
     install_plugin_id: Optional[str] = None,
+    extra_install_specs: Optional[list[tuple[str, str]]] = None,
 ) -> str:
     """Step 2: layer eval-runtime on top of openclaw-base.
 
@@ -240,12 +241,19 @@ def build_eval_layer(
     that path into ``plugins.load.paths`` of the rendered openclaw
     config at runtime. ``memory_plugin`` is still the slot id (must
     match ``install_plugin_id`` when slot is the installed plugin).
+
+    ``extra_install_specs`` is a list of (spec, plugin_id) pairs for
+    auxiliary plugins (e.g. context-engine plugins that pair with the
+    primary memory plugin). They are installed in the same build step
+    and the entrypoint adds their extension dirs to
+    ``plugins.load.paths`` via EXTRA_INSTALL_PLUGIN_IDS env.
     """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
     if install_spec:
         # install-mode rev replaces source-content rev
-        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}-{plugin_rev}-{variant}"
+        tag_extra = f"-x{len(extra_install_specs or [])}" if extra_install_specs else ""
+        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{tag_extra}-{plugin_rev}-{variant}"
     else:
         tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
     cmd = [
@@ -261,6 +269,13 @@ def build_eval_layer(
             "--build-arg", f"INSTALL_SPEC={install_spec}",
             "--build-arg", f"INSTALL_PLUGIN_ID={install_plugin_id}",
         ]
+        if extra_install_specs:
+            specs_str = " ".join(spec for spec, _id in extra_install_specs)
+            ids_str = " ".join(pid for _spec, pid in extra_install_specs)
+            cmd += [
+                "--build-arg", f"EXTRA_INSTALL_SPECS={specs_str}",
+                "--build-arg", f"EXTRA_INSTALL_PLUGIN_IDS={ids_str}",
+            ]
     cmd += ["-t", tag, str(eval_dir)]
     run_step(f"Step 2: openclaw-eval ({memory_plugin})", cmd)
     return tag
@@ -293,6 +308,30 @@ def main():
                               "--install-spec when the spec doesn't reveal the id "
                               "(e.g. raw paths). For npm/clawhub/marketplace specs "
                               "this is auto-derived if omitted."))
+    parser.add_argument(
+        "--extra-install-spec",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help=(
+            "Auxiliary plugin to install alongside the primary --install-spec. "
+            "Repeatable. Each is run via 'openclaw plugins install' and its "
+            "extension dir is added to plugins.load.paths at runtime. Use for "
+            "context-engine plugins paired with a memory plugin (e.g. "
+            "--install-spec npm:@psiclawops/hypermem@0.9.6 "
+            "--extra-install-spec npm:@psiclawops/hypercompositor@0.9.6)."
+        ),
+    )
+    parser.add_argument(
+        "--extra-install-plugin-id",
+        action="append",
+        default=[],
+        metavar="ID",
+        help=(
+            "Plugin id for each --extra-install-spec, in matching order. "
+            "Auto-derived from the spec when omitted (npm:@scope/name@v -> name)."
+        ),
+    )
     parser.add_argument("--manifest-out",
                         help="optional path to write build-manifest JSON")
     args = parser.parse_args()
@@ -330,6 +369,46 @@ def main():
             sys.exit(1)
         # Stash resolved id back so downstream code uses it uniformly.
         args.install_plugin_id = plugin_id
+
+    # Resolve extra install specs into (spec, plugin_id) pairs.
+    extra_pairs: list[tuple[str, str]] = []
+    if args.extra_install_spec:
+        if not args.install_spec:
+            print(
+                "[build] ERROR: --extra-install-spec requires --install-spec "
+                "(extras are auxiliary to a primary install).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        explicit_ids = list(args.extra_install_plugin_id)
+        for i, spec in enumerate(args.extra_install_spec):
+            if i < len(explicit_ids):
+                pid = explicit_ids[i]
+            else:
+                pid = derive_plugin_id_from_spec(spec)
+            if not pid:
+                print(
+                    f"[build] ERROR: cannot derive plugin id from extra spec "
+                    f"'{spec}'; pass --extra-install-plugin-id matching it.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if pid in ("memory-core", "noop"):
+                print(
+                    f"[build] ERROR: extra spec '{spec}' resolves to bundled "
+                    f"plugin '{pid}'; bundled plugins aren't install-mode targets.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if pid == args.install_plugin_id:
+                print(
+                    f"[build] ERROR: extra spec '{spec}' duplicates primary "
+                    f"plugin id '{pid}'.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            extra_pairs.append((spec, pid))
+    args._extra_pairs = extra_pairs
 
     if shutil.which("docker") is None:
         print("[build] ERROR: docker not in PATH", file=sys.stderr)
@@ -387,6 +466,7 @@ def main():
         plugins_dir=here / "plugins",
         install_spec=args.install_spec,
         install_plugin_id=args.install_plugin_id,
+        extra_install_specs=args._extra_pairs or None,
     )
 
     print()
