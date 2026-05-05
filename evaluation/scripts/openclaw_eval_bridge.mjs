@@ -75,6 +75,11 @@ function envForSandbox(input) {
   };
   if (input.config_path) env.OPENCLAW_CONFIG_PATH = input.config_path;
   if (input.state_dir) env.OPENCLAW_STATE_DIR = input.state_dir;
+  // Pass through OPENCLAW_HOME so install-mode plugins (Stage 3 Phase 5)
+  // resolve their extension dirs. Bridge's envForSandbox otherwise strips
+  // this env, causing plugin loader to fall back to $HOME/.openclaw which
+  // doesn't exist in the workspace mount.
+  if (process.env.OPENCLAW_HOME) env.OPENCLAW_HOME = process.env.OPENCLAW_HOME;
 
   // v0.7: explicit env whitelist - only listed names are passed through.
   if (Array.isArray(input.agent_llm_env_vars)) {
@@ -96,19 +101,74 @@ function cwdForSandbox(input) {
   return input.cwd_dir || input.workspace_dir || undefined;
 }
 
-function runLauncher(launcher, args, env, cwd) {
+function runLauncher(launcher, args, env, cwd, opts = {}) {
+  // Stage 3 Phase 5: hypercompositor + hypermem (and other context-engine
+  // plugins with background indexer tasks via setInterval) keep the Node
+  // event loop alive after agent --local prints its JSON, so proc.on("close")
+  // never fires within a reasonable bound. Add a hard wall-clock kill after
+  // `hardTimeoutMs` (default 120s) so the bridge always returns within
+  // bounded time. The collected stdout/stderr at kill time is what we
+  // already received during streaming, which is enough for JSON tail
+  // extraction.
+  const hardTimeoutMs = opts.hardTimeoutMs ?? 120_000;
   return new Promise((resolve, reject) => {
+    // detached:true puts the spawned node in its own process group. The
+    // openclaw CLI forks `openclaw-agent` subprocesses; they inherit the
+    // same group. On hard-timeout we send SIGKILL to the whole group via
+    // -pgid so the subagent dies even if the parent already exited (which
+    // is what hypermem's setInterval-keepalive scenario produces). Without
+    // this, the grandchild keeps stderr fd open and proc.on("close") never
+    // fires.
     const proc = spawn("node", [launcher, ...args], {
       env,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
+    // Detached children must be unref'd in case their stdio doesn't close,
+    // so the parent (this bridge) can exit too.
+    proc.unref();
+
     let stdout = "";
     let stderr = "";
+    let resolved = false;
+    let killTimer = null;
+    let waitForCloseTimer = null;
+
+    const killGroup = (signal) => {
+      try {
+        // Negative pid kills the entire process group.
+        process.kill(-proc.pid, signal);
+      } catch (_) {
+        try {
+          proc.kill(signal);
+        } catch (_) {}
+      }
+    };
+
+    const finish = (code, killed) => {
+      if (resolved) return;
+      resolved = true;
+      if (killTimer) clearTimeout(killTimer);
+      if (waitForCloseTimer) clearTimeout(waitForCloseTimer);
+      resolve({ code, stdout, stderr, killed: killed === true });
+    };
+
     proc.stdout.on("data", (b) => (stdout += b.toString()));
     proc.stderr.on("data", (b) => (stderr += b.toString()));
-    proc.on("close", (code) => resolve({ code, stdout, stderr }));
-    proc.on("error", reject);
+    proc.on("close", (code) => finish(code, false));
+    proc.on("error", (err) => {
+      if (!resolved) reject(err);
+    });
+
+    killTimer = setTimeout(() => {
+      killGroup("SIGTERM");
+      waitForCloseTimer = setTimeout(() => {
+        killGroup("SIGKILL");
+        // Last-ditch: resolve even if "close" still doesn't fire (defensive).
+        setTimeout(() => finish(null, true), 1_000);
+      }, 2_000);
+    }, hardTimeoutMs);
   });
 }
 
@@ -301,28 +361,37 @@ async function handleAgentRun(input, launcher) {
     String(input.timeout_seconds ?? 180),
   ];
 
-  const { code, stdout, stderr } = await runLauncher(launcher, args, env, cwd);
+  // Hard timeout = agent's own --timeout + buffer for hypercompositor-style
+  // background indexers. Without this, `proc.on("close")` never fires and
+  // the bridge appears to hang from the caller's perspective.
+  const hardTimeoutMs = (Number(input.timeout_seconds ?? 180) + 15) * 1000;
+  const { code, stdout, stderr, killed } = await runLauncher(launcher, args, env, cwd, { hardTimeoutMs });
 
   // openclaw agent --local --json puts the JSON on stderr; stdout is empty.
   // Fall back to stdout if stderr is empty (e.g. behavior changes upstream).
   const merged = stripAnsi(stderr || "") || stripAnsi(stdout || "");
 
-  if (code !== 0) {
-    return {
-      ok: false,
-      command: "agent_run",
-      error: extractErrorTail(merged) || `exit ${code}`,
-    };
-  }
-
+  // Try to parse before short-circuiting on non-zero exit. Stage 3 plugins
+  // (hypercompositor + hypermem) keep background indexer timers alive after
+  // stopReason: "stop", forcing runLauncher to SIGTERM/SIGKILL the proc.
+  // The JSON tail is already complete on stderr by then, so accept it as
+  // the canonical response rather than blaming the kill on the agent.
   const parsed = extractJsonObject(merged);
+
   if (!parsed) {
     return {
       ok: false,
       command: "agent_run",
-      error: "no valid JSON object (with payloads+meta) found in stderr",
+      error: extractErrorTail(merged) ||
+        (killed ? "agent killed by hard timeout before JSON arrived" :
+                  `exit ${code}: no JSON object (with payloads+meta) found in stderr`),
     };
   }
+
+  // We have a parsed agent response. Non-zero exit codes from a clean
+  // agent run (i.e. JSON present) are typically from forced termination
+  // due to lingering background timers; surface them via `killed` rather
+  // than failing the whole call.
 
   const reply = parsed.payloads?.[0]?.text ?? "";
   const meta = parsed.meta || {};
@@ -337,6 +406,7 @@ async function handleAgentRun(input, launcher) {
     tool_names: (meta.systemPromptReport?.tools?.entries || []).map((t) => t.name),
     system_prompt_chars: meta.systemPromptReport?.systemPrompt?.chars ?? null,
     last_call_usage: meta.agentMeta?.lastCallUsage ?? null,
+    forced_terminate: killed === true,
   };
 }
 

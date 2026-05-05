@@ -347,14 +347,19 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        # Memory plugin slot must match installed id (entrypoint reads
-        # MEMORY_PLUGIN_ID for slot wiring; mismatch = silent slot bind
-        # to a non-existent plugin).
-        if args.memory_plugin != plugin_id:
+        # Pre-Stage-3 invariant: memory plugin slot had to match installed id
+        # because install was assumed memory-only. Stage 3 onboards
+        # context-engine plugins (kind: context-engine) which install via
+        # the same --install-spec but bind to a different slot at runtime
+        # via CONTEXT_ENGINE_PLUGIN_ID. Allow memory_plugin in {memory-core,
+        # noop} regardless of installed id; only enforce the match when
+        # memory_plugin is a non-bundled id (memory plugin install path).
+        if args.memory_plugin not in ("memory-core", "noop") and args.memory_plugin != plugin_id:
             print(
                 f"[build] ERROR: --memory-plugin '{args.memory_plugin}' must "
                 f"match installed plugin id '{plugin_id}' when --install-spec "
-                f"is set. Re-run with --memory-plugin {plugin_id}.",
+                f"is a memory plugin. Re-run with --memory-plugin {plugin_id} "
+                f"or --memory-plugin memory-core for context-engine plugins.",
                 file=sys.stderr,
             )
             sys.exit(1)

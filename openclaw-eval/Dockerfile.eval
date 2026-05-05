@@ -91,28 +91,56 @@ USER root
 ENV OPENCLAW_HOME=/opt/openclaw
 RUN mkdir -p /opt/openclaw && chown -R node:node /opt/openclaw
 
-# Install-mode: when INSTALL_SPEC is non-empty, run openclaw plugins install
-# at build time. --force lets re-builds overwrite without prompting.
-# --pin records exact npm version for reproducibility (no-op for non-npm
-# specs). The dangerously-force-unsafe-install flag bypasses the safety
-# scan; we accept this trade-off because the eval framework only installs
-# specs explicitly listed in build commands by an operator. If you prefer
-# safety scanning, drop the flag and let install fail noisily on flagged
-# plugins.
+# Install plugins via `npm pack` + `tar -x` directly into /opt/openclaw/extensions/<id>/.
+#
+# Why not `openclaw plugins install`: that command resolves OPENCLAW_HOME to
+# $HOME/.openclaw at build time, but $HOME=/workspace/home is a runtime
+# mount point — anything written there during build is shadowed by the
+# host volume on `docker run`. Direct npm pack lands the plugin in image
+# layers that survive the volume mount. The entrypoint adds these dirs
+# to plugins.load.paths so the runtime sees them like any other plugin.
+#
+# Spec format: same as `openclaw plugins install` (npm spec like
+# "@scope/name@version" or "name@version"). We strip an optional "npm:"
+# prefix for compatibility with build.py docs/examples.
 USER node
 RUN if [ -n "${INSTALL_SPEC}" ]; then \
       echo "[Dockerfile.eval] installing plugin: ${INSTALL_SPEC} (id=${INSTALL_PLUGIN_ID})"; \
-      OPENCLAW_HOME=/opt/openclaw openclaw plugins install "${INSTALL_SPEC}" --force --pin --dangerously-force-unsafe-install; \
-      ls -la /opt/openclaw/extensions/ || true; \
+      spec="${INSTALL_SPEC#npm:}"; \
+      mkdir -p "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      cd "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      tarball="$(npm pack "$spec" --silent)"; \
+      tar -xf "$tarball" --strip-components=1; \
+      rm -f "$tarball"; \
+      npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
+      ls -la /opt/openclaw/extensions/; \
     fi
 RUN if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
+      ids="${EXTRA_INSTALL_PLUGIN_IDS}"; \
+      i=0; \
       for spec in ${EXTRA_INSTALL_SPECS}; do \
-        echo "[Dockerfile.eval] installing extra plugin: $spec"; \
-        OPENCLAW_HOME=/opt/openclaw openclaw plugins install "$spec" --force --pin --dangerously-force-unsafe-install; \
+        i=$((i+1)); \
+        pid=$(echo $ids | cut -d ' ' -f $i); \
+        echo "[Dockerfile.eval] installing extra plugin: $spec (id=$pid)"; \
+        spec_clean="${spec#npm:}"; \
+        mkdir -p "/opt/openclaw/extensions/$pid"; \
+        cd "/opt/openclaw/extensions/$pid"; \
+        tarball="$(npm pack "$spec_clean" --silent)"; \
+        tar -xf "$tarball" --strip-components=1; \
+        rm -f "$tarball"; \
+        npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
       done; \
-      ls -la /opt/openclaw/extensions/ || true; \
+      ls -la /opt/openclaw/extensions/; \
     fi
 USER root
+# openclaw discovery rejects plugin dirs owned by non-root, non-process uids
+# (suspicious ownership guard). Container runs under arbitrary host uid via
+# `--user`, so we chown installed plugins to root:root which openclaw treats
+# as trusted regardless of the runtime uid.
+RUN if [ -d /opt/openclaw/extensions ] && [ -n "$(ls -A /opt/openclaw/extensions 2>/dev/null)" ]; then \
+      chown -R root:root /opt/openclaw/extensions && \
+      chmod -R a+rX /opt/openclaw/extensions; \
+    fi
 
 # Memory plugin id is read by entrypoint.sh to render the right plugin
 # entries / slot config into /workspace/openclaw.json. INSTALL_PLUGIN_ID
