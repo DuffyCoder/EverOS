@@ -20,12 +20,12 @@ Why this exists:
     re-running is wasteful. This script reuses the saved AnswerResult
     artifacts and just reruns the judge with retry/backoff.
 
-Reliability tweaks vs the in-pipeline LLMJudge:
-    - Lower default concurrency (4 vs 10) to avoid bursts that trip
-      sophnet's connection limits during tight judge loops.
-    - Bounded retry on APIConnectionError / 429 / 5xx with exponential
-      backoff. The default LLMJudge in the pipeline catches errors and
-      defaults the judgment to False, which silently zeros the run.
+Reliability:
+    As of Stage 2 R-S2-3 hardening (2026-05-05), the in-pipeline LLMJudge
+    has the same retry/concurrency behavior as this script. rejudge.py
+    is now mainly useful for re-evaluating legacy runs whose answers
+    were saved before the hardening, and as a knob for tuning judge
+    behavior without touching the live yaml.
 """
 from __future__ import annotations
 
@@ -112,59 +112,15 @@ def _build_judge_config(dataset_yaml: Path, concurrency: int) -> dict:
     }
 
 
-class _ResilientLLMJudge(LLMJudge):
-    """LLMJudge with lower concurrency + bounded retry."""
-
-    def __init__(self, config: dict, concurrency: int = 4, max_retries: int = 4):
-        super().__init__(config)
-        self._concurrency = concurrency
-        self._max_retries = max_retries
-
-    async def _judge_answer(self, *args, **kwargs):  # type: ignore[override]
-        """Wrap parent _judge_answer with retry on transient errors."""
-        delay = 1.0
-        last_err: Exception | None = None
-        for attempt in range(self._max_retries):
-            try:
-                return await super()._judge_answer(*args, **kwargs)
-            except Exception as e:  # noqa: BLE001 — swallow only transient
-                msg = str(e).lower()
-                transient = (
-                    "connection" in msg
-                    or "timeout" in msg
-                    or "429" in msg
-                    or "5xx" in msg
-                    or "rate" in msg
-                    or "temporarily" in msg
-                )
-                if not transient:
-                    raise
-                last_err = e
-                if attempt == self._max_retries - 1:
-                    break
-                await asyncio.sleep(delay)
-                delay *= 2
-        # Out of retries — re-raise so caller logs and counts as False.
-        assert last_err is not None
-        raise last_err
-
-    async def evaluate(self, answer_results):  # type: ignore[override]
-        # Override parent's hard-coded Semaphore(10) by patching asyncio.Semaphore
-        # for the duration of the call. Cleaner than copy-pasting the parent
-        # method just to change one constant.
-        from asyncio import Semaphore as _OrigSem
-
-        # Patch only the attribute LLMJudge uses (asyncio.Semaphore is captured
-        # in the parent's evaluate() at call time). We monkey-patch the asyncio
-        # module reference to swap concurrency.
-        import asyncio as _asyncio
-
-        original = _asyncio.Semaphore
-        try:
-            _asyncio.Semaphore = lambda _n=self._concurrency: _OrigSem(self._concurrency)  # type: ignore[assignment]
-            return await super().evaluate(answer_results)
-        finally:
-            _asyncio.Semaphore = original
+def _build_resilient_judge(config: dict, concurrency: int, max_retries: int = 4) -> LLMJudge:
+    """Stage 2 R-S2-3: in-pipeline LLMJudge already has retry + concurrency
+    cap. This wrapper just injects per-invocation overrides via the same
+    config mechanism the live pipeline uses.
+    """
+    cfg = dict(config)
+    cfg["judge_concurrency"] = concurrency
+    cfg["judge_max_retries"] = max_retries
+    return LLMJudge(cfg)
 
 
 def _format_report(eval_result, run_name: str, source_run_dir: Path) -> str:
@@ -220,7 +176,7 @@ async def main_async() -> int:
               file=sys.stderr)
         return 1
 
-    judge = _ResilientLLMJudge(cfg, concurrency=args.concurrency)
+    judge = _build_resilient_judge(cfg, concurrency=args.concurrency)
     eval_result = await judge.evaluate(answer_results)
 
     out_path = args.out or (args.run_dir / "eval_results.json")

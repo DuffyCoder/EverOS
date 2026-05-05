@@ -37,6 +37,48 @@ class LLMJudge(BaseEvaluator):
         self.model = llm_config.get("model", "gpt-4o-mini")
         self.num_runs = config.get("num_runs", 3)
 
+        # Stage 2 R-S2-3 hardening: concurrency cap + transient retry.
+        # Old hard-coded Semaphore(10) saturated sophnet during 50Q runs and
+        # the catch-all `return False` masked transient connection errors as
+        # silent wrong-answer judgments (evermemos r2 hit 0% via this path).
+        # Both are now configurable; defaults reflect rejudge.py's empirically
+        # validated values (concurrency=4, max_retries=4).
+        self._concurrency = int(config.get("judge_concurrency", 4))
+        self._max_retries = int(config.get("judge_max_retries", 4))
+
+    def _judge_concurrency(self) -> int:
+        return self._concurrency
+
+    def _judge_max_retries(self) -> int:
+        return self._max_retries
+
+    @staticmethod
+    def _is_transient_error(err: BaseException) -> bool:
+        """Classify whether a judge call error should trigger retry.
+
+        Transient signals (mirror rejudge.py):
+          - APIConnectionError
+          - 5xx HTTP status text
+          - 429 / rate limit
+          - timeout
+          - "temporarily" wording from upstream proxies
+
+        Anything else (auth, JSON parse, etc.) is permanent and returns
+        immediately.
+        """
+        msg = str(err).lower()
+        return (
+            "connection" in msg
+            or "timeout" in msg
+            or "429" in msg
+            or "503" in msg
+            or "502" in msg
+            or "504" in msg
+            or "5xx" in msg
+            or "rate" in msg
+            or "temporarily" in msg
+        )
+
     async def evaluate(self, answer_results: List[AnswerResult]) -> EvaluationResult:
         """
         Evaluate answers using LLM, return statistics from multiple runs.
@@ -53,8 +95,10 @@ class LLMJudge(BaseEvaluator):
 
         detailed_results = []
 
-        # Evaluate all answers concurrently
-        semaphore = asyncio.Semaphore(10)  # Limit concurrency
+        # Evaluate all answers concurrently. Cap is configurable
+        # (default 4; was hard-coded 10 which saturated sophnet — see
+        # Stage 2 R-S2-3 / rejudge.py).
+        semaphore = asyncio.Semaphore(self._judge_concurrency())
 
         # Use tqdm progress bar
         pbar = tqdm(total=len(answer_results), desc="⚖️  Evaluate Progress", unit="qa")
@@ -227,8 +271,17 @@ class LLMJudge(BaseEvaluator):
         """
         Use LLM to judge if answer is correct.
 
+        Bounded retry on transient upstream errors (connection / 5xx / 429
+        / timeout / rate-limit phrasing). Permanent errors (JSON parse,
+        empty content, missing label) return False immediately so we don't
+        re-burn LLM tokens on cases the upstream already gave up on.
+
+        After max_retries on transient errors, the failure is logged and
+        False is returned — *but* the log is loud (Stage 2 R-S2-3) so
+        callers/operators can tell "judge crashed" apart from "judged wrong".
+
         Returns:
-            True if correct, False if wrong
+            True if correct, False if wrong/error
         """
         # Use configured prompts
         system_prompt = get_prompt("llm_judge", "system_prompt")
@@ -240,31 +293,51 @@ class LLMJudge(BaseEvaluator):
             generated_answer=generated_answer,
         )
 
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0,
-            )
+        max_retries = self._judge_max_retries()
+        delay = 1.0
+        last_transient: Exception | None = None
 
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0,
+                )
+            except Exception as e:  # noqa: BLE001 — classify before re-raising
+                if not self._is_transient_error(e):
+                    print(f"  ⚠️ LLM Judge failed (permanent): {type(e).__name__}: {e}")
+                    return False
+                last_transient = e
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                continue
+
+            # Successful API call — parse content; parse failures are
+            # permanent (no retry, original behavior).
             content = response.choices[0].message.content
 
-            # Debug: check if content is empty or None
             if not content:
                 print(f"  ⚠️ LLM Judge: Empty response from model {self.model}")
                 return False
 
-            # Extract JSON from response (handle models that add explanation text)
             json_str = self._extract_json(content)
             if not json_str:
                 print(f"  ⚠️ LLM Judge: No JSON found in response")
                 print(f"     Raw response: {content[:200]}...")
                 return False
 
-            result = json.loads(json_str)
+            try:
+                result = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                print(f"  ⚠️ LLM Judge JSON parse failed: {e}")
+                print(f"     Raw response: {content[:200] if content else 'None'}...")
+                return False
+
             label = result.get("label", "")
             if not label:
                 print(f"  ⚠️ LLM Judge: No label found in response")
@@ -273,13 +346,13 @@ class LLMJudge(BaseEvaluator):
 
             return label.strip().upper() == "CORRECT"
 
-        except json.JSONDecodeError as e:
-            print(f"  ⚠️ LLM Judge JSON parse failed: {e}")
-            print(f"     Raw response: {content[:200] if content else 'None'}...")
-            return False
-        except Exception as e:
-            print(f"  ⚠️ LLM Judge failed: {type(e).__name__}: {e}")
-            return False
+        # Out of retries on transient errors — log loudly (Stage 2 R-S2-3
+        # silent-False bug guard) and return False.
+        print(
+            f"  ⚠️ LLM Judge transient error exhausted retries "
+            f"({max_retries}): {type(last_transient).__name__}: {last_transient}"
+        )
+        return False
 
     def _extract_json(self, content: str) -> str:
         """
