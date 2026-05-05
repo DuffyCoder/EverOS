@@ -482,6 +482,9 @@ class OpenClawAdapter(BaseAdapter):
 
         # Persist trace event so downstream metrics/diagnostics can
         # observe agent behavior without a parallel trace channel.
+        # R-S3-4: forced_terminate flags whether the bridge SIGKILLed the
+        # subprocess group (hypermem/context-engine indexer keepalive).
+        # Latency stats include the bridge's grace period when this is true.
         self._append_events(sandbox, [{
             "event": "agent_run_complete",
             "conversation_id": conv_id, "question_id": qid,
@@ -491,6 +494,7 @@ class OpenClawAdapter(BaseAdapter):
             "tool_names": resp.get("tool_names"),
             "system_prompt_chars": resp.get("system_prompt_chars"),
             "reply_len": len(resp.get("reply", "")),
+            "forced_terminate": bool(resp.get("forced_terminate", False)),
         }])
         return (resp.get("reply") or "").strip()
 
