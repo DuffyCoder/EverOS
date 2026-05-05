@@ -64,11 +64,11 @@ sleep 1  # let entrypoint render config
 
 # Confirm Phase 1 jq render landed slots.contextEngine in the rendered config.
 # This is criterion 4a (slot resolution check, before bridge dispatch).
-RENDERED_SLOT=$(docker exec "$CONTAINER" jq -r '.plugins.slots.contextEngine // ""' /workspace/openclaw.json 2>/dev/null || true)
+RENDERED_SLOT=$(docker exec "$CONTAINER" jq -r '.plugins.slots.contextEngine // ""' /workspace/openclaw.docker.json 2>/dev/null || true)
 if [ "$RENDERED_SLOT" != "stub-engine" ]; then
   echo "[gate] FAIL 4a — rendered config slots.contextEngine='$RENDERED_SLOT' (expected 'stub-engine')"
   echo "[gate] dumping config..."
-  docker exec "$CONTAINER" cat /workspace/openclaw.json || true
+  docker exec "$CONTAINER" cat /workspace/openclaw.docker.json || true
   exit 1
 fi
 echo "[gate] PASS 4a — slots.contextEngine=stub-engine in rendered config"
@@ -79,7 +79,7 @@ PAYLOAD=$(cat <<EOF
   "command": "agent_run",
   "repo_path": "/app",
   "workspace_dir": "/workspace",
-  "config_path": "/workspace/openclaw.json",
+  "config_path": "/workspace/openclaw.docker.json",
   "state_dir": "/workspace/state",
   "home_dir": "/workspace/home",
   "session_id": "stub-engine-gate-001",
@@ -137,6 +137,6 @@ else
   echo "[gate] FAIL 4c — reply does NOT contain '$SENTINEL'"
   echo "[gate] full response:"
   echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
-  echo "[gate] hint: check docker exec $CONTAINER cat $WORKSPACE/openclaw.json | jq .plugins"
+  echo "[gate] hint: check docker exec $CONTAINER cat $WORKSPACE/openclaw.docker.json | jq .plugins"
   exit 1
 fi
