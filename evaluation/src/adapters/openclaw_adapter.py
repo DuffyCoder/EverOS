@@ -160,6 +160,25 @@ class OpenClawAdapter(BaseAdapter):
                 # concurrent first-runs race on the same workspace.
                 if answer_mode == "agent_local":
                     await self._prebootstrap_workspace(sandbox)
+
+                # Stage 3 Phase 5 R2 routing: when context_engine_mode is
+                # set AND yaml opts in via context_engine_ingest_mode!=none,
+                # replay conv messages through agent_run so the engine's
+                # afterTurn ingests them. Replies are discarded — engine
+                # session state is what QA relies on.
+                #
+                # Cost reality (LoCoMo): ~380 msgs/conv × ~80s each =
+                # ~8.5 hours per conv at sequential rate. The "none"
+                # default gives a wiring/prototype scorecard with empty
+                # session state (engine assemble injects only system prompt
+                # addition, no recall); "all" mode is operator-driven for
+                # true scoring runs.
+                ce_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
+                ingest_mode = (
+                    self._openclaw_cfg.get("context_engine_ingest_mode") or "none"
+                ).strip()
+                if ce_mode and answer_mode == "agent_local" and ingest_mode != "none":
+                    await self._replay_conv_for_context_engine(sandbox, conv)
             except Exception as err:
                 sandbox["run_status"] = "failed"
                 self._write_handle(sandbox, add_summary={"error": str(err)})
@@ -758,6 +777,20 @@ class OpenClawAdapter(BaseAdapter):
             (Path(handle["metrics_dir"]) / "add_summary.json").write_text(
                 json.dumps(add_summary, ensure_ascii=False, indent=2)
             )
+
+    async def _replay_conv_for_context_engine(
+        self, sandbox: dict, conv: Conversation
+    ) -> None:
+        """Replay each conv message through agent_run to seed the
+        context-engine plugin's session state (R2 routing).
+
+        Default impl is a no-op (host adapter bypasses docker bridge);
+        the docker adapter overrides this to drive the in-container bridge.
+        Subclasses that don't run agent_run can keep this no-op without harm
+        — the eval pipeline degrades to "context-engine sees empty history".
+        """
+        del sandbox, conv  # unused in base
+        return
 
     async def _ingest_conversation(self, sandbox: dict, conv: Conversation) -> None:
         """Render each session as markdown and ask OpenClaw to build its FTS/vector index.

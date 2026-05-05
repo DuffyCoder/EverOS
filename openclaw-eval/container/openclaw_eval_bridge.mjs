@@ -12,69 +12,17 @@
 // callers. Smoke validation against the native path is documented in
 // docs/plans/2026-04-13-openclaw-benchmark-a.md Task 8 Step 4.
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-// --------------------------------------------------------------------
-// Form B sidecar routing (mem0/evermemos/zep): when the container ships
-// /sidecar/server.py, the bridge bypasses memory-core's CLI for index/
-// status because memory-core's plugin entry is disabled in those modes
-// and `openclaw memory ...` would fail with "plugin not found". Instead
-// we POST to the sidecar's HTTP API directly.
-// --------------------------------------------------------------------
-const SIDECAR_SCRIPT = "/sidecar/server.py";
-const SIDECAR_BASE_URL = process.env.MEM0_SIDECAR_URL || "http://127.0.0.1:8765";
-const SIDECAR_TIMEOUT_MS = Number(process.env.MEM0_SIDECAR_TIMEOUT_MS || 90000);
-// Long calls: /sync (mem0 cold init ~60s + N×add for N session files).
-// Default sized for full LoCoMo conv (10–20 sessions × messages worth of
-// text → up to ~5–10min including embedding throughput on CPU MiniLM).
-const SIDECAR_INDEX_TIMEOUT_MS = Number(process.env.MEM0_INDEX_TIMEOUT_MS || 900000);
-
-function hasSidecar() {
-  return existsSync(SIDECAR_SCRIPT);
-}
-
-async function sidecarRequest(method, urlPath, body, timeoutMs = SIDECAR_TIMEOUT_MS) {
-  const url = SIDECAR_BASE_URL + (urlPath.startsWith("/") ? urlPath : `/${urlPath}`);
-  const init = {
-    method,
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeoutMs),
-  };
-  const res = await fetch(url, init);
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`sidecar ${method} ${urlPath} returned ${res.status}: ${text.slice(0, 256)}`);
-  }
-  return text ? JSON.parse(text) : {};
-}
-
-async function waitForSidecarReady(maxWaitMs = 60000) {
-  // /healthz responds fast (no mem0 init). When the bridge is invoked
-  // immediately after container start, uvicorn may not yet be bound to
-  // the port. Poll healthz until it answers OR maxWaitMs elapses.
-  const deadline = Date.now() + maxWaitMs;
-  let lastError = "not yet polled";
-  while (Date.now() < deadline) {
-    try {
-      const res = await sidecarRequest("GET", "/healthz", undefined, 2000);
-      if (res?.ok === true) return;
-    } catch (err) {
-      lastError = err?.message || String(err);
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(`sidecar /healthz did not respond within ${maxWaitMs}ms: ${lastError}`);
-}
-
 import {
   stripAnsi,
   extractJsonObject,
   extractErrorTail,
+  dispatchEngineImport,
 } from "./openclaw_eval_bridge_lib.mjs";
 
 function respond(obj) {
@@ -127,6 +75,11 @@ function envForSandbox(input) {
   };
   if (input.config_path) env.OPENCLAW_CONFIG_PATH = input.config_path;
   if (input.state_dir) env.OPENCLAW_STATE_DIR = input.state_dir;
+  // Pass through OPENCLAW_HOME so install-mode plugins (Stage 3 Phase 5)
+  // resolve their extension dirs. Bridge's envForSandbox otherwise strips
+  // this env, causing plugin loader to fall back to $HOME/.openclaw which
+  // doesn't exist in the workspace mount.
+  if (process.env.OPENCLAW_HOME) env.OPENCLAW_HOME = process.env.OPENCLAW_HOME;
 
   // v0.7: explicit env whitelist - only listed names are passed through.
   if (Array.isArray(input.agent_llm_env_vars)) {
@@ -148,19 +101,74 @@ function cwdForSandbox(input) {
   return input.cwd_dir || input.workspace_dir || undefined;
 }
 
-function runLauncher(launcher, args, env, cwd) {
+function runLauncher(launcher, args, env, cwd, opts = {}) {
+  // Stage 3 Phase 5: hypercompositor + hypermem (and other context-engine
+  // plugins with background indexer tasks via setInterval) keep the Node
+  // event loop alive after agent --local prints its JSON, so proc.on("close")
+  // never fires within a reasonable bound. Add a hard wall-clock kill after
+  // `hardTimeoutMs` (default 120s) so the bridge always returns within
+  // bounded time. The collected stdout/stderr at kill time is what we
+  // already received during streaming, which is enough for JSON tail
+  // extraction.
+  const hardTimeoutMs = opts.hardTimeoutMs ?? 120_000;
   return new Promise((resolve, reject) => {
+    // detached:true puts the spawned node in its own process group. The
+    // openclaw CLI forks `openclaw-agent` subprocesses; they inherit the
+    // same group. On hard-timeout we send SIGKILL to the whole group via
+    // -pgid so the subagent dies even if the parent already exited (which
+    // is what hypermem's setInterval-keepalive scenario produces). Without
+    // this, the grandchild keeps stderr fd open and proc.on("close") never
+    // fires.
     const proc = spawn("node", [launcher, ...args], {
       env,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
+    // Detached children must be unref'd in case their stdio doesn't close,
+    // so the parent (this bridge) can exit too.
+    proc.unref();
+
     let stdout = "";
     let stderr = "";
+    let resolved = false;
+    let killTimer = null;
+    let waitForCloseTimer = null;
+
+    const killGroup = (signal) => {
+      try {
+        // Negative pid kills the entire process group.
+        process.kill(-proc.pid, signal);
+      } catch (_) {
+        try {
+          proc.kill(signal);
+        } catch (_) {}
+      }
+    };
+
+    const finish = (code, killed) => {
+      if (resolved) return;
+      resolved = true;
+      if (killTimer) clearTimeout(killTimer);
+      if (waitForCloseTimer) clearTimeout(waitForCloseTimer);
+      resolve({ code, stdout, stderr, killed: killed === true });
+    };
+
     proc.stdout.on("data", (b) => (stdout += b.toString()));
     proc.stderr.on("data", (b) => (stderr += b.toString()));
-    proc.on("close", (code) => resolve({ code, stdout, stderr }));
-    proc.on("error", reject);
+    proc.on("close", (code) => finish(code, false));
+    proc.on("error", (err) => {
+      if (!resolved) reject(err);
+    });
+
+    killTimer = setTimeout(() => {
+      killGroup("SIGTERM");
+      waitForCloseTimer = setTimeout(() => {
+        killGroup("SIGKILL");
+        // Last-ditch: resolve even if "close" still doesn't fire (defensive).
+        setTimeout(() => finish(null, true), 1_000);
+      }, 2_000);
+    }, hardTimeoutMs);
   });
 }
 
@@ -183,47 +191,6 @@ function extractJsonTail(stdout) {
   }
 }
 
-async function handleIndexViaSidecar(input) {
-  // Walk <workspace>/memory/*.md and POST the relative paths to the
-  // sidecar's /sync. The sidecar reads each file and pushes it through
-  // the upstream memory SDK (mem0 / evermemos / zep). This replaces the
-  // memory-core CLI ingest path for Form B plugins.
-  const workspaceDir = input.workspace_dir;
-  const memoryDir = path.join(workspaceDir, "memory");
-  let sessionFiles = [];
-  try {
-    sessionFiles = readdirSync(memoryDir)
-      .filter((name) => name.endsWith(".md"))
-      .map((name) => `memory/${name}`)
-      .sort();
-  } catch {
-    // memory dir absent — nothing to ingest, sidecar /sync should still ok
-  }
-  try {
-    await waitForSidecarReady();
-    const data = await sidecarRequest("POST", "/sync", {
-      reason: "eval_index",
-      force: true,
-      session_files: sessionFiles,
-    }, SIDECAR_INDEX_TIMEOUT_MS);
-    return {
-      ok: true,
-      command: "index",
-      flush_epoch: epochSeconds(),
-      index_epoch: epochSeconds(),
-      input_artifacts: sessionFiles,
-      output_artifacts: [],
-      sidecar: { ingested: data?.ingested ?? null },
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      command: "index",
-      error: `sidecar index failed: ${err?.message || err}`,
-    };
-  }
-}
-
 async function handleIndex(input, launcher) {
   if (!launcher) {
     return {
@@ -234,9 +201,6 @@ async function handleIndex(input, launcher) {
       input_artifacts: [],
       output_artifacts: [],
     };
-  }
-  if (hasSidecar()) {
-    return await handleIndexViaSidecar(input);
   }
   const env = envForSandbox(input);
   const cwd = cwdForSandbox(input);
@@ -267,28 +231,6 @@ async function handleFlush(input, launcher) {
   return { ...result, command: "flush" };
 }
 
-async function handleStatusViaSidecar(input) {
-  try {
-    await waitForSidecarReady();
-    const stats = await sidecarRequest("GET", "/stats");
-    return {
-      ok: true,
-      command: "status",
-      settled: stats?.dirty === false,
-      files: Number(stats?.files || 0),
-      chunks: Number(stats?.chunks || 0),
-      backend: stats?.provider || "mem0",
-      active_artifacts: [],
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      command: "status",
-      error: `sidecar status failed: ${err?.message || err}`,
-    };
-  }
-}
-
 async function handleStatus(input, launcher) {
   if (!launcher) {
     return {
@@ -299,9 +241,6 @@ async function handleStatus(input, launcher) {
       index_epoch: 0,
       active_artifacts: [],
     };
-  }
-  if (hasSidecar()) {
-    return await handleStatusViaSidecar(input);
   }
   const env = envForSandbox(input);
   const cwd = cwdForSandbox(input);
@@ -422,28 +361,37 @@ async function handleAgentRun(input, launcher) {
     String(input.timeout_seconds ?? 180),
   ];
 
-  const { code, stdout, stderr } = await runLauncher(launcher, args, env, cwd);
+  // Hard timeout = agent's own --timeout + buffer for hypercompositor-style
+  // background indexers. Without this, `proc.on("close")` never fires and
+  // the bridge appears to hang from the caller's perspective.
+  const hardTimeoutMs = (Number(input.timeout_seconds ?? 180) + 15) * 1000;
+  const { code, stdout, stderr, killed } = await runLauncher(launcher, args, env, cwd, { hardTimeoutMs });
 
   // openclaw agent --local --json puts the JSON on stderr; stdout is empty.
   // Fall back to stdout if stderr is empty (e.g. behavior changes upstream).
   const merged = stripAnsi(stderr || "") || stripAnsi(stdout || "");
 
-  if (code !== 0) {
-    return {
-      ok: false,
-      command: "agent_run",
-      error: extractErrorTail(merged) || `exit ${code}`,
-    };
-  }
-
+  // Try to parse before short-circuiting on non-zero exit. Stage 3 plugins
+  // (hypercompositor + hypermem) keep background indexer timers alive after
+  // stopReason: "stop", forcing runLauncher to SIGTERM/SIGKILL the proc.
+  // The JSON tail is already complete on stderr by then, so accept it as
+  // the canonical response rather than blaming the kill on the agent.
   const parsed = extractJsonObject(merged);
+
   if (!parsed) {
     return {
       ok: false,
       command: "agent_run",
-      error: "no valid JSON object (with payloads+meta) found in stderr",
+      error: extractErrorTail(merged) ||
+        (killed ? "agent killed by hard timeout before JSON arrived" :
+                  `exit ${code}: no JSON object (with payloads+meta) found in stderr`),
     };
   }
+
+  // We have a parsed agent response. Non-zero exit codes from a clean
+  // agent run (i.e. JSON present) are typically from forced termination
+  // due to lingering background timers; surface them via `killed` rather
+  // than failing the whole call.
 
   const reply = parsed.payloads?.[0]?.text ?? "";
   const meta = parsed.meta || {};
@@ -458,6 +406,7 @@ async function handleAgentRun(input, launcher) {
     tool_names: (meta.systemPromptReport?.tools?.entries || []).map((t) => t.name),
     system_prompt_chars: meta.systemPromptReport?.systemPrompt?.chars ?? null,
     last_call_usage: meta.agentMeta?.lastCallUsage ?? null,
+    forced_terminate: killed === true,
   };
 }
 
@@ -550,6 +499,61 @@ async function handleBuildFlushPlan(input, launcher) {
   };
 }
 
+// Stage 3 Phase 3: engine_import_history bridge handler.
+//
+// Stub mode (no launcher): returns a deterministic shape so contract tests
+// can pass without the openclaw runtime. This is also the path used when
+// OPENCLAW_REPO_PATH is unset (e.g. CI without the repo cloned).
+//
+// Native mode (launcher present): production wiring is intentionally
+// deferred. Empirical finding (2026-05-02): openclaw's compiled `dist/` is
+// a flat hashed bundle (e.g. registry-D4L8wbCo.js) and does NOT expose
+// `resolveContextEngine` / `resolveRuntimePluginRegistry` via the public
+// `exports` map (255 exports surveyed; only `loadConfig` is reachable from
+// `dist/index.js`). To run the engine in-process we'd need either:
+//   (a) an upstream patch adding stable `./context-engine` or
+//       `./eval-harness/import-history` exports, or
+//   (b) brittle hash-discovery (glob `dist/registry-*.js` and import the
+//       munged `r` symbol — rebuild-fragile),
+// or (c) ingest by replaying messages through the existing `agent_run`
+// CLI pipeline (each message becomes a turn, engine's afterTurn fires
+// natively — but burns LLM tokens).
+//
+// Path (a) is the right answer; tracked in plan Phase 3 follow-up. Until
+// then, native mode returns ok:false with a clear marker so adapters can
+// branch. The dispatcher unit tests still cover the precedence contract.
+async function handleEngineImportHistory(input, launcher) {
+  const sessionId = String(input.session_id ?? "");
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+
+  if (!launcher) {
+    // Stub path — used by Phase 4 smoke gate where the engine is loaded
+    // by openclaw's normal CLI startup (not via this RPC). Returning
+    // ok:true with method_used=stub keeps the wire shape contract.
+    return {
+      ok: true,
+      command: "engine_import_history",
+      native: false,
+      method_used: "stub",
+      message_count: messages.length,
+      session_id: sessionId,
+    };
+  }
+
+  // Native production path is deferred (see header comment). Surface the
+  // status explicitly so adapters/tests don't silently assume success.
+  return {
+    ok: false,
+    command: "engine_import_history",
+    native: true,
+    method_used: null,
+    error:
+      "engine_import_history native path not yet wired — openclaw " +
+      "dist/ does not expose resolveContextEngine via stable exports. " +
+      "Consider replaying messages via agent_run in the meantime.",
+  };
+}
+
 async function handleGet(input) {
   // OpenClaw has no get command; read the markdown file range directly.
   const locator = input.artifact_locator || {};
@@ -609,6 +613,9 @@ const command = input.command;
         break;
       case "agent_run":
         resp = await handleAgentRun(input, launcher);
+        break;
+      case "engine_import_history":
+        resp = await handleEngineImportHistory(input, launcher);
         break;
       default:
         return fail(`unknown command: ${command}`, command);

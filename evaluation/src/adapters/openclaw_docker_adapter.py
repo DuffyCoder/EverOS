@@ -568,16 +568,24 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         """
         conv_id = sandbox["conversation_id"]
         last_error: Optional[str] = None
+        # Stage 3 Phase 5: context-engine plugins (e.g. hypercompositor)
+        # do heavy first-run init (vector store, indexer warmup) on their
+        # debut agent_run. With concurrent container starts the cumulative
+        # warmup pushes a single bootstrap past the 60s ceiling. Bump to
+        # 120s/180s when context_engine_mode is set.
+        ce_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
+        bootstrap_inner = 120 if ce_mode else 60
+        bootstrap_outer = 180.0 if ce_mode else 90.0
         for attempt in range(3):
             payload = {
                 "command": "agent_run",
                 "session_id": f"{conv_id}__bootstrap",
                 "message": "Reply with: BOOTSTRAP_OK",
-                "timeout_seconds": 60,
+                "timeout_seconds": bootstrap_inner,
             }
             try:
                 resp = await self._arun_bridge_via_docker(
-                    conv_id, payload, timeout=90.0,
+                    conv_id, payload, timeout=bootstrap_outer,
                 )
                 if resp.get("ok"):
                     last_error = None
@@ -612,6 +620,65 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "conversation_id": conv_id,
             "bootstrap_files": expected,
             "via": "docker",
+        }])
+
+    async def _replay_conv_for_context_engine(
+        self, sandbox: dict, conv
+    ) -> None:
+        """Stage 3 Phase 5 R2 routing: feed each conv message through
+        agent_run so the context-engine plugin's afterTurn ingests it.
+
+        - session_id is the conv id (R2 conv-level scoping per design note)
+        - we discard replies; the goal is engine session state, not LLM output
+        - per-message timeout is short (60s inner / 90s outer) since each
+          turn does only one LLM call + ingest
+        - failures of individual messages do NOT abort the conv; we log and
+          continue, so a single LLM hiccup doesn't lose the whole replay
+        """
+        conv_id = sandbox["conversation_id"]
+        messages = conv.messages or []
+        ingested = 0
+        skipped = 0
+        for idx, msg in enumerate(messages):
+            speaker = (msg.speaker_name or "user").strip()
+            content = (msg.content or "").strip()
+            if not content:
+                skipped += 1
+                continue
+            # Frame as user-side dialog turn so the agent's view matches
+            # how the conversation actually arrived. Prefix with speaker
+            # for engines that want a hint at multi-party context.
+            framed = f"[{speaker}] {content}"
+            payload = {
+                "command": "agent_run",
+                "session_id": conv_id,
+                "message": framed,
+                "timeout_seconds": 60,
+            }
+            try:
+                resp = await self._arun_bridge_via_docker(
+                    conv_id, payload, timeout=90.0,
+                )
+                if resp.get("ok"):
+                    ingested += 1
+                else:
+                    skipped += 1
+                    logger.warning(
+                        "context-engine replay msg %d/%d skipped for %s: %s",
+                        idx, len(messages), conv_id, resp.get("error"),
+                    )
+            except Exception as err:
+                skipped += 1
+                logger.warning(
+                    "context-engine replay msg %d/%d errored for %s: %s",
+                    idx, len(messages), conv_id, err,
+                )
+        self._append_events(sandbox, [{
+            "event": "context_engine_replay_complete",
+            "conversation_id": conv_id,
+            "ingested": ingested,
+            "skipped": skipped,
+            "total_messages": len(messages),
         }])
 
     def get_system_info(self) -> dict:
