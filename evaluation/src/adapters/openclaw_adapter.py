@@ -832,9 +832,33 @@ class OpenClawAdapter(BaseAdapter):
           * visibility_mode == 'eventual': we do not wait; visibility_state
             stays at 'indexed' and the caller accepts that search() may
             trigger a background re-sync via memorySearch.sync.onSearch.
+
+        Stage 3 Phase 5 short-circuit: when context_engine_mode is set AND
+        the memory slot is bundled (memory-core/noop), the context-engine
+        plugin (e.g. hypercompositor) intercepts ingest before the memory
+        backend is touched. memory status reports settled=false forever
+        because there's nothing to flush, breaking the eval pipeline at
+        add(). Transition straight to 'settled' since the context-engine
+        owns its own storage settlement contract.
         """
         if sandbox.get("visibility_mode") != "settled":
             sandbox["visibility_state"] = "indexed"
+            return
+
+        context_engine_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        if context_engine_mode and memory_mode in ("memory-core", "noop"):
+            self._append_events(
+                sandbox,
+                [
+                    {
+                        "event": "settle_skipped_context_engine",
+                        "context_engine_mode": context_engine_mode,
+                        "memory_mode": memory_mode,
+                    }
+                ],
+            )
+            sandbox["visibility_state"] = "settled"
             return
 
         status_resp = await self._invoke_bridge(
