@@ -28,6 +28,26 @@ backend service requirements).
 | `metainsight-context-engine` | 0.1.0 | 2026-03-20 | MIT | unknown | unknown | Cloud (Tencent COS) — external service dependency |
 | `@pentatonic-ai/openclaw-memory-plugin` | 0.8.3 | 2026-04-24 | MIT | (memory keywords) | unknown | Self-described as memory plugin, not CE-first |
 
+## 2026-05-05 update — second plugin onboarded
+
+Second context-engine plugin **`@memclaw/memclaw-context-engine` v0.9.61**
+brought up under the same install-spec pipeline (commit pending).
+
+- Plugin loads correctly: openclaw plugins doctor reports "No issues",
+  `Context Engine registered`, `Registered 10 tools`.
+- agent_run smoke completes in 19s, ok=true,
+  `system_prompt_chars=24843` (vs ~150 baseline without context engine),
+  `forced_terminate=false`.
+- Image: `openclaw-eval:7da23c3-install-memclaw-context-engine-bb444b9-slim`
+- yaml: `evaluation/config/systems/openclaw-docker-memclaw.yaml`
+
+This validates Phase 5 wiring generality: the install-spec build path,
+slot rendering, and bridge process-group kill all work for a second
+context-engine plugin without code changes. Memclaw has its own
+configuration file requirement (`config.toml` for cortex-mem backing
+service) for full scoring runs; wiring smoke works with the default
+auto-generated scaffold.
+
 ## Selection rationale: `@psiclawops/hypercompositor`
 
 1. **Explicit `kind: "context-engine"`** in `openclaw.plugin.json` — confirms
