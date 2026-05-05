@@ -1,4 +1,4 @@
-# Stage 3 Phase 5 — first real context-engine plugin (R2-routed prototype).
+# Stage 3 Phase 5 — first real context-engine plugin (R2-routed prototype, docker mode).
 #
 # Plugin: @psiclawops/hypercompositor (Apache-2.0, Stage 3 audit selection
 # 2026-05-02 — see docs/superpowers/specs/2026-05-02-stage3-phase5-plugin-audit.md).
@@ -9,14 +9,15 @@
 #   memory_mode=memory-core             -> slots.memory = memory-core (bundled)
 #   context_engine_mode=hypercompositor -> slots.contextEngine = hypercompositor
 #
-# Image: openclaw-eval:7da23c3-install-hypercompositor-5bace1f-slim
-# Build: build.py --memory-plugin memory-core --install-spec '@psiclawops/hypercompositor@0.9.6'
-#                  --install-plugin-id hypercompositor
+# Image build:
+#   python openclaw-eval/harness/build.py --memory-plugin memory-core \
+#     --install-spec '@psiclawops/hypercompositor@0.9.6' \
+#     --install-plugin-id hypercompositor
 #
 # IMPORTANT: scorecard from this config is "wiring/prototype, NOT
 # comparable" with the Stage 1/2 memory-plugin matrix. R2 routing
 # (conv-level session_id) leaks state across QA per design note caveats.
-adapter: "openclaw"
+adapter: "openclaw-docker"
 
 llm:
   provider: "openai"
@@ -29,11 +30,12 @@ llm:
 search:
   top_k: 6
   response_top_k: 5
-  num_workers: 5
+  num_workers: 2
   max_inflight_queries_per_conversation: 1
 
 answer:
-  max_retries: 3
+  max_retries: 2
+  max_concurrent: 2
 
 openclaw:
   repo_path: "${OPENCLAW_REPO_PATH}"
@@ -42,12 +44,9 @@ openclaw:
   backend_mode: "hybrid"
   flush_mode: "shared_llm"
   answer_mode: "agent_local"
-  # Memory slot keeps the bundled memory-core (hypercompositor brings its
-  # own internal storage via hypermem npm dep). Context-engine slot binds
-  # to the installed hypercompositor plugin.
   memory_mode: "memory-core"
   context_engine_mode: "hypercompositor"
-  agent_timeout_seconds: 180
+  agent_timeout_seconds: 90
   agent_llm:
     provider_id: "sophnet"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
@@ -79,3 +78,11 @@ openclaw:
     memory_mode: "native_compiled"
     flush_mode: "shared_llm"
     answer_mode: "shared"
+
+# Image carries the installed hypercompositor (kind: context-engine).
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-install-hypercompositor-5bace1f-slim"
+  max_concurrent_containers: 2
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 120

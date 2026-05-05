@@ -43,10 +43,11 @@ class TestYamlShape:
         assert cfg["adapter"] == "openclaw"
 
     def test_dual_slot_modes_set(self):
-        """Both memory and context-engine slots must declare a non-empty id;
-        empty/missing context_engine_mode would route to default 'legacy'."""
+        """Memory slot stays on bundled memory-core; context-engine slot
+        binds the installed hypercompositor plugin. hypermem is hypercompositor's
+        internal storage dep, not a standalone openclaw plugin."""
         oc = _load_yaml()["openclaw"]
-        assert oc["memory_mode"] == "hypermem"
+        assert oc["memory_mode"] == "memory-core"
         assert oc["context_engine_mode"] == "hypercompositor"
 
     def test_answer_mode_agent_local(self):
@@ -91,28 +92,28 @@ class TestResolvedConfigIntegration:
             embedding=embedding,
         )
 
-    def test_plugins_allow_includes_both_plugins_plus_memory_core(self):
-        """memory-core stays in allow because it's the bundled fallback."""
+    def test_plugins_allow_includes_memory_core_and_context_engine(self):
+        """memory-core (bundled memory) + hypercompositor (context-engine
+        install). hypermem is a transitive npm dep of hypercompositor, not
+        a standalone openclaw plugin, so it's NOT in plugins.allow."""
         cfg = self._resolved()
         allow = cfg["plugins"]["allow"]
         assert "memory-core" in allow
-        assert "hypermem" in allow
         assert "hypercompositor" in allow
+        assert "hypermem" not in allow
 
     def test_slot_resolution(self):
         cfg = self._resolved()
         slots = cfg["plugins"]["slots"]
-        assert slots["memory"] == "hypermem"
+        assert slots["memory"] == "memory-core"
         assert slots["contextEngine"] == "hypercompositor"
 
     def test_entry_states(self):
-        """Both target plugins enabled; bundled memory-core disabled (we
-        substituted hypermem as the memory slot)."""
+        """Both slots-bound plugins enabled."""
         cfg = self._resolved()
         entries = cfg["plugins"]["entries"]
-        assert entries["hypermem"]["enabled"] is True
+        assert entries["memory-core"]["enabled"] is True
         assert entries["hypercompositor"]["enabled"] is True
-        assert entries["memory-core"]["enabled"] is False
 
     def test_memory_search_enabled(self):
         """memory_mode != 'noop' -> memorySearch.enabled is True."""
