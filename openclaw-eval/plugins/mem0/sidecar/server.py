@@ -266,6 +266,24 @@ def sync(req: SyncRequest):
     user_id = os.getenv("MEM0_DEFAULT_USER_ID", "openclaw")
     workspace_dir = os.getenv("WORKSPACE_DIR", "/workspace")
     base = pathlib.Path(workspace_dir)
+    # Honor force=true: emulate `openclaw memory index --force` by clearing
+    # the per-user store before re-ingesting. Without this, checkpoint
+    # resume / manual re-index appends another copy of every session file
+    # to Chroma and later searches see duplicated memories. mem0 0.1.x
+    # delete_all(user_id=...) iterates get_all → per-memory delete from
+    # vector store + history, so persisted rows are removed.
+    if req.force:
+        try:
+            memory.delete_all(user_id=user_id)
+        except Exception as exc:
+            logger.exception(
+                "mem0.delete_all(user_id=%s) failed under force=true", user_id
+            )
+            return {
+                "ok": False,
+                "ingested": 0,
+                "error": f"force-reset failed: {exc}",
+            }
     for rel in files:
         try:
             abs_path = (base / rel).resolve()

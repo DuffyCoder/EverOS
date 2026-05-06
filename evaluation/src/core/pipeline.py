@@ -4,6 +4,7 @@ Pipeline core module.
 Orchestrates the evaluation workflow across four stages: Add → Search → Answer → Evaluate.
 """
 
+import json
 import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -797,17 +798,18 @@ class Pipeline:
         try:
             for events_file in self.output_dir.rglob("events.jsonl"):
                 try:
-                    raw = events_file.read_text()
+                    fh = events_file.open("r", encoding="utf-8")
                 except OSError:
                     continue
-                for line in raw.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        events_acc.append(json.loads(line))
-                    except (ValueError, TypeError):
-                        continue
+                with fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            events_acc.append(json.loads(line))
+                        except (ValueError, TypeError):
+                            continue
         except OSError:
             pass
         return build_forced_terminate_metrics(events_acc)

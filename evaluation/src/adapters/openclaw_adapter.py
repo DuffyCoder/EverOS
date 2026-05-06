@@ -731,12 +731,14 @@ class OpenClawAdapter(BaseAdapter):
         # ${VAR} templates rebuilt from *_env markers.
         memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
         agent_llm = self._openclaw_cfg.get("agent_llm")
+        context_engine_mode = self._openclaw_cfg.get("context_engine_mode")
         resolved = build_openclaw_resolved_config(
             workspace_dir=paths["workspace_dir"],
             native_store_dir=paths["native_store_dir"],
             backend_mode=backend_mode,
             flush_mode=flush_mode,
             memory_mode=memory_mode,
+            context_engine_mode=context_engine_mode,
             agent_llm=agent_llm,
             embedding=self._openclaw_cfg.get("embedding"),
         )
