@@ -24,7 +24,7 @@ _ADAPTER_MODULES = {
     "supermemory": "evaluation.src.adapters.supermemory_adapter",
 
     # OpenClaw memory system (via Node bridge)
-    "openclaw": "evaluation.src.adapters.openclaw_adapter",
+    "openclaw": "evaluation.src.adapters.openclaw.adapter",
 
     # Stage 1 dockerized openclaw (Path B per-conv containers)
     "openclaw-docker": "evaluation.src.adapters.openclaw_docker_adapter",

@@ -71,14 +71,22 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int | None = None,
         extra_body: dict | None = None,
         response_format: dict | None = None,
+        system_prompt: str | None = None,
     ) -> str:
         """
         Generate a response for the given prompt.
 
         Args:
-            prompt: Input prompt
+            prompt: Input prompt (sent as ``user`` role).
             temperature: Override temperature for this request
             max_tokens: Override max tokens for this request
+            system_prompt: When non-empty, prepended as a separate
+                ``system`` role message. Callers that need the LLM to
+                treat instruction text as a system instruction rather
+                than body content must use this kwarg — concatenating
+                system + user text into ``prompt`` collapses both into
+                one user turn and relies on the model to infer roles
+                from position, which is not stable across deployments.
 
         Returns:
             Generated response text
@@ -95,14 +103,21 @@ class OpenAIProvider(LLMProvider):
             openrouter_provider = {"order": provider_list, "allow_fallbacks": False}
         else:
             openrouter_provider = None
-        # Prepare request data
+        messages: list[dict] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        # Prepare request data. Skip fields that are None so strict
+        # OpenAI-compatible gateways (e.g. Sophnet) don't reject the payload.
         data = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": temperature if temperature is not None else self.temperature,
-            "provider": openrouter_provider,
-            "response_format": response_format,
         }
+        if openrouter_provider is not None:
+            data["provider"] = openrouter_provider
+        if response_format is not None:
+            data["response_format"] = response_format
         # print(data)
         # print(data["extra_body"])
         # Add max_tokens if specified
@@ -128,8 +143,10 @@ class OpenAIProvider(LLMProvider):
                         async for chunk in response.content.iter_any():
                             chunks.append(chunk)
                         test = b"".join(chunks).decode()
-                        response_data = json.loads(test)
-                        # print(response_data)
+                        try:
+                            response_data = json.loads(test)
+                        except json.JSONDecodeError:
+                            response_data = {}
                         # Handle error responses
                         if response.status != 200:
                             error_msg = response_data.get('error', {}).get(
@@ -139,6 +156,7 @@ class OpenAIProvider(LLMProvider):
                                 f"❌ [OpenAI-{self.model}] HTTP error {response.status}:"
                             )
                             logger.error(f"   💬 Error message: {error_msg}")
+                            logger.error(f"   📦 Raw body (first 1000 chars): {test[:1000]}")
                             # Debug: 429 Too Many Requests breakpoint debugging
                             if response.status == 429:
                                 logger.warning(

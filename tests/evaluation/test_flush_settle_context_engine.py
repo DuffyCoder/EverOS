@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 
 
 def _adapter(openclaw_cfg: dict) -> OpenClawAdapter:

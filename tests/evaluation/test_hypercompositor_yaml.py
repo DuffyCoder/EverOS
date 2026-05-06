@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from evaluation.src.adapters.openclaw_resolved_config import (
+from evaluation.src.adapters.openclaw.resolved_config import (
     build_openclaw_resolved_config,
 )
 

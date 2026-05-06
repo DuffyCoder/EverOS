@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 from evaluation.src.core.data_models import Conversation
 
 

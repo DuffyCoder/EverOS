@@ -33,8 +33,8 @@ import time
 from pathlib import Path
 from typing import Any, List, Optional
 
-from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
-from evaluation.src.adapters.openclaw_runtime import (
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.runtime import (
     BridgeError,
     BridgeTimeout,
 )

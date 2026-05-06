@@ -4,7 +4,7 @@
 //   * the real OpenClaw CLI at $OPENCLAW_REPO_PATH/openclaw.mjs (when the
 //     env var points at a valid repo), or
 //   * built-in stub handlers that still honor the BridgeResponse shape
-//     defined in openclaw_types.py.
+//     defined in evaluation/src/adapters/openclaw/types.py.
 //
 // The stub path is always safe to use in CI - contract tests lock the
 // response shape - and the native path keeps the wire protocol identical

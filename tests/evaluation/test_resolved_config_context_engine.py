@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluation.src.adapters.openclaw_resolved_config import (
+from evaluation.src.adapters.openclaw.resolved_config import (
     _build_plugins_section,
     build_openclaw_resolved_config,
 )

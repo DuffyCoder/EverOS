@@ -2,7 +2,7 @@
 Session-bucketed markdown rendering + LLM-driven flush for OpenClaw.
 
 This is the "faithful" ingest path - closer to what OpenClaw actually does
-at runtime than the raw-transcript dump in bench/openclaw_adapter.py.
+at runtime than the raw-transcript dump in the v0.1/v0.2 bench adapter.
 
 Two modes controlled by config["openclaw"]["flush_mode"]:
 
@@ -32,7 +32,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-from evaluation.src.adapters.openclaw_manifest import project_message_id_to_session_id
+from evaluation.src.adapters.openclaw.manifest import project_message_id_to_session_id
 from evaluation.src.core.data_models import Conversation, Message
 
 
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Fallback prompts used only when a native OpenClaw flush plan is not
 # available (stub mode / bridge unreachable). In the happy path the plan
 # is fetched via ``build_flush_plan`` from OpenClaw's own memory-core and
-# passed in as ``flush_plan`` - see openclaw_adapter._ingest_conversation.
+# passed in as ``flush_plan`` - see adapter._ingest_conversation.
 _FALLBACK_FLUSH_SYSTEM_PROMPT = (
     "You are OpenClaw's memory compaction agent. Distill the SESSION TRANSCRIPT "
     "into retention-worthy memories before the conversation context is compacted.\n"

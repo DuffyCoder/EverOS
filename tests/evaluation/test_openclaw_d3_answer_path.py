@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from evaluation.src.adapters.openclaw_adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 from evaluation.src.core.data_models import Conversation, SearchResult
 
 
@@ -185,7 +185,7 @@ def test_search_uses_real_path_in_shared_llm(monkeypatch):
     adapter = _build_adapter(answer_mode="shared_llm")
     bridge_mock = AsyncMock(return_value={"ok": True, "hits": []})
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
 
     sandbox = _make_sandbox("conv-S")
@@ -214,7 +214,7 @@ def test_answer_agent_local_calls_agent_path(monkeypatch):
         "tool_names": [], "system_prompt_chars": 0, "last_call_usage": None,
     })
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
     monkeypatch.setattr(adapter, "_append_events", MagicMock())
 
@@ -254,7 +254,7 @@ def test_answer_agent_local_treats_stop_reason_error_as_failure(monkeypatch):
         "tool_names": [], "system_prompt_chars": 0, "last_call_usage": None,
     })
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
     events = []
     monkeypatch.setattr(adapter, "_append_events",
@@ -300,10 +300,10 @@ def test_prebootstrap_raises_after_3_failed_attempts(monkeypatch, tmp_path):
 
     bridge_mock = AsyncMock(return_value={"ok": False, "error": "boom"})
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.asyncio.sleep",
+        "evaluation.src.adapters.openclaw.adapter.asyncio.sleep",
         AsyncMock(),  # don't actually sleep in test
     )
 
@@ -324,7 +324,7 @@ def test_prebootstrap_raises_on_missing_workspace_files(monkeypatch, tmp_path):
 
     bridge_mock = AsyncMock(return_value={"ok": True, "reply": "OK", "raw": {}})
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
 
     import asyncio
@@ -343,7 +343,7 @@ def test_prebootstrap_succeeds_when_files_exist(monkeypatch, tmp_path):
 
     bridge_mock = AsyncMock(return_value={"ok": True, "reply": "BOOTSTRAP_OK", "raw": {}})
     monkeypatch.setattr(
-        "evaluation.src.adapters.openclaw_adapter.arun_bridge", bridge_mock
+        "evaluation.src.adapters.openclaw.adapter.arun_bridge", bridge_mock
     )
     monkeypatch.setattr(adapter, "_append_events", MagicMock())
 
