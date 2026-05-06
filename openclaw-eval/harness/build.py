@@ -120,6 +120,74 @@ def run_step(label: str, cmd: list[str], cwd: Optional[Path] = None) -> None:
         sys.exit(res.returncode)
 
 
+# Eval-layer minimal-prune contract. The upstream openclaw runtime image
+# bundles 101 unused extension dist outputs (~210M), 53 skills, 14M of docs,
+# and 6 large node_modules packages tied to extensions we never enable.
+# Dockerfile.eval prunes them in a single RUN layer so the eval image stays
+# under ~700M instead of ~1.5G. See discussion in the 2026-05-06 session.
+
+# Packages whose only known consumers are extensions we explicitly do not
+# enable (memory-lancedb, nano-pdf-style PDF tools, tlon channel, feishu,
+# diagnostics-otel, and node-llama-cpp's local LLM provider — memory-core
+# treats node-llama-cpp as ERR_MODULE_NOT_FOUND-tolerant optional). Never
+# add koffi / @napi-rs / rolldown / oxlint / typescript here without an
+# explicit smoke gate — they're hoisted across many transitive deps.
+PRUNE_NODE_MODULES_PACKAGES: tuple[str, ...] = (
+    "@lancedb",
+    "pdfjs-dist",
+    "@tloncorp",
+    "node-llama-cpp",
+    "@node-llama-cpp",
+    "@larksuiteoapi",
+    "@opentelemetry",
+)
+
+# Bundled plugins openclaw's bootstrap path imports unconditionally as
+# "public surfaces" (e.g. speech-core/runtime-api.js, llm-task/runtime-api.js).
+# Removing these breaks `agent --local` workspace prebootstrap with
+# "Unable to resolve bundled plugin public surface <id>/runtime-api.js"
+# even when plugins.allow doesn't list them. Discovered empirically while
+# pruning the hypercompositor image (2026-05-06).
+#
+# These are kept on top of whatever the caller explicitly asks for. They
+# are tiny (~140KB total compiled) so the overhead is negligible.
+BOOTSTRAP_KEEP_EXTENSIONS: tuple[str, ...] = (
+    "speech-core",
+    "image-generation-core",
+    "video-generation-core",
+    "media-understanding-core",
+    "llm-task",
+)
+
+
+def compute_keep_extensions(
+    memory_plugin: str,
+    install_plugin_id: Optional[str],
+    extra_install_plugin_ids: Optional[list[str]],
+) -> list[str]:
+    """Return the sorted-unique extension whitelist for KEEP_EXTENSIONS.
+
+    memory-core is always kept — even in noop mode the entrypoint binds
+    plugins.slots.memory to "memory-core" (memorySearch is just disabled
+    via the agents.defaults flag), so the extension dir must remain
+    loadable. Other slots (memory_plugin when external, primary install
+    id, paired context-engine ids) are added on top.
+
+    Sorting + dedup makes the docker --build-arg value stable so layer
+    caching isn't perturbed by argument order.
+    """
+    keep: set[str] = {"memory-core"}
+    keep.update(BOOTSTRAP_KEEP_EXTENSIONS)
+    if memory_plugin and memory_plugin not in ("memory-core", "noop"):
+        keep.add(memory_plugin)
+    if install_plugin_id:
+        keep.add(install_plugin_id)
+    for pid in extra_install_plugin_ids or []:
+        if pid:
+            keep.add(pid)
+    return sorted(keep)
+
+
 def stage_external_plugin(
     plugins_dir: Path,
     plugin_name: str,
@@ -231,6 +299,7 @@ def build_eval_layer(
     install_spec: Optional[str] = None,
     install_plugin_id: Optional[str] = None,
     extra_install_specs: Optional[list[tuple[str, str]]] = None,
+    minimal_prune: bool = True,
 ) -> str:
     """Step 2: layer eval-runtime on top of openclaw-base.
 
@@ -276,6 +345,14 @@ def build_eval_layer(
                 "--build-arg", f"EXTRA_INSTALL_SPECS={specs_str}",
                 "--build-arg", f"EXTRA_INSTALL_PLUGIN_IDS={ids_str}",
             ]
+    if minimal_prune:
+        extra_ids = [pid for _spec, pid in (extra_install_specs or [])]
+        keep = compute_keep_extensions(memory_plugin, install_plugin_id, extra_ids)
+        cmd += [
+            "--build-arg", f"KEEP_EXTENSIONS={' '.join(keep)}",
+            "--build-arg",
+            f"PRUNE_NODE_MODULES_PACKAGES={' '.join(PRUNE_NODE_MODULES_PACKAGES)}",
+        ]
     cmd += ["-t", tag, str(eval_dir)]
     run_step(f"Step 2: openclaw-eval ({memory_plugin})", cmd)
     return tag
@@ -334,6 +411,15 @@ def main():
     )
     parser.add_argument("--manifest-out",
                         help="optional path to write build-manifest JSON")
+    parser.add_argument(
+        "--no-minimal-prune",
+        action="store_true",
+        help=(
+            "Disable the minimal-prune layer (KEEP_EXTENSIONS + node_modules "
+            "package removal). Use only for debugging upstream behavior — "
+            "normal eval images strip ~830M of unused content by default."
+        ),
+    )
     args = parser.parse_args()
 
     # Validate install-spec mode early.
@@ -472,6 +558,7 @@ def main():
         install_spec=args.install_spec,
         install_plugin_id=args.install_plugin_id,
         extra_install_specs=args._extra_pairs or None,
+        minimal_prune=not args.no_minimal_prune,
     )
 
     print()
