@@ -1,0 +1,9 @@
+{
+  "id": "stub-engine",
+  "kind": "context-engine",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -1,0 +1,71 @@
+# Stage 1 Week 2 Day 0: stub plugin gate.
+#
+# This config swaps memory_mode to "stub" so the openclaw-docker adapter
+# loads our hardcoded passphrase plugin instead of memory-core. Used by
+# the passphrase gate test:
+#
+#     "Tell me the secret passphrase from memory" → reply contains "WOMBAT_42"
+#
+# PASS = plugin discovery, registration, and tool routing all work end-to-end
+#        on the dockerized openclaw stack. No retrieval/embedding involved.
+# FAIL = plugin chain broken; mem0 work blocked until fixed.
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 1
+  response_top_k: 1
+  num_workers: 1
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 1
+  max_concurrent: 1
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "fts_only"   # stub doesn't use embeddings
+  flush_mode: "shared_llm"
+  answer_mode: "agent_local"
+  memory_mode: "stub"
+  agent_timeout_seconds: 60
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "shared_llm"
+    answer_mode: "shared"
+
+# Stub gate uses its own image tagged with stub plugin rev.
+# Image is built by:
+#     python openclaw-eval/harness/build.py --memory-plugin stub
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"
+  max_concurrent_containers: 1
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 60

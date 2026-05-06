@@ -108,24 +108,55 @@ def evaluate_retrieval_metrics(qa_pairs, search_results, k: int = 5) -> dict:
     able to silently misalign metrics - that class of bug is now caught:
     missing ids raise, extra ids are logged, and a length mismatch is
     reported before aggregation.
+
+    v0.7: ``retrieval_metadata.skipped == True`` samples are suppressed
+    from aggregation rather than scored as zero. Used by Path B
+    ``answer_mode=agent_local`` where the agent owns retrieval inside
+    its own loop and adapter.search() returns a placeholder. Reporting
+    these as "0.0 recall" would falsely indicate retrieval failure.
     """
     from evaluation.src.metrics.pairing import pair_by_question_id
 
     search_by_id, missing_meta = pair_by_question_id(qa_pairs, search_results)
 
     per_question = []
+    skipped_ids: list[str] = []
     unresolved: list[str] = []
     for qa in qa_pairs:
         sr = search_by_id.get(qa.question_id)
         if sr is None:
             unresolved.append(qa.question_id)
             continue
+        # v0.7: skipped samples are suppressed (not aggregated as 0)
+        meta = getattr(sr, "retrieval_metadata", None) or {}
+        if meta.get("skipped"):
+            skipped_ids.append(qa.question_id)
+            continue
         try:
             per_question.append(evaluate_retrieval_for_question(qa, sr, k=k))
         except ValueError:
             unresolved.append(qa.question_id)
 
-    n = len(per_question) or 1
+    if not per_question:
+        # v0.7: All queries skipped or unresolved -> N/A rather than 0.0
+        return {
+            "k": k,
+            "status": "not_applicable",
+            "reason": (
+                "all_queries_skipped"
+                if skipped_ids and not unresolved
+                else "no_resolvable_queries"
+            ),
+            "per_question": [],
+            "n_scored": 0,
+            "n_skipped": len(skipped_ids),
+            "n_unresolved": len(unresolved),
+            "skipped_question_ids": skipped_ids,
+            "unresolved_question_ids": unresolved,
+            "search_results_missing_question_id": missing_meta,
+        }
+
+    n = len(per_question)
     return {
         "k": k,
         "per_question": per_question,
@@ -133,6 +164,10 @@ def evaluate_retrieval_metrics(qa_pairs, search_results, k: int = 5) -> dict:
         "evidence_recall_at_k_mean": sum(p["evidence_recall_at_k"] for p in per_question) / n,
         "mrr_mean": sum(p["mrr"] for p in per_question) / n,
         "ndcg_at_k_mean": sum(p["ndcg_at_k"] for p in per_question) / n,
+        "n_scored": n,
+        "n_skipped": len(skipped_ids),
+        "n_unresolved": len(unresolved),
+        "skipped_question_ids": skipped_ids,
         "unresolved_question_ids": unresolved,
         "search_results_missing_question_id": missing_meta,
     }

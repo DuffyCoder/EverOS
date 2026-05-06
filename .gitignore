@@ -110,6 +110,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Editor / operator backup files
+*.bak
+
 # Spyder project settings
 .spyderproject
 .spyderworkspace
@@ -170,6 +173,12 @@ memory_base/static_memory_base/raw_data/*.json
 evaluation/memory_evaluation/converted_messages_all_from_1_1.jsonl
 evaluation/memory_evaluation/*.jsonl
 evaluation/memory_evaluation/*.json
+
+# LongMemEval datasets — operator-fetched, > 100MB per file. Locomo's
+# small bundled dataset stays tracked at evaluation/data/locomo/locomo10.json.
+evaluation/data/longmemeval/*.json
+evaluation/data/longmemeval/*.jsonl
+!evaluation/data/longmemeval/.gitkeep
 
 # Large log files
 *.log

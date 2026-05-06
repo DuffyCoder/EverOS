@@ -1,0 +1,43 @@
+{
+  "id": "evermemos",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiUrl": {
+        "type": "string",
+        "description": "Base URL of the EverMemOS HTTP API. Inside the openclaw container this is usually http://host.docker.internal:1995 (host.docker.internal resolves to the host machine when the container is run with --add-host=host.docker.internal:host-gateway)."
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Optional bearer token. Local deployments leave empty."
+      },
+      "apiTimeoutMs": {
+        "type": "integer",
+        "minimum": 100,
+        "default": 30000
+      },
+      "syncMode": {
+        "type": "boolean",
+        "default": true,
+        "description": "Send sync_mode=true on POST /api/v1/memories so the server waits for boundary detection before returning."
+      },
+      "retrieveMethod": {
+        "type": "string",
+        "default": "keyword",
+        "description": "Retrieval method passed to /api/v1/memories/search (e.g. keyword | hybrid | vector)."
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["personal", "group"],
+        "default": "group"
+      },
+      "memoryTypes": {
+        "type": "array",
+        "items": {"type": "string"},
+        "default": []
+      }
+    }
+  }
+}
