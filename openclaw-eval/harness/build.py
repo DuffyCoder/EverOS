@@ -34,6 +34,22 @@ def short_sha(path: Path, ref: str = "HEAD") -> str:
     return res.stdout.strip()
 
 
+def _hash_files_to_rev(named_files: list[tuple[str, Path]]) -> str:
+    """Hash a list of (logical_name, file_path) into a 7-char rev.
+
+    Missing files are skipped silently so eval_base_rev() returns a stable
+    rev even on partially-empty trees. Used by both content-derived plugin
+    revs and framework-derived eval-base revs.
+    """
+    h = hashlib.sha256()
+    for name, path in named_files:
+        if not path.is_file():
+            continue
+        h.update(name.encode())
+        h.update(path.read_bytes())
+    return h.hexdigest()[:7]
+
+
 def plugin_content_hash(plugin_dir: Path) -> str:
     """Hash of plugin source files for tag reproducibility.
 
@@ -45,17 +61,16 @@ def plugin_content_hash(plugin_dir: Path) -> str:
     """
     if not plugin_dir.exists():
         return "0000000"
-    h = hashlib.sha256()
     skip_names = {"node_modules", "dist"}
+    named: list[tuple[str, Path]] = []
     for p in sorted(plugin_dir.rglob("*")):
         if not p.is_file():
             continue
         rel_parts = p.relative_to(plugin_dir).parts
         if any(part.startswith(".") or part in skip_names for part in rel_parts):
             continue
-        h.update("/".join(rel_parts).encode())
-        h.update(p.read_bytes())
-    return h.hexdigest()[:7]
+        named.append(("/".join(rel_parts), p))
+    return _hash_files_to_rev(named)
 
 
 def docker_image_exists(tag: str) -> bool:
@@ -64,6 +79,28 @@ def docker_image_exists(tag: str) -> bool:
         capture_output=True,
     )
     return res.returncode == 0
+
+
+def eval_layer_tag(
+    *,
+    openclaw_sha: str,
+    memory_plugin: str,
+    plugin_rev: str,
+    variant: str,
+    install_plugin_id: Optional[str] = None,
+    extra_count: int = 0,
+) -> str:
+    """Compose the openclaw-eval image tag. Single source of truth so the
+    legacy full-build and split-build paths can't drift apart.
+
+    Tag shape:
+      install-mode: openclaw-eval:<sha>-install-<id>[-x<n>]-<rev>-<variant>
+      bundled:      openclaw-eval:<sha>-<plugin>-<rev>-<variant>
+    """
+    if install_plugin_id:
+        suffix = f"-x{extra_count}" if extra_count else ""
+        return f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{suffix}-{plugin_rev}-{variant}"
+    return f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
 
 
 def install_spec_hash(spec: str) -> str:
@@ -263,20 +300,14 @@ def eval_base_rev(eval_dir: Path) -> str:
     the same. Hashed inputs are exactly what Dockerfile.eval-base COPYs in
     plus its own contents.
     """
-    h = hashlib.sha256()
-    inputs = [
+    paths = [
         eval_dir / "Dockerfile.eval-base",
         eval_dir / "container" / "openclaw.template.json",
         eval_dir / "container" / "entrypoint.sh",
         eval_dir / "container" / "openclaw_eval_bridge.mjs",
         eval_dir / "container" / "openclaw_eval_bridge_lib.mjs",
     ]
-    for p in inputs:
-        if not p.exists():
-            continue
-        h.update(p.name.encode())
-        h.update(p.read_bytes())
-    return h.hexdigest()[:7]
+    return _hash_files_to_rev([(p.name, p) for p in paths])
 
 
 def build_eval_base(
@@ -394,11 +425,14 @@ def build_eval_plugin_layer(
     """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
-    if install_spec:
-        tag_extra = f"-x{len(extra_install_specs or [])}" if extra_install_specs else ""
-        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{tag_extra}-{plugin_rev}-{variant}"
-    else:
-        tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
+    tag = eval_layer_tag(
+        openclaw_sha=openclaw_sha,
+        memory_plugin=memory_plugin,
+        plugin_rev=plugin_rev,
+        variant=variant,
+        install_plugin_id=install_plugin_id if install_spec else None,
+        extra_count=len(extra_install_specs or []),
+    )
     cmd = [
         "docker", "build",
         "-f", str(eval_dir / "Dockerfile.eval-plugin"),
@@ -456,12 +490,14 @@ def build_eval_layer(
     """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
-    if install_spec:
-        # install-mode rev replaces source-content rev
-        tag_extra = f"-x{len(extra_install_specs or [])}" if extra_install_specs else ""
-        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{tag_extra}-{plugin_rev}-{variant}"
-    else:
-        tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
+    tag = eval_layer_tag(
+        openclaw_sha=openclaw_sha,
+        memory_plugin=memory_plugin,
+        plugin_rev=plugin_rev,
+        variant=variant,
+        install_plugin_id=install_plugin_id if install_spec else None,
+        extra_count=len(extra_install_specs or []),
+    )
     cmd = [
         "docker", "build",
         "-f", str(eval_dir / "Dockerfile.eval"),
@@ -746,7 +782,7 @@ def main():
         if args.push_eval_base:
             pushed_tag = push_eval_base(eval_base_tag, args.registry)
         print()
-        print(f"[build] DONE (eval-base only)")
+        print("[build] DONE (eval-base only)")
         print(f"[build]   base_tag:      {base_tag}")
         print(f"[build]   eval_base_tag: {eval_base_tag}")
         if pushed_tag:
@@ -774,7 +810,7 @@ def main():
             extra_install_specs=args._extra_pairs or None,
         )
         print()
-        print(f"[build] DONE (plugin layer)")
+        print("[build] DONE (plugin layer)")
         print(f"[build]   eval_base:  {args.eval_base_image}")
         print(f"[build]   layer_tag:  {layer_tag}")
         if args.manifest_out:
@@ -789,7 +825,7 @@ def main():
             print(f"[build]   manifest:   {args.manifest_out}")
         return
 
-    # ---------------------------------------------------------------- legacy full mode
+    # ---------------------------------------------------------------- full-build mode
     # In install mode the eval-layer Dockerfile runs `openclaw plugins install`,
     # so we don't stage source from openclaw-eval/plugins/ for the base. We
     # also don't need to OPENCLAW_EXTENSIONS-include the plugin at base
