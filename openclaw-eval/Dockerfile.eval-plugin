@@ -1,0 +1,122 @@
+# syntax=docker/dockerfile:1.7
+#
+# Plugin-specific eval layer. Built locally by each evaluator on top of a
+# pulled openclaw-eval-base:<sha>-clean-<variant> image; this layer is
+# NOT pushed to the shared registry by default.
+#
+# Pipeline:
+#   harness/build.py
+#     --eval-base-image ghcr.io/<org>/openclaw-eval-base:<sha>-clean-<variant>
+#     --install-spec '@openclaw/openviking@2026.4.33'
+#     --install-plugin-id openviking
+#   ->
+#   docker build
+#     -f openclaw-eval/Dockerfile.eval-plugin
+#     --build-arg BASE_IMAGE=<eval-base-tag>
+#     --build-arg INSTALL_SPEC=...
+#     --build-arg INSTALL_PLUGIN_ID=...
+#     -t openclaw-eval:<sha>-install-<id>-<rev>-<variant>
+#
+# What lives in this layer:
+#   * sidecar/ source + Python deps + sentence-transformers cache
+#   * primary plugin install (npm pack + tar -x)
+#   * extra (auxiliary) plugin installs
+#   * chown plugin dirs to root (openclaw's suspicious-ownership guard)
+#   * MEMORY_PLUGIN_ID / INSTALL_PLUGIN_ID / EXTRA_INSTALL_PLUGIN_IDS ENV
+#   * sidecar / EverMemOS plugin defaults
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG MEMORY_PLUGIN=memory-core
+ARG OPENCLAW_COMMIT=unknown
+ARG PLUGIN_REV=unknown
+ARG INSTALL_SPEC=""
+ARG INSTALL_PLUGIN_ID=""
+ARG EXTRA_INSTALL_SPECS=""
+ARG EXTRA_INSTALL_PLUGIN_IDS=""
+LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
+      eval.openclaw_commit=${OPENCLAW_COMMIT} \
+      eval.plugin_rev=${PLUGIN_REV} \
+      eval.install_spec=${INSTALL_SPEC} \
+      eval.install_plugin_id=${INSTALL_PLUGIN_ID} \
+      eval.extra_install_specs=${EXTRA_INSTALL_SPECS} \
+      eval.extra_install_plugin_ids=${EXTRA_INSTALL_PLUGIN_IDS} \
+      eval.layer=eval-plugin
+
+# Sidecar — staged into _active_sidecar/ by build.py before invoking
+# docker build, or empty for plugins without a sidecar (no-op pip step).
+USER node
+COPY --chown=node:node _active_sidecar/ /sidecar/
+RUN if [ -f /sidecar/requirements.txt ]; then \
+      python3 -m venv /sidecar/venv \
+      && /sidecar/venv/bin/pip install --no-cache-dir --upgrade pip \
+      && /sidecar/venv/bin/pip install --no-cache-dir -r /sidecar/requirements.txt; \
+    fi
+# Pre-cache the default sentence-transformers model so first /search call
+# does not pay the HuggingFace download cost (~80MB). Best-effort.
+RUN if [ -x /sidecar/venv/bin/python ]; then \
+      /sidecar/venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); print('precached MiniLM')" || true; \
+    fi
+
+# Install primary plugin via `npm pack` + `tar -x` directly into
+# /opt/openclaw/extensions/<id>/. See openclaw-eval/Dockerfile.eval for the
+# rationale on why we don't use `openclaw plugins install` (HOME shadowed
+# by runtime mount).
+RUN if [ -n "${INSTALL_SPEC}" ]; then \
+      echo "[Dockerfile.eval-plugin] installing plugin: ${INSTALL_SPEC} (id=${INSTALL_PLUGIN_ID})"; \
+      spec="${INSTALL_SPEC#npm:}"; \
+      mkdir -p "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      cd "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      tarball="$(npm pack "$spec" --silent)"; \
+      tar -xf "$tarball" --strip-components=1; \
+      rm -f "$tarball"; \
+      npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
+      ls -la /opt/openclaw/extensions/; \
+    fi
+RUN if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
+      ids="${EXTRA_INSTALL_PLUGIN_IDS}"; \
+      i=0; \
+      for spec in ${EXTRA_INSTALL_SPECS}; do \
+        i=$((i+1)); \
+        pid=$(echo $ids | cut -d ' ' -f $i); \
+        echo "[Dockerfile.eval-plugin] installing extra plugin: $spec (id=$pid)"; \
+        spec_clean="${spec#npm:}"; \
+        mkdir -p "/opt/openclaw/extensions/$pid"; \
+        cd "/opt/openclaw/extensions/$pid"; \
+        tarball="$(npm pack "$spec_clean" --silent)"; \
+        tar -xf "$tarball" --strip-components=1; \
+        rm -f "$tarball"; \
+        npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
+      done; \
+      ls -la /opt/openclaw/extensions/; \
+    fi
+
+USER root
+# Suspicious-ownership guard: openclaw rejects plugin dirs owned by
+# non-root, non-process uids. Container runs under arbitrary host uid via
+# `--user`, so chown installed plugins to root:root which openclaw treats
+# as trusted regardless of runtime uid.
+RUN if [ -d /opt/openclaw/extensions ] && [ -n "$(ls -A /opt/openclaw/extensions 2>/dev/null)" ]; then \
+      chown -R root:root /opt/openclaw/extensions && \
+      chmod -R a+rX /opt/openclaw/extensions; \
+    fi
+
+# Plugin-specific ENV. Read by entrypoint.sh to render the right plugin
+# entries / slot config into /workspace/openclaw.json. INSTALL_PLUGIN_ID
+# is also surfaced so entrypoint adds the install path to plugins.load.paths.
+ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN} \
+    INSTALL_PLUGIN_ID=${INSTALL_PLUGIN_ID} \
+    EXTRA_INSTALL_PLUGIN_IDS=${EXTRA_INSTALL_PLUGIN_IDS} \
+    MEMORY_MODE=memory-core
+
+# Sidecar defaults (mem0-shaped plugins).
+ENV MEM0_PORT=8765 \
+    MEM0_INFER=false \
+    MEM0_DATA_DIR=/workspace/state/mem0
+
+# EverMemOS plugin defaults (memory_mode=evermemos).
+ENV EVERMEMOS_API_URL=http://host.docker.internal:1995 \
+    EVERMEMOS_API_KEY=
+
+USER node

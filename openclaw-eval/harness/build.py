@@ -255,6 +255,91 @@ def build_base(
     return tag
 
 
+def eval_base_rev(eval_dir: Path) -> str:
+    """Stable 7-char hash of eval-base inputs (Dockerfile + bridge + entrypoint).
+
+    Lets the eval-base image tag track framework changes (bridge.mjs edits,
+    minimal-prune rule tweaks) even when the underlying OpenClaw sha stays
+    the same. Hashed inputs are exactly what Dockerfile.eval-base COPYs in
+    plus its own contents.
+    """
+    h = hashlib.sha256()
+    inputs = [
+        eval_dir / "Dockerfile.eval-base",
+        eval_dir / "container" / "openclaw.template.json",
+        eval_dir / "container" / "entrypoint.sh",
+        eval_dir / "container" / "openclaw_eval_bridge.mjs",
+        eval_dir / "container" / "openclaw_eval_bridge_lib.mjs",
+    ]
+    for p in inputs:
+        if not p.exists():
+            continue
+        h.update(p.name.encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()[:7]
+
+
+def build_eval_base(
+    eval_dir: Path,
+    base_tag: str,
+    openclaw_sha: str,
+    *,
+    variant: str = "slim",
+    skip_if_exists: bool = True,
+    minimal_prune: bool = True,
+) -> str:
+    """Build the plugin-agnostic eval-base layer (push target).
+
+    Stacks on ``openclaw-base:<sha>-memory-core-<variant>`` (always
+    memory-core — the eval-base whitelist must not depend on which
+    downstream plugin will be installed). Tag includes both the OpenClaw
+    sha and an eval_base_rev so framework-level bridge / minimal-prune
+    changes invalidate the cache without piggybacking on OpenClaw bumps.
+    """
+    rev = eval_base_rev(eval_dir)
+    tag = f"openclaw-eval-base:{openclaw_sha}-clean-{rev}-{variant}"
+    if skip_if_exists and docker_image_exists(tag):
+        print(f"[build] eval-base image {tag} already exists; skipping rebuild")
+        return tag
+
+    cmd = [
+        "docker", "build",
+        "-f", str(eval_dir / "Dockerfile.eval-base"),
+        "--build-arg", f"BASE_IMAGE={base_tag}",
+        "--build-arg", f"OPENCLAW_COMMIT={openclaw_sha}",
+        "--build-arg", f"EVAL_BASE_REV={rev}",
+    ]
+    if minimal_prune:
+        # eval-base whitelist: memory-core + bootstrap public surfaces
+        # only. Plugin layer installs land under /opt/openclaw/extensions/
+        # which prune never touches, so the whitelist is plugin-agnostic.
+        keep = compute_keep_extensions("memory-core", None, None)
+        cmd += [
+            "--build-arg", f"KEEP_EXTENSIONS={' '.join(keep)}",
+            "--build-arg",
+            f"PRUNE_NODE_MODULES_PACKAGES={' '.join(PRUNE_NODE_MODULES_PACKAGES)}",
+        ]
+    cmd += ["-t", tag, str(eval_dir)]
+    run_step("eval-base (clean, plugin-agnostic)", cmd)
+    return tag
+
+
+def push_eval_base(local_tag: str, registry: str) -> str:
+    """Retag the local eval-base under <registry>/<image>:<tag> and push.
+
+    No-op if the registry-qualified tag already exists locally with the
+    same image id (idempotent re-push).
+    """
+    image_part = local_tag.split(":", 1)
+    if len(image_part) != 2:
+        raise SystemExit(f"[build] ERROR: malformed eval-base tag: {local_tag}")
+    name, version = image_part
+    remote_tag = f"{registry.rstrip('/')}/{name}:{version}"
+    run_step(f"retag {local_tag} -> {remote_tag}", ["docker", "tag", local_tag, remote_tag])
+    run_step(f"push {remote_tag}", ["docker", "push", remote_tag])
+    return remote_tag
+
+
 def stage_active_sidecar(eval_dir: Path, plugins_dir: Path, memory_plugin: str) -> None:
     """Stage plugins/<name>/sidecar/ into eval_dir/_active_sidecar/.
 
@@ -285,6 +370,58 @@ def stage_active_sidecar(eval_dir: Path, plugins_dir: Path, memory_plugin: str) 
         else:
             shutil.copy2(entry, dst / entry.name)
     print(f"[build] staged sidecar: {src} -> {dst}")
+
+
+def build_eval_plugin_layer(
+    eval_dir: Path,
+    base_tag: str,
+    memory_plugin: str,
+    openclaw_sha: str,
+    plugin_rev: str,
+    *,
+    variant: str = "slim",
+    plugins_dir: Optional[Path] = None,
+    install_spec: Optional[str] = None,
+    install_plugin_id: Optional[str] = None,
+    extra_install_specs: Optional[list[tuple[str, str]]] = None,
+) -> str:
+    """Plugin-only layer on top of an already-built eval-base.
+
+    Used by the split-build pipeline (--eval-base-image). Skips the
+    apt/prune/bridge steps that the eval-base layer already covers, so
+    this build is small (sidecar pip install + npm pack) and fast on
+    cached layers.
+    """
+    if plugins_dir is not None:
+        stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
+    if install_spec:
+        tag_extra = f"-x{len(extra_install_specs or [])}" if extra_install_specs else ""
+        tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{tag_extra}-{plugin_rev}-{variant}"
+    else:
+        tag = f"openclaw-eval:{openclaw_sha}-{memory_plugin}-{plugin_rev}-{variant}"
+    cmd = [
+        "docker", "build",
+        "-f", str(eval_dir / "Dockerfile.eval-plugin"),
+        "--build-arg", f"BASE_IMAGE={base_tag}",
+        "--build-arg", f"MEMORY_PLUGIN={memory_plugin}",
+        "--build-arg", f"OPENCLAW_COMMIT={openclaw_sha}",
+        "--build-arg", f"PLUGIN_REV={plugin_rev}",
+    ]
+    if install_spec:
+        cmd += [
+            "--build-arg", f"INSTALL_SPEC={install_spec}",
+            "--build-arg", f"INSTALL_PLUGIN_ID={install_plugin_id}",
+        ]
+        if extra_install_specs:
+            specs_str = " ".join(spec for spec, _id in extra_install_specs)
+            ids_str = " ".join(pid for _spec, pid in extra_install_specs)
+            cmd += [
+                "--build-arg", f"EXTRA_INSTALL_SPECS={specs_str}",
+                "--build-arg", f"EXTRA_INSTALL_PLUGIN_IDS={ids_str}",
+            ]
+    cmd += ["-t", tag, str(eval_dir)]
+    run_step(f"eval-plugin layer ({memory_plugin or install_plugin_id})", cmd)
+    return tag
 
 
 def build_eval_layer(
@@ -420,7 +557,65 @@ def main():
             "normal eval images strip ~830M of unused content by default."
         ),
     )
+    parser.add_argument(
+        "--build-eval-base",
+        action="store_true",
+        help=(
+            "Split-build mode: build only the plugin-agnostic eval-base "
+            "layer (Dockerfile.eval-base) and exit. Tag: "
+            "openclaw-eval-base:<sha>-clean-<eval_base_rev>-<variant>. "
+            "Combine with --push-eval-base to publish to the shared registry."
+        ),
+    )
+    parser.add_argument(
+        "--push-eval-base",
+        action="store_true",
+        help=(
+            "After --build-eval-base, retag and `docker push` to "
+            "<registry>/openclaw-eval-base:<tag>. Requires --registry."
+        ),
+    )
+    parser.add_argument(
+        "--registry",
+        default=None,
+        help=(
+            "Container registry path (e.g. ghcr.io/duffycoder) used when "
+            "--push-eval-base or --eval-base-image is a local tag to retag."
+        ),
+    )
+    parser.add_argument(
+        "--eval-base-image",
+        default=None,
+        help=(
+            "Skip openclaw-base + eval-base build; use this image as the "
+            "BASE_IMAGE for the eval-plugin layer (Dockerfile.eval-plugin). "
+            "Typically a registry-qualified tag pulled from the shared "
+            "registry, e.g. ghcr.io/duffycoder/openclaw-eval-base:"
+            "7da23c3-clean-XXXXXXX-slim. Only valid with --install-spec."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.push_eval_base and not args.build_eval_base:
+        print("[build] ERROR: --push-eval-base requires --build-eval-base", file=sys.stderr)
+        sys.exit(1)
+    if args.push_eval_base and not args.registry:
+        print("[build] ERROR: --push-eval-base requires --registry", file=sys.stderr)
+        sys.exit(1)
+    if args.eval_base_image and args.build_eval_base:
+        print(
+            "[build] ERROR: --eval-base-image and --build-eval-base are mutually "
+            "exclusive (the former skips base build; the latter only builds base)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.eval_base_image and not args.install_spec:
+        print(
+            "[build] ERROR: --eval-base-image only supports install-spec mode "
+            "(bundled plugins still need to be staged into openclaw-base)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Validate install-spec mode early.
     if args.install_spec:
@@ -532,6 +727,69 @@ def main():
     else:
         print(f"[build] openclaw_sha={openclaw_sha}  plugin={args.memory_plugin}  rev={plugin_rev}")
 
+    # ---------------------------------------------------------------- split mode
+    # Path A — only build the plugin-agnostic eval-base layer (push target).
+    if args.build_eval_base:
+        base_tag = build_base(
+            openclaw_repo, "memory-core", openclaw_sha,
+            variant=args.variant,
+            skip_if_exists=not args.rebuild_base,
+            plugins_dir=None,
+        )
+        eval_base_tag = build_eval_base(
+            here, base_tag, openclaw_sha,
+            variant=args.variant,
+            skip_if_exists=not args.rebuild_base,
+            minimal_prune=not args.no_minimal_prune,
+        )
+        pushed_tag = None
+        if args.push_eval_base:
+            pushed_tag = push_eval_base(eval_base_tag, args.registry)
+        print()
+        print(f"[build] DONE (eval-base only)")
+        print(f"[build]   base_tag:      {base_tag}")
+        print(f"[build]   eval_base_tag: {eval_base_tag}")
+        if pushed_tag:
+            print(f"[build]   pushed:        {pushed_tag}")
+        if args.manifest_out:
+            Path(args.manifest_out).write_text(json.dumps({
+                "openclaw_sha": openclaw_sha,
+                "variant": args.variant,
+                "base_tag": base_tag,
+                "eval_base_tag": eval_base_tag,
+                "pushed_tag": pushed_tag,
+            }, indent=2))
+            print(f"[build]   manifest:      {args.manifest_out}")
+        return
+
+    # Path B — build only the plugin layer on top of an existing eval-base.
+    if args.eval_base_image:
+        layer_tag = build_eval_plugin_layer(
+            here, args.eval_base_image, args.memory_plugin, openclaw_sha,
+            plugin_rev,
+            variant=args.variant,
+            plugins_dir=here / "plugins",
+            install_spec=args.install_spec,
+            install_plugin_id=args.install_plugin_id,
+            extra_install_specs=args._extra_pairs or None,
+        )
+        print()
+        print(f"[build] DONE (plugin layer)")
+        print(f"[build]   eval_base:  {args.eval_base_image}")
+        print(f"[build]   layer_tag:  {layer_tag}")
+        if args.manifest_out:
+            Path(args.manifest_out).write_text(json.dumps({
+                "openclaw_sha": openclaw_sha,
+                "memory_plugin": args.memory_plugin,
+                "plugin_rev": plugin_rev,
+                "variant": args.variant,
+                "eval_base_image": args.eval_base_image,
+                "eval_tag": layer_tag,
+            }, indent=2))
+            print(f"[build]   manifest:   {args.manifest_out}")
+        return
+
+    # ---------------------------------------------------------------- legacy full mode
     # In install mode the eval-layer Dockerfile runs `openclaw plugins install`,
     # so we don't stage source from openclaw-eval/plugins/ for the base. We
     # also don't need to OPENCLAW_EXTENSIONS-include the plugin at base
