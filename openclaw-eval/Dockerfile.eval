@@ -37,6 +37,16 @@ ARG INSTALL_PLUGIN_ID=""
 # with a memory plugin (e.g. hypercompositor with hypermem).
 ARG EXTRA_INSTALL_SPECS=""
 ARG EXTRA_INSTALL_PLUGIN_IDS=""
+# Minimal-prune layer (2026-05-06). Whitelists which upstream extension
+# directories to keep; everything else under /app/extensions and
+# /app/dist/extensions is removed. Empty value => no pruning (debug mode).
+# build.py defaults this to "memory-core <memory_plugin> <install_id> ..."
+# computed by compute_keep_extensions().
+ARG KEEP_EXTENSIONS=""
+# Space-separated node_modules package paths to remove (e.g. "@lancedb
+# pdfjs-dist"). build.py defaults to PRUNE_NODE_MODULES_PACKAGES (6 pkgs
+# tied to extensions we never enable, ~547M total).
+ARG PRUNE_NODE_MODULES_PACKAGES=""
 LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
       eval.openclaw_commit=${OPENCLAW_COMMIT} \
       eval.plugin_rev=${PLUGIN_REV} \
@@ -44,6 +54,8 @@ LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
       eval.install_plugin_id=${INSTALL_PLUGIN_ID} \
       eval.extra_install_specs=${EXTRA_INSTALL_SPECS} \
       eval.extra_install_plugin_ids=${EXTRA_INSTALL_PLUGIN_IDS} \
+      eval.keep_extensions=${KEEP_EXTENSIONS} \
+      eval.prune_node_modules=${PRUNE_NODE_MODULES_PACKAGES} \
       eval.layer=eval-runtime
 
 # We need root briefly to mkdir + install jq + Python (sidecar runtime).
@@ -54,6 +66,51 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /eval /workspace /etc/openclaw /sidecar \
  && chown -R node:node /eval /workspace /etc/openclaw /sidecar
+
+# Minimal-prune layer: strip upstream openclaw bloat the harness never uses.
+# Saves ~810M (210M dist/extensions of unused plugins, 54M extensions/ source,
+# 4.8M control-ui, 1.5M skills+qa, 547M node_modules) so per-conv `docker run`
+# stays fast and plugin-loader has fewer dirs to stat.
+#
+# /app/docs is INTENTIONALLY NOT pruned: docs/reference/templates contains
+# AGENTS.md / SOUL.md / IDENTITY.md / CLAUDE.md / BOOT.md / BOOTSTRAP.md /
+# HEARTBEAT.md which `openclaw agent --local` reads to bootstrap a workspace.
+# Removing /app/docs broke hypercompositor's prebootstrap with "Missing
+# workspace template: AGENTS.md (/app/docs/reference/templates/AGENTS.md)".
+# The 14M cost is dwarfed by the savings above.
+#
+# Skipped when KEEP_EXTENSIONS is empty (debug builds via build.py
+# --no-minimal-prune). When set, the value is a space-separated whitelist;
+# every extension dir not on the list is rm -rf'd.
+RUN set -eux; \
+    if [ -n "${KEEP_EXTENSIONS}" ]; then \
+      echo "[Dockerfile.eval] minimal-prune: KEEP_EXTENSIONS=${KEEP_EXTENSIONS}"; \
+      for tree in /app/extensions /app/dist/extensions; do \
+        [ -d "$tree" ] || continue; \
+        for entry in "$tree"/*/; do \
+          [ -d "$entry" ] || continue; \
+          name="$(basename "$entry")"; \
+          keep=0; \
+          for k in ${KEEP_EXTENSIONS}; do \
+            [ "$name" = "$k" ] && keep=1 && break; \
+          done; \
+          if [ "$keep" -eq 0 ]; then \
+            rm -rf "$entry"; \
+          fi; \
+        done; \
+      done; \
+      rm -rf /app/skills /app/qa /app/dist/control-ui; \
+    fi; \
+    if [ -n "${PRUNE_NODE_MODULES_PACKAGES}" ] && [ -d /app/node_modules ]; then \
+      echo "[Dockerfile.eval] minimal-prune node_modules: ${PRUNE_NODE_MODULES_PACKAGES}"; \
+      for pkg in ${PRUNE_NODE_MODULES_PACKAGES}; do \
+        target="/app/node_modules/${pkg}"; \
+        if [ -e "$target" ] || [ -L "$target" ]; then \
+          rm -rf "$target"; \
+        fi; \
+      done; \
+    fi; \
+    du -sh /app 2>/dev/null || true
 
 # Eval-layer assets
 COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
