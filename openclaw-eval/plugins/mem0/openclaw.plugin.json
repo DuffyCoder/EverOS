@@ -1,0 +1,24 @@
+{
+  "id": "mem0",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sidecarUrl": {
+        "type": "string",
+        "description": "HTTP base URL of the mem0 sidecar process inside the container."
+      },
+      "sidecarTimeoutMs": {
+        "type": "integer",
+        "minimum": 100,
+        "default": 10000
+      },
+      "writeSessionFiles": {
+        "type": "boolean",
+        "default": true,
+        "description": "If true, plugin writes session.md to workspace and reads via local fs (matches memory-core readFile contract). If false, readFile delegates to sidecar /readFile."
+      }
+    }
+  }
+}

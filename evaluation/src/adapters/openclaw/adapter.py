@@ -79,6 +79,10 @@ class OpenClawAdapter(BaseAdapter):
         self._openclaw_repo_path: str = (
             (self._openclaw_cfg.get("repo_path") or "").strip()
         )
+        # v0.7: per-conversation sandbox cache. Populated by both add()
+        # and build_lazy_index() so answer_mode=agent_local can find
+        # the bridge payload via _sandbox_for(conversation_id).
+        self._sandbox_by_conversation_id: dict[str, dict] = {}
 
     # ----------------------------------------------------------------- prepare
     async def prepare(
@@ -123,18 +127,60 @@ class OpenClawAdapter(BaseAdapter):
         run_id = root_dir.name
         conversations_map: dict[str, dict] = {}
 
+        answer_mode = self._openclaw_cfg.get("answer_mode", "shared_llm")
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+
         for conv in conversations:
             sandbox = self._prepare_conversation_sandbox(root_dir, conv)
             t0 = time.perf_counter()
             try:
                 await self._ingest_conversation(sandbox, conv)
-                # _flush_and_settle_if_needed is authoritative for
-                # visibility_state. It raises if visibility_mode=='settled'
-                # and the OpenClaw status check does not confirm settled,
-                # so we never persist a handle that claims 'settled' when
-                # the backend disagrees.
-                await self._flush_and_settle_if_needed(sandbox)
-                self._assert_visibility_contract(sandbox)
+                # v0.7: noop mode disables memorySearch entirely, so the
+                # status check would always report settled=false with 0
+                # files/chunks. Skip flush/settle in that case — there's
+                # no memory state to verify. Agent_local + noop is a
+                # legitimate combo for the memory-sensitivity gate.
+                if memory_mode == "noop":
+                    sandbox["visibility_state"] = "settled"
+                    self._append_events(sandbox, [{
+                        "event": "flush_skipped",
+                        "reason": "memory_mode=noop",
+                    }])
+                else:
+                    # _flush_and_settle_if_needed is authoritative for
+                    # visibility_state. It raises if visibility_mode=='settled'
+                    # and the OpenClaw status check does not confirm settled,
+                    # so we never persist a handle that claims 'settled' when
+                    # the backend disagrees.
+                    await self._flush_and_settle_if_needed(sandbox)
+                    self._assert_visibility_contract(sandbox)
+                # v0.7: when answer_mode=agent_local, pre-bootstrap the
+                # workspace by running a dummy `agent --local` so first-
+                # run files (AGENTS.md, SOUL.md, TOOLS.md, ...) are
+                # written serially during this conv-serial add() phase.
+                # answer_stage's 50-worker semaphore would otherwise let
+                # concurrent first-runs race on the same workspace.
+                if answer_mode == "agent_local":
+                    await self._prebootstrap_workspace(sandbox)
+
+                # Stage 3 Phase 5 R2 routing: when context_engine_mode is
+                # set AND yaml opts in via context_engine_ingest_mode!=none,
+                # replay conv messages through agent_run so the engine's
+                # afterTurn ingests them. Replies are discarded — engine
+                # session state is what QA relies on.
+                #
+                # Cost reality (LoCoMo): ~380 msgs/conv × ~80s each =
+                # ~8.5 hours per conv at sequential rate. The "none"
+                # default gives a wiring/prototype scorecard with empty
+                # session state (engine assemble injects only system prompt
+                # addition, no recall); "all" mode is operator-driven for
+                # true scoring runs.
+                ce_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
+                ingest_mode = (
+                    self._openclaw_cfg.get("context_engine_ingest_mode") or "none"
+                ).strip()
+                if ce_mode and answer_mode == "agent_local" and ingest_mode != "none":
+                    await self._replay_conv_for_context_engine(sandbox, conv)
             except Exception as err:
                 sandbox["run_status"] = "failed"
                 self._write_handle(sandbox, add_summary={"error": str(err)})
@@ -152,6 +198,9 @@ class OpenClawAdapter(BaseAdapter):
                 },
             )
             conversations_map[conv.conversation_id] = sandbox
+            # v0.7: persist sandbox so answer() can locate it without
+            # the `index` argument (answer_stage doesn't pass index).
+            self._sandbox_by_conversation_id[conv.conversation_id] = sandbox
 
         return {
             "type": "openclaw_sandboxes",
@@ -164,6 +213,12 @@ class OpenClawAdapter(BaseAdapter):
     def build_lazy_index(
         self, conversations: List[Conversation], output_dir: Any
     ) -> dict:
+        """Rebuild handle dict from disk (resume / skip-add path).
+
+        v0.7: also populates ``self._sandbox_by_conversation_id`` so
+        answer_mode=agent_local can find sandbox state via
+        ``_sandbox_for(conv_id)`` even when add() was skipped.
+        """
         root_dir = self._locate_existing_run_root(Path(output_dir))
         handles: dict[str, dict] = {}
         for conv in conversations:
@@ -185,6 +240,10 @@ class OpenClawAdapter(BaseAdapter):
                 if state not in ("indexed", "settled"):
                     continue
             handles[conv.conversation_id] = handle
+            # v0.7: ALSO populate the in-memory sandbox map so
+            # answer() / agent_local path can find it without going back
+            # to disk on every call.
+            self._sandbox_by_conversation_id[conv.conversation_id] = handle
         return {
             "type": "openclaw_sandboxes",
             "run_id": root_dir.name,
@@ -196,6 +255,24 @@ class OpenClawAdapter(BaseAdapter):
     async def search(
         self, query: str, conversation_id: str, index: Any, **kwargs
     ) -> SearchResult:
+        # v0.7: in agent_local mode the agent owns retrieval inside its
+        # own loop; pipeline-level search would double-cost and possibly
+        # mutate openclaw memory state via memorySearch.sync.onSearch.
+        # Return a placeholder marked skipped=True so retrieval_metrics
+        # / content_overlap suppress these samples instead of scoring 0.
+        if self._openclaw_cfg.get("answer_mode") == "agent_local":
+            return SearchResult(
+                query=query,
+                conversation_id=conversation_id,
+                results=[],
+                retrieval_metadata={
+                    "system": "openclaw",
+                    "skipped": True,
+                    "reason": "agent_local_owns_retrieval",
+                    "question_id": kwargs.get("question_id"),
+                },
+            )
+
         sandbox = index["conversations"][conversation_id]
         backend_mode = sandbox.get("backend_mode", self._openclaw_cfg.get("backend_mode", "hybrid"))
         retrieval_route = sandbox.get(
@@ -318,8 +395,188 @@ class OpenClawAdapter(BaseAdapter):
 
     # ---------------------------------------------------------------- answer
     async def answer(self, query: str, context: str, **kwargs) -> str:
+        """Generate an answer for ``query``.
+
+        v0.7 dispatch by ``openclaw.answer_mode``:
+          - ``shared_llm`` (default, Path A compat): build a context+question
+            prompt and call evermemos's own LLM provider. Backwards
+            compatible with v0.6 behavior.
+          - ``agent_local`` (Path B): drive a real ``openclaw agent --local``
+            run via the bridge. Per-QA session-id keeps chat history
+            isolated; memory state is shared across QAs of the same conv
+            because /workspace/memory is per-conv.
+        """
+        answer_mode = self._openclaw_cfg.get("answer_mode", "shared_llm")
+        conv_id = kwargs.get("conversation_id")
+        qid = kwargs.get("question_id")
+
+        if answer_mode == "agent_local":
+            if not conv_id or not qid:
+                logger.warning(
+                    "answer_mode=agent_local requires conversation_id+question_id; "
+                    "got conv_id=%r qid=%r. Falling back to shared_llm.",
+                    conv_id, qid,
+                )
+            else:
+                return await self._generate_answer_via_agent(query, conv_id, qid)
+
         prompt = self._shared_answer_prompt().format(context=context, question=query)
         return await self._generate_answer(prompt)
+
+    # v0.7: Path B answer path - drives real openclaw agent loop.
+    async def _generate_answer_via_agent(
+        self, query: str, conv_id: str, qid: str
+    ) -> str:
+        sandbox = self._sandbox_for(conv_id)
+        agent_timeout = int(self._openclaw_cfg.get("agent_timeout_seconds", 180))
+        payload = {
+            **self._bridge_base_payload(sandbox),
+            "command": "agent_run",
+            "session_id": f"{conv_id}__{qid}",   # v0.6: per-QA isolation
+            "message": query,
+            "timeout_seconds": agent_timeout,
+        }
+        try:
+            resp = await arun_bridge(
+                self._bridge_script_path(),
+                payload,
+                timeout=float(agent_timeout) + 30.0,
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning("agent_run bridge call failed for %s/%s: %s",
+                           conv_id, qid, err)
+            self._append_events(sandbox, [{
+                "event": "agent_run_failed",
+                "conversation_id": conv_id, "question_id": qid,
+                "error": str(err),
+            }])
+            return ""
+
+        if not resp.get("ok"):
+            err = resp.get("error", "")
+            logger.warning("agent_run failed for %s/%s: %s", conv_id, qid, err)
+            self._append_events(sandbox, [{
+                "event": "agent_run_failed",
+                "conversation_id": conv_id, "question_id": qid,
+                "error": err,
+            }])
+            return ""
+
+        # v0.7 D4 fix: openclaw subprocess exit=0 doesn't mean the agent
+        # loop succeeded. When the LLM call inside the agent fails (e.g.
+        # provider rate limit), openclaw still returns a "graceful" reply
+        # like "API rate limit reached" and sets stop_reason="error".
+        # Treat this as adapter failure so it does not pollute accuracy
+        # metrics with fake wrong answers.
+        if resp.get("stop_reason") == "error":
+            reply_excerpt = (resp.get("reply") or "")[:200]
+            logger.warning(
+                "agent_run completed but stop_reason=error for %s/%s; "
+                "reply: %s", conv_id, qid, reply_excerpt,
+            )
+            self._append_events(sandbox, [{
+                "event": "agent_run_internal_error",
+                "conversation_id": conv_id, "question_id": qid,
+                "reply_excerpt": reply_excerpt,
+                "duration_ms": resp.get("duration_ms"),
+            }])
+            return ""
+
+        # Persist trace event so downstream metrics/diagnostics can
+        # observe agent behavior without a parallel trace channel.
+        # R-S3-4: forced_terminate flags whether the bridge SIGKILLed the
+        # subprocess group (hypermem/context-engine indexer keepalive).
+        # Latency stats include the bridge's grace period when this is true.
+        self._append_events(sandbox, [{
+            "event": "agent_run_complete",
+            "conversation_id": conv_id, "question_id": qid,
+            "duration_ms": resp.get("duration_ms"),
+            "stop_reason": resp.get("stop_reason"),
+            "aborted": resp.get("aborted"),
+            "tool_names": resp.get("tool_names"),
+            "system_prompt_chars": resp.get("system_prompt_chars"),
+            "reply_len": len(resp.get("reply", "")),
+            "forced_terminate": bool(resp.get("forced_terminate", False)),
+        }])
+        return (resp.get("reply") or "").strip()
+
+    # v0.7: per-conv sandbox lookup, populated by add() and build_lazy_index()
+    def _sandbox_for(self, conversation_id: str) -> dict:
+        sandbox = self._sandbox_by_conversation_id.get(conversation_id)
+        if sandbox is None:
+            raise RuntimeError(
+                f"No sandbox found for conversation_id={conversation_id!r}. "
+                f"add() or build_lazy_index() must run before answer()."
+            )
+        return sandbox
+
+    # v0.7: BaseAdapter.get_answer_timeout() override
+    def get_answer_timeout(self) -> float:
+        """Negotiate longer timeout for agent_local; default for shared_llm.
+
+        agent_local can legitimately run 60-120s on complex prompts, so we
+        pass agent_timeout_seconds + 30s margin. shared_llm (single LLM
+        call) is fine with the historical 120s default.
+        """
+        if self._openclaw_cfg.get("answer_mode") == "agent_local":
+            return float(self._openclaw_cfg.get("agent_timeout_seconds", 180)) + 30.0
+        return 120.0
+
+    # v0.7: pre-bootstrap workspace files via dummy agent run (retry + raise)
+    async def _prebootstrap_workspace(self, sandbox: dict) -> None:
+        """Run a dummy ``agent --local`` to write AGENTS.md/SOUL.md/etc.
+
+        Without this, the answer-stage 50-worker semaphore can have
+        multiple concurrent first-runs racing on the same workspace dir.
+        Hard guard (raise on failure) — better to fail this conv at add()
+        than silently corrupt state in answer phase.
+        """
+        last_error: Optional[str] = None
+        for attempt in range(3):
+            payload = {
+                **self._bridge_base_payload(sandbox),
+                "command": "agent_run",
+                "session_id": f"{sandbox.get('conversation_id', 'unknown')}__bootstrap",
+                "message": "Reply with: BOOTSTRAP_OK",
+                "timeout_seconds": 60,
+            }
+            try:
+                resp = await arun_bridge(
+                    self._bridge_script_path(), payload, timeout=90.0
+                )
+                if resp.get("ok"):
+                    last_error = None
+                    break
+                last_error = resp.get("error", "")
+            except Exception as err:  # noqa: BLE001
+                last_error = str(err)
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)  # 1s, 2s
+
+        if last_error:
+            raise RuntimeError(
+                f"prebootstrap agent_run failed for "
+                f"{sandbox.get('conversation_id')!r} after 3 attempts: {last_error}"
+            )
+
+        # Hard verify expected workspace files were written. If openclaw
+        # changes its bootstrap layout upstream, fail loudly here rather
+        # than continue and corrupt answer phase.
+        ws = Path(sandbox["workspace_dir"])
+        expected = ["AGENTS.md", "SOUL.md", "TOOLS.md"]
+        missing = [n for n in expected if not (ws / n).exists()]
+        if missing:
+            raise RuntimeError(
+                f"workspace bootstrap files missing for "
+                f"{sandbox.get('conversation_id')!r}: {missing}. "
+                f"openclaw agent --local did not write expected files."
+            )
+
+        self._append_events(sandbox, [{
+            "event": "prebootstrap_complete",
+            "conversation_id": sandbox.get("conversation_id"),
+            "bootstrap_files": expected,
+        }])
 
     async def _generate_answer(self, prompt: str) -> str:
         provider = self._get_llm_provider()
@@ -371,12 +628,38 @@ class OpenClawAdapter(BaseAdapter):
     def _bridge_script_path(self) -> Path:
         return _BRIDGE_SCRIPT_PATH
 
+    async def _invoke_bridge(
+        self, sandbox: dict, payload: dict, timeout: float
+    ) -> dict:
+        """Run a bridge command via the host node + script.
+
+        Subclasses (e.g. ``OpenClawDockerAdapter``) override this to route
+        through ``docker exec`` so the bridge runs INSIDE the container
+        where plugin sidecars (mem0/evermemos/zep) live. Form B plugins
+        disable memory-core's CLI, so the host's ``openclaw memory index``
+        path won't work — only the in-container sidecar HTTP path does.
+        """
+        return await arun_bridge(
+            self._bridge_script_path(),
+            payload,
+            timeout=timeout,
+        )
+
     def _bridge_base_payload(self, sandbox: dict) -> dict:
         """Fields every BridgeCommand needs: where OpenClaw lives, where the
         sandbox lives, and which config to read. repo_path comes from the
         yaml (preferred) so the config surface is authoritative; bridge
         still falls back to the env var for developer convenience.
+
+        v0.7: agent_llm_env_vars is the explicit whitelist of env var
+        names that ``envForSandbox`` will pass through to the openclaw
+        subprocess. The resolved config carries ``${VAR}`` template
+        strings for secrets (apiKey); without env passthrough OpenClaw
+        throws MissingEnvVarError on those templates. List comes from
+        yaml ``openclaw.agent_llm.env_vars`` (defaults to []).
         """
+        agent_llm = self._openclaw_cfg.get("agent_llm") or {}
+        env_vars = agent_llm.get("env_vars") or []
         return {
             "repo_path": self._openclaw_repo_path,
             "config_path": sandbox.get("resolved_config_path", ""),
@@ -384,6 +667,7 @@ class OpenClawAdapter(BaseAdapter):
             "state_dir": sandbox.get("native_store_dir", ""),
             "home_dir": sandbox.get("home_dir", ""),
             "cwd_dir": sandbox.get("cwd_dir", ""),
+            "agent_llm_env_vars": list(env_vars) if isinstance(env_vars, list) else [],
         }
 
     # ===================================================== internal helpers
@@ -443,11 +727,20 @@ class OpenClawAdapter(BaseAdapter):
         # OPENCLAW_CONFIG_PATH.
         backend_mode = self._openclaw_cfg.get("backend_mode", "hybrid")
         flush_mode = self._openclaw_cfg.get("flush_mode", "shared_llm")
+        # v0.7: pass memory_mode + agent_llm so resolved_config emits
+        # plugins.allow/slots/entries and models.providers.<id> with secret
+        # ${VAR} templates rebuilt from *_env markers.
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        agent_llm = self._openclaw_cfg.get("agent_llm")
+        context_engine_mode = self._openclaw_cfg.get("context_engine_mode")
         resolved = build_openclaw_resolved_config(
             workspace_dir=paths["workspace_dir"],
             native_store_dir=paths["native_store_dir"],
             backend_mode=backend_mode,
             flush_mode=flush_mode,
+            memory_mode=memory_mode,
+            context_engine_mode=context_engine_mode,
+            agent_llm=agent_llm,
             embedding=self._openclaw_cfg.get("embedding"),
         )
         resolved_config_path = Path(paths["config_path"])
@@ -491,6 +784,20 @@ class OpenClawAdapter(BaseAdapter):
             (Path(handle["metrics_dir"]) / "add_summary.json").write_text(
                 json.dumps(add_summary, ensure_ascii=False, indent=2)
             )
+
+    async def _replay_conv_for_context_engine(
+        self, sandbox: dict, conv: Conversation
+    ) -> None:
+        """Replay each conv message through agent_run to seed the
+        context-engine plugin's session state (R2 routing).
+
+        Default impl is a no-op (host adapter bypasses docker bridge);
+        the docker adapter overrides this to drive the in-container bridge.
+        Subclasses that don't run agent_run can keep this no-op without harm
+        — the eval pipeline degrades to "context-engine sees empty history".
+        """
+        del sandbox, conv  # unused in base
+        return
 
     async def _ingest_conversation(self, sandbox: dict, conv: Conversation) -> None:
         """Render each session as markdown and ask OpenClaw to build its FTS/vector index.
@@ -537,8 +844,10 @@ class OpenClawAdapter(BaseAdapter):
         self._append_events(sandbox, [{"event": "session_ingested", **r} for r in rows])
 
         # Drive the real OpenClaw index build so search has something to hit.
-        index_resp = await arun_bridge(
-            self._bridge_script_path(),
+        # Routed via _invoke_bridge so subclasses (e.g. docker) can run the
+        # bridge inside the container where the sidecar / plugin lives.
+        index_resp = await self._invoke_bridge(
+            sandbox,
             {
                 **self._bridge_base_payload(sandbox),
                 "command": "index",
@@ -563,13 +872,37 @@ class OpenClawAdapter(BaseAdapter):
           * visibility_mode == 'eventual': we do not wait; visibility_state
             stays at 'indexed' and the caller accepts that search() may
             trigger a background re-sync via memorySearch.sync.onSearch.
+
+        Stage 3 Phase 5 short-circuit: when context_engine_mode is set AND
+        the memory slot is bundled (memory-core/noop), the context-engine
+        plugin (e.g. hypercompositor) intercepts ingest before the memory
+        backend is touched. memory status reports settled=false forever
+        because there's nothing to flush, breaking the eval pipeline at
+        add(). Transition straight to 'settled' since the context-engine
+        owns its own storage settlement contract.
         """
         if sandbox.get("visibility_mode") != "settled":
             sandbox["visibility_state"] = "indexed"
             return
 
-        status_resp = await arun_bridge(
-            self._bridge_script_path(),
+        context_engine_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        if context_engine_mode and memory_mode in ("memory-core", "noop"):
+            self._append_events(
+                sandbox,
+                [
+                    {
+                        "event": "settle_skipped_context_engine",
+                        "context_engine_mode": context_engine_mode,
+                        "memory_mode": memory_mode,
+                    }
+                ],
+            )
+            sandbox["visibility_state"] = "settled"
+            return
+
+        status_resp = await self._invoke_bridge(
+            sandbox,
             {**self._bridge_base_payload(sandbox), "command": "status"},
             timeout=self._status_timeout(),
         )

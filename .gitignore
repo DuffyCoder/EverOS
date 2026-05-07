@@ -110,6 +110,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Editor / operator backup files
+*.bak
+
 # Spyder project settings
 .spyderproject
 .spyderworkspace
@@ -171,6 +174,12 @@ evaluation/memory_evaluation/converted_messages_all_from_1_1.jsonl
 evaluation/memory_evaluation/*.jsonl
 evaluation/memory_evaluation/*.json
 
+# LongMemEval datasets — operator-fetched, > 100MB per file. Locomo's
+# small bundled dataset stays tracked at evaluation/data/locomo/locomo10.json.
+evaluation/data/longmemeval/*.json
+evaluation/data/longmemeval/*.jsonl
+!evaluation/data/longmemeval/.gitkeep
+
 # Large log files
 *.log
 su_ser.log
@@ -206,7 +215,13 @@ src/memory_layer/memory_extractor/profile_memory_extractor keep llm merge.py
 #LLM related
 AGENTS.mk
 docs/api_docs/profile_extraction_fields.md
-.claude/
+.claude/*
+# Routine-consumed files must be tracked; per-user settings stay ignored via .claude/*.
+!.claude/skills/
+!.claude/rules/
+!.claude/setup.sh
+!.claude/ROUTINE_PROMPT.md
+!.claude/FIRST_RUN_CHECKLIST.md
 .cursor/*
 
 #tmp_data

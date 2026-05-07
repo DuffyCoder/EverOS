@@ -1,0 +1,51 @@
+{
+  "models": {
+    "mode": "replace",
+    "providers": {
+      "sophnet": {
+        "baseUrl": "${LLM_BASE_URL}",
+        "apiKey": "${LLM_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "${LLM_MODEL_ID}",
+            "name": "${LLM_MODEL_NAME}",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+            "contextWindow": 128000,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "sophnet/${LLM_MODEL_ID}",
+      "workspace": "${WORKSPACE_DIR}",
+      "userTimezone": "UTC",
+      "memorySearch": {
+        "enabled": "__MEMORY_SEARCH_ENABLED__",
+        "provider": "sophnet",
+        "model": "text-embeddings",
+        "outputDimensionality": 1024,
+        "remote": {
+          "baseUrl": "${SOPH_EMBED_URL}",
+          "easyllmId": "${SOPH_EMBED_EASYLLM_ID}",
+          "apiKey": "${SOPH_API_KEY}"
+        },
+        "store": {
+          "path": "${OPENCLAW_STATE_DIR}/memory/default.sqlite",
+          "vector": {"enabled": true}
+        }
+      },
+      "compaction": {"memoryFlush": {"enabled": false}}
+    }
+  },
+  "plugins": {
+    "allow": "__PLUGIN_ALLOW__",
+    "slots": {"memory": "__MEMORY_SLOT__"},
+    "entries": "__PLUGIN_ENTRIES__"
+  }
+}

@@ -1,0 +1,191 @@
+# syntax=docker/dockerfile:1.7
+#
+# Memory Evaluation eval-layer Dockerfile.
+#
+# Layered on top of an openclaw-base image built from the openclaw repo's
+# own Dockerfile with OPENCLAW_EXTENSIONS=memory-core (and any plugin
+# being benchmarked) + OPENCLAW_VARIANT=slim.
+#
+# Run with:
+#   harness/build.py --memory-plugin memory-core
+# which orchestrates:
+#   Step 1: docker build $OPENCLAW_REPO_PATH --build-arg OPENCLAW_EXTENSIONS=...
+#           -> tags openclaw-base:<sha>-<plugin>-slim
+#   Step 2: docker build openclaw-eval/ --build-arg BASE_IMAGE=...
+#           -> tags openclaw-eval:<sha>-<plugin>-slim
+#
+# Container entrypoint keeps the container alive (sleep) so the harness
+# can issue many `docker exec openclaw ...` calls per per-conversation
+# container. The per-RPC openclaw invocation is one-shot (CLI, exits).
+
+ARG BASE_IMAGE=openclaw-base:latest
+FROM ${BASE_IMAGE}
+
+ARG MEMORY_PLUGIN=memory-core
+ARG OPENCLAW_COMMIT=unknown
+ARG PLUGIN_REV=unknown
+# Optional install-mode args (build.py --install-spec). When INSTALL_SPEC
+# is non-empty, this layer runs `openclaw plugins install $INSTALL_SPEC`
+# at build time and the plugin lands at $OPENCLAW_HOME/extensions/$INSTALL_PLUGIN_ID/.
+# entrypoint.sh injects that path into plugins.load.paths of the rendered
+# openclaw config so the runtime sees the installed plugin alongside any
+# bundled ones. See openclaw-eval/harness/build.py for orchestration.
+ARG INSTALL_SPEC=""
+ARG INSTALL_PLUGIN_ID=""
+# Stage 3 Phase 5: auxiliary plugins installed alongside the primary one.
+# Space-separated lists of specs/ids used by context-engine plugins paired
+# with a memory plugin (e.g. hypercompositor with hypermem).
+ARG EXTRA_INSTALL_SPECS=""
+ARG EXTRA_INSTALL_PLUGIN_IDS=""
+LABEL eval.memory_plugin=${MEMORY_PLUGIN} \
+      eval.openclaw_commit=${OPENCLAW_COMMIT} \
+      eval.plugin_rev=${PLUGIN_REV} \
+      eval.install_spec=${INSTALL_SPEC} \
+      eval.install_plugin_id=${INSTALL_PLUGIN_ID} \
+      eval.extra_install_specs=${EXTRA_INSTALL_SPECS} \
+      eval.extra_install_plugin_ids=${EXTRA_INSTALL_PLUGIN_IDS} \
+      eval.layer=eval-runtime
+
+# We need root briefly to mkdir + install jq + Python (sidecar runtime).
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      jq python3 python3-venv python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /eval /workspace /etc/openclaw /sidecar \
+ && chown -R node:node /eval /workspace /etc/openclaw /sidecar
+
+# Eval-layer assets
+COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
+COPY --chown=node:node container/entrypoint.sh /eval/entrypoint.sh
+COPY --chown=node:node container/openclaw_eval_bridge.mjs /eval/openclaw_eval_bridge.mjs
+COPY --chown=node:node container/openclaw_eval_bridge_lib.mjs /eval/openclaw_eval_bridge_lib.mjs
+RUN chmod 755 /eval/entrypoint.sh
+
+# Plugin sidecar (FastAPI server + Python deps). build.py stages the
+# active plugin's sidecar/ into _active_sidecar/ before invoking docker
+# build, or leaves it empty for plugins without a sidecar. The venv
+# setup below is a no-op when requirements.txt is absent.
+COPY --chown=node:node _active_sidecar/ /sidecar/
+
+USER node
+RUN if [ -f /sidecar/requirements.txt ]; then \
+      python3 -m venv /sidecar/venv \
+      && /sidecar/venv/bin/pip install --no-cache-dir --upgrade pip \
+      && /sidecar/venv/bin/pip install --no-cache-dir -r /sidecar/requirements.txt; \
+    fi
+# Pre-cache the default sentence-transformers model so first /search call
+# does not pay the HuggingFace download cost (~80MB). Best-effort: the
+# `|| true` lets the build proceed if the cache fetch fails (model will
+# download lazily at runtime).
+RUN if [ -x /sidecar/venv/bin/python ]; then \
+      /sidecar/venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); print('precached MiniLM')" || true; \
+    fi
+
+USER root
+
+# OPENCLAW_HOME pins where openclaw stores its config + extensions on this
+# image. Both build-time `plugins install` and runtime `openclaw agent`
+# resolve this same dir, so install-mode plugins land at a stable,
+# documented location: /opt/openclaw/extensions/<plugin_id>/.
+ENV OPENCLAW_HOME=/opt/openclaw
+RUN mkdir -p /opt/openclaw && chown -R node:node /opt/openclaw
+
+# Install plugins via `npm pack` + `tar -x` directly into /opt/openclaw/extensions/<id>/.
+#
+# Why not `openclaw plugins install`: that command resolves OPENCLAW_HOME to
+# $HOME/.openclaw at build time, but $HOME=/workspace/home is a runtime
+# mount point — anything written there during build is shadowed by the
+# host volume on `docker run`. Direct npm pack lands the plugin in image
+# layers that survive the volume mount. The entrypoint adds these dirs
+# to plugins.load.paths so the runtime sees them like any other plugin.
+#
+# Spec format: same as `openclaw plugins install` (npm spec like
+# "@scope/name@version" or "name@version"). We strip an optional "npm:"
+# prefix for compatibility with build.py docs/examples.
+USER node
+RUN if [ -n "${INSTALL_SPEC}" ]; then \
+      echo "[Dockerfile.eval] installing plugin: ${INSTALL_SPEC} (id=${INSTALL_PLUGIN_ID})"; \
+      spec="${INSTALL_SPEC#npm:}"; \
+      mkdir -p "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      cd "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
+      tarball="$(npm pack "$spec" --silent)"; \
+      tar -xf "$tarball" --strip-components=1; \
+      rm -f "$tarball"; \
+      npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
+      ls -la /opt/openclaw/extensions/; \
+    fi
+RUN if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
+      ids="${EXTRA_INSTALL_PLUGIN_IDS}"; \
+      i=0; \
+      for spec in ${EXTRA_INSTALL_SPECS}; do \
+        i=$((i+1)); \
+        pid=$(echo $ids | cut -d ' ' -f $i); \
+        echo "[Dockerfile.eval] installing extra plugin: $spec (id=$pid)"; \
+        spec_clean="${spec#npm:}"; \
+        mkdir -p "/opt/openclaw/extensions/$pid"; \
+        cd "/opt/openclaw/extensions/$pid"; \
+        tarball="$(npm pack "$spec_clean" --silent)"; \
+        tar -xf "$tarball" --strip-components=1; \
+        rm -f "$tarball"; \
+        npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
+      done; \
+      ls -la /opt/openclaw/extensions/; \
+    fi
+USER root
+# openclaw discovery rejects plugin dirs owned by non-root, non-process uids
+# (suspicious ownership guard). Container runs under arbitrary host uid via
+# `--user`, so we chown installed plugins to root:root which openclaw treats
+# as trusted regardless of the runtime uid.
+RUN if [ -d /opt/openclaw/extensions ] && [ -n "$(ls -A /opt/openclaw/extensions 2>/dev/null)" ]; then \
+      chown -R root:root /opt/openclaw/extensions && \
+      chmod -R a+rX /opt/openclaw/extensions; \
+    fi
+
+# Memory plugin id is read by entrypoint.sh to render the right plugin
+# entries / slot config into /workspace/openclaw.json. INSTALL_PLUGIN_ID
+# is also surfaced so entrypoint can add the install path to plugins.load.paths.
+ENV MEMORY_PLUGIN_ID=${MEMORY_PLUGIN}
+ENV INSTALL_PLUGIN_ID=${INSTALL_PLUGIN_ID}
+ENV EXTRA_INSTALL_PLUGIN_IDS=${EXTRA_INSTALL_PLUGIN_IDS}
+
+# Per-conv mounted at /workspace by the harness.
+# Use a docker-specific config path so we don't collide with the
+# host-side config that the harness writes to /workspace/openclaw.json
+# (host paths) for host-side ingest/flush bridge calls.
+ENV WORKSPACE_DIR=/workspace
+ENV OPENCLAW_CONFIG_PATH=/workspace/openclaw.docker.json
+ENV OPENCLAW_STATE_DIR=/workspace/state
+ENV HOME=/workspace/home
+
+# Defaults that may be overridden via -e at docker run time.
+ENV MEMORY_MODE=memory-core
+ENV LLM_BASE_URL=
+ENV LLM_API_KEY=
+ENV LLM_MODEL=gpt-4.1-mini
+ENV SOPH_API_KEY=
+ENV SOPH_EMBED_URL=
+ENV SOPH_EMBED_EASYLLM_ID=
+
+# Sidecar defaults. MEM0_PORT must match what the plugin's sidecarUrl
+# points at (default http://localhost:8765 in plugin code).
+ENV MEM0_PORT=8765
+ENV MEM0_INFER=false
+ENV MEM0_DATA_DIR=/workspace/state/mem0
+
+# EverMemOS plugin defaults (memory_mode=evermemos). Plugin reads
+# EVERMEMOS_API_URL/KEY at registration; OpenClawDockerAdapter forwards
+# them via -e when memory_mode=evermemos. host.docker.internal resolves
+# to the host machine when the container is started with
+# --add-host=host.docker.internal:host-gateway (also handled by
+# OpenClawDockerAdapter for this memory_mode).
+ENV EVERMEMOS_API_URL=http://host.docker.internal:1995
+ENV EVERMEMOS_API_KEY=
+
+# Drop back to non-root for runtime.
+USER node
+
+# Override openclaw's default gateway CMD - we want a passive long-lived
+# container that the harness drives via docker exec.
+ENTRYPOINT ["/eval/entrypoint.sh"]
+CMD ["sleep", "infinity"]
