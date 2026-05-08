@@ -56,6 +56,31 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 - `openclaw-hybrid-noflush.yaml` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
 - `openclaw-hybrid.yaml` (`openclaw.yaml` main preset) ← full stack. Closest to production but with documented divergences above.
 
+## Cross-QA isolation for context-engine runs (PR4 plugin-cli-unify)
+
+Context-engine plugins under R2 routing (the current default) share a
+single `sessionId = conv_id` across all QAs in a conversation. The CE's
+`afterTurn` writes back into per-conversation state, so QA n+1's
+`assemble(conv_id)` sees QA n's question and answer.
+
+To restore the per-QA isolation that memory-plugin runs get for free,
+the docker adapter supports a workspace-snapshot mechanism:
+
+- `--per-qa-isolation snapshot` (or `auto` when a context engine is
+  selected): freeze `/workspace/state/` at the end of `add()`, restore
+  a fresh copy per QA, discard after the answer
+- `--per-qa-isolation off`: current R2 leakage behavior; matches
+  pre-PR4 numbers
+
+Full mechanism + caveats: [`per_qa_isolation.md`](per_qa_isolation.md).
+
+The fix is **necessary for CE-vs-CE comparability** (different engines
+write different amounts in `afterTurn`; without isolation an aggressive
+writer wins on leak signal). Cross-paradigm comparison (memory plugin
+vs context engine) is still not directly comparable for the structural
+asymmetries listed under "Approximate, with documented divergence" and
+"Explicitly omitted" above.
+
 ## Bugs the benchmark is *not* designed to catch
 
 - **LLM judge leniency.** Cross-mode sweeps on LoCoMo conv 9 showed gpt-4o-mini accepting `"Sep 2023"` as matching the gold `"Mar 2023"`. Consider adding a stricter exact-match sanity rail before trusting accuracy deltas below ~5%.

@@ -34,6 +34,15 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.per_qa_isolation import (
+    QA_STATES_DIRNAME,
+    SNAPSHOT_DIRNAME,
+    container_state_dir,
+    discard_qa_state,
+    freeze_state,
+    resolve_isolation_mode,
+    restore_state_for_qa,
+)
 from evaluation.src.adapters.openclaw.runtime import (
     BridgeError,
     BridgeTimeout,
@@ -74,6 +83,17 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
 
         # Limit concurrent docker run invocations during prepare/add.
         self._spawn_sem: Optional[asyncio.Semaphore] = None
+
+        # Cached per-QA isolation mode. Resolved once from config; both
+        # docker_cfg and openclaw_cfg are read-only post-init.
+        self._isolation_mode_cache: str = resolve_isolation_mode(
+            self._docker_cfg.get("per_qa_isolation"),
+            self._openclaw_cfg.get("context_engine_mode"),
+        )
+
+        # Per-conversation freeze locks for the snapshot critical section.
+        # Keyed by conv_id; created lazily in _ensure_state_frozen.
+        self._freeze_locks: dict[str, asyncio.Lock] = {}
 
     # ---------------------------------------------------- container lifecycle
 
@@ -236,12 +256,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # bridge's envForSandbox passes secrets to the openclaw subprocess.
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
         env_vars = list(agent_llm.get("env_vars") or [])
+
+        # Per-QA isolation may pass an alternate state_dir (a per-QA
+        # copy of the frozen baseline). Fall back to the shared default.
+        caller_state_dir = payload.get("state_dir")
+        container_state = caller_state_dir or "/workspace/state"
+
         payload = {
             **payload,
             "repo_path": "/app",
             "config_path": "/workspace/openclaw.docker.json",
             "workspace_dir": "/workspace",
-            "state_dir": "/workspace/state",
+            "state_dir": container_state,
             "home_dir": "/workspace/home",
             "cwd_dir": "/workspace",
             "agent_llm_env_vars": payload.get("agent_llm_env_vars") or env_vars,
@@ -318,6 +344,13 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 # Pre-create sandbox so volume dir exists.
                 root_dir = self._resolve_run_root(output_dir or self.output_dir)
                 sandbox = self._prepare_conversation_sandbox(root_dir, conv)
+                # GC any stale per-QA state dirs left by a prior run that
+                # was killed before its discard finally-block fired. The
+                # baseline (.qa_state_baseline) is intentionally preserved
+                # so replay continues from post-add() state.
+                stale = Path(sandbox["workspace_dir"]) / QA_STATES_DIRNAME
+                if stale.exists():
+                    shutil.rmtree(stale, ignore_errors=True)
                 cid = await self._docker_run_container(
                     conv.conversation_id, sandbox
                 )
@@ -341,13 +374,101 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         ], return_exceptions=True)
         self._docker_handles.clear()
 
+    # ------------------------------------------------ per-QA isolation v1
+    #
+    # ``answer.max_concurrent`` (yaml) is a global cap, not per-conversation,
+    # so two QAs from the same conv can race here. The freeze is guarded
+    # by an adapter-owned lock keyed by conv_id. Per-QA restore is
+    # race-free as long as qid is unique per call (the answer stage never
+    # re-asks the same qid in the same run).
+
+    def _isolation_mode(self) -> str:
+        """Cached ``openclaw_docker.per_qa_isolation`` resolution."""
+        return self._isolation_mode_cache
+
+    async def _ensure_state_frozen(self, sandbox: dict) -> None:
+        """Lazy-freeze /workspace/state on first answer call per conversation.
+
+        Lazy freeze (vs eager at end of add()) is robust to partial
+        pipelines (``--stages search answer evaluate`` skipping add).
+
+        On replay (workspace already has ``.qa_state_baseline`` from a
+        previous run) we **do not** re-freeze: the baseline must reflect
+        post-add() state, and re-freezing here would capture whatever
+        post-answer writes accumulated in ``/workspace/state`` during the
+        previous run. Operators wanting a fresh baseline should pass
+        ``--clean-groups`` or wipe the workspace.
+        """
+        if self._isolation_mode() != "snapshot":
+            return
+        if sandbox.get("_state_frozen"):
+            return  # fast path before we even take the lock
+
+        conv_id = sandbox.get("conversation_id") or id(sandbox)
+        lock = self._freeze_locks.setdefault(conv_id, asyncio.Lock())
+        async with lock:
+            if sandbox.get("_state_frozen"):
+                return
+            workspace = Path(sandbox["workspace_dir"])
+            baseline_existing = (workspace / SNAPSHOT_DIRNAME).exists()
+            if baseline_existing:
+                sandbox["_state_frozen"] = True
+                self._append_events(sandbox, [{
+                    "event": "per_qa_isolation_freeze_skipped_replay",
+                    "conversation_id": sandbox.get("conversation_id"),
+                    "reason": "baseline already exists from prior run",
+                }])
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, freeze_state, workspace,
+            )
+            sandbox["_state_frozen"] = True
+            self._append_events(sandbox, [{
+                "event": "per_qa_isolation_freeze",
+                "conversation_id": sandbox.get("conversation_id"),
+                "mode": "snapshot",
+            }])
+
+    async def _restore_qa_state_dir(self, sandbox: dict, qid: str) -> str:
+        """Restore baseline -> per-QA dir; return container-side path.
+
+        Returns ``/workspace/state`` (the shared default) when isolation
+        is off so no extra disk I/O happens.
+        """
+        if self._isolation_mode() != "snapshot":
+            return "/workspace/state"
+        loop = asyncio.get_running_loop()
+        workspace = Path(sandbox["workspace_dir"])
+        qa_host = await loop.run_in_executor(
+            None, restore_state_for_qa, workspace, qid,
+        )
+        return container_state_dir(qa_host, workspace)
+
+    async def _discard_qa_state(self, sandbox: dict, qid: str) -> None:
+        if self._isolation_mode() != "snapshot":
+            return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, discard_qa_state, Path(sandbox["workspace_dir"]), qid,
+        )
+
     # ---------------------------------------- override answer to use docker
 
     async def _generate_answer_via_agent(
         self, query: str, conv_id: str, qid: str
     ) -> str:
-        """Override base impl to route bridge call through docker exec."""
+        """Override base impl to route bridge call through docker exec.
+
+        When per_qa_isolation=snapshot, wraps the agent_run call in a
+        freeze (lazy, once per conv) + restore (per QA) + discard cycle
+        so cross-QA state leakage in context-engine plugins is eliminated.
+        See evaluation/src/adapters/openclaw/per_qa_isolation.py.
+        """
         sandbox = self._sandbox_for(conv_id)
+        await self._ensure_state_frozen(sandbox)
+        qa_container_state = await self._restore_qa_state_dir(sandbox, qid)
+
         agent_timeout = int(self._openclaw_cfg.get("agent_timeout_seconds", 180))
         payload = {
             **self._bridge_base_payload(sandbox),
@@ -355,59 +476,65 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "session_id": f"{conv_id}__{qid}",
             "message": query,
             "timeout_seconds": agent_timeout,
+            "state_dir": qa_container_state,
         }
         try:
-            resp = await self._arun_bridge_via_docker(
-                conv_id, payload,
-                timeout=float(self._exec_timeout),
-            )
-        except (BridgeError, BridgeTimeout) as err:
-            logger.warning("docker bridge failed for %s/%s: %s",
-                           conv_id, qid, err)
-            self._append_events(sandbox, [{
-                "event": "agent_run_failed",
-                "conversation_id": conv_id, "question_id": qid,
-                "error": str(err),
-            }])
-            return ""
+            try:
+                resp = await self._arun_bridge_via_docker(
+                    conv_id, payload,
+                    timeout=float(self._exec_timeout),
+                )
+            except (BridgeError, BridgeTimeout) as err:
+                logger.warning("docker bridge failed for %s/%s: %s",
+                               conv_id, qid, err)
+                self._append_events(sandbox, [{
+                    "event": "agent_run_failed",
+                    "conversation_id": conv_id, "question_id": qid,
+                    "error": str(err),
+                }])
+                return ""
 
-        if not resp.get("ok"):
-            err = resp.get("error", "")
-            logger.warning("docker agent_run failed for %s/%s: %s",
-                           conv_id, qid, err)
-            self._append_events(sandbox, [{
-                "event": "agent_run_failed",
-                "conversation_id": conv_id, "question_id": qid,
-                "error": err,
-            }])
-            return ""
+            if not resp.get("ok"):
+                err = resp.get("error", "")
+                logger.warning("docker agent_run failed for %s/%s: %s",
+                               conv_id, qid, err)
+                self._append_events(sandbox, [{
+                    "event": "agent_run_failed",
+                    "conversation_id": conv_id, "question_id": qid,
+                    "error": err,
+                }])
+                return ""
 
-        # Inherit v0.7 D5 stop_reason=error guard from base behavior.
-        if resp.get("stop_reason") == "error":
-            reply_excerpt = (resp.get("reply") or "")[:200]
-            logger.warning(
-                "docker agent_run completed but stop_reason=error for "
-                "%s/%s; reply: %s", conv_id, qid, reply_excerpt,
-            )
+            # Inherit v0.7 D5 stop_reason=error guard from base behavior.
+            if resp.get("stop_reason") == "error":
+                reply_excerpt = (resp.get("reply") or "")[:200]
+                logger.warning(
+                    "docker agent_run completed but stop_reason=error for "
+                    "%s/%s; reply: %s", conv_id, qid, reply_excerpt,
+                )
+                self._append_events(sandbox, [{
+                    "event": "agent_run_internal_error",
+                    "conversation_id": conv_id, "question_id": qid,
+                    "reply_excerpt": reply_excerpt,
+                    "duration_ms": resp.get("duration_ms"),
+                }])
+                return ""
+
             self._append_events(sandbox, [{
-                "event": "agent_run_internal_error",
+                "event": "agent_run_complete",
                 "conversation_id": conv_id, "question_id": qid,
-                "reply_excerpt": reply_excerpt,
                 "duration_ms": resp.get("duration_ms"),
+                "stop_reason": resp.get("stop_reason"),
+                "aborted": resp.get("aborted"),
+                "tool_names": resp.get("tool_names"),
+                "system_prompt_chars": resp.get("system_prompt_chars"),
+                "reply_len": len(resp.get("reply", "")),
             }])
-            return ""
-
-        self._append_events(sandbox, [{
-            "event": "agent_run_complete",
-            "conversation_id": conv_id, "question_id": qid,
-            "duration_ms": resp.get("duration_ms"),
-            "stop_reason": resp.get("stop_reason"),
-            "aborted": resp.get("aborted"),
-            "tool_names": resp.get("tool_names"),
-            "system_prompt_chars": resp.get("system_prompt_chars"),
-            "reply_len": len(resp.get("reply", "")),
-        }])
-        return (resp.get("reply") or "").strip()
+            return (resp.get("reply") or "").strip()
+        finally:
+            # Always discard the per-QA state copy so .qa_states/ does
+            # not accumulate across runs.
+            await self._discard_qa_state(sandbox, qid)
 
     async def _invoke_bridge(
         self, sandbox: dict, payload: dict, timeout: float
