@@ -115,18 +115,21 @@ def test_install_spec_underivable_id_requires_explicit():
     assert "could not derive a plugin id" in res.stderr
 
 
-def test_install_spec_explicit_id_overrides_derivation():
-    """Even when spec is parseable, --install-plugin-id wins. Uses an
-    invalid openclaw-repo path so the build aborts before docker but
-    after argparse/validation, proving args were accepted.
+def test_install_spec_deprecated_path_resolves_registered_plugin():
+    """The --install-spec deprecation shim should accept a spec for any
+    plugin already in plugin_registry.yaml and migrate it to the right
+    slot (memory or context-engine) per the registry's kind. Validation
+    must pass; build aborts later because --openclaw-repo points at a
+    nonexistent path.
     """
     res = _run_build(
-        "--memory-plugin", "custom-id",
-        "--install-spec", "npm:hindsight-plugin@0.5.0",
-        "--install-plugin-id", "custom-id",
+        "--install-spec", "npm:@psiclawops/hypercompositor@0.9.6",
+        "--install-plugin-id", "hypercompositor",
         "--openclaw-repo", "/nonexistent/path",
     )
-    # Validation passes; build aborts later (no Dockerfile at fake path).
     assert res.returncode != 0
     assert "must match installed plugin id" not in res.stderr
+    # Reaches the openclaw-repo Dockerfile check (validation passed).
     assert "Dockerfile not found" in res.stderr or "openclaw-repo" in res.stderr.lower()
+    # Deprecation warning should fire on stderr.
+    assert "deprecated" in res.stderr.lower()
