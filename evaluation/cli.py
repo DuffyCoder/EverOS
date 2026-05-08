@@ -33,6 +33,7 @@ from evaluation.src.core.loaders import load_dataset
 from evaluation.src.core.pipeline import Pipeline
 from evaluation.src.adapters.registry import create_adapter
 from evaluation.src.evaluators.registry import create_evaluator
+from evaluation.src.plugins.cli_overrides import apply_plugin_overrides
 from evaluation.src.utils.config import load_yaml
 from evaluation.src.utils.logger import get_console
 
@@ -150,6 +151,65 @@ async def main():
         ),
     )
 
+    # Plugin selection overrides (PR3 plugin-cli-unify). Same grammar as
+    # build.py: <id> | <id>@<version> | none. When passed, these override
+    # the system yaml's openclaw.memory_mode / openclaw.context_engine_mode
+    # and the docker image is auto-resolved from
+    # evaluation/config/image_manifest.yaml.
+    parser.add_argument(
+        "--memory-plugin",
+        type=str,
+        default=None,
+        help=(
+            "Override yaml's openclaw.memory_mode. Format: <id>, <id>@<version>, "
+            "or 'none' (wires the slot to noop). See "
+            "evaluation/config/plugin_registry.yaml for available ids."
+        ),
+    )
+    parser.add_argument(
+        "--context-engine",
+        type=str,
+        default=None,
+        help=(
+            "Override yaml's openclaw.context_engine_mode. Same syntax as "
+            "--memory-plugin. 'none' unsets the slot (entrypoint falls back "
+            "to openclaw's built-in 'legacy' engine)."
+        ),
+    )
+    parser.add_argument(
+        "--image",
+        type=str,
+        default=None,
+        help=(
+            "Explicit docker image tag override. Highest precedence: skips "
+            "manifest lookup. Use when you want to point at a specific tag "
+            "outside what build.py / the manifest knows."
+        ),
+    )
+    parser.add_argument(
+        "--build-missing",
+        action="store_true",
+        help=(
+            "When --memory-plugin / --context-engine resolves to an image not "
+            "in image_manifest.yaml, auto-invoke build.py to build it (and "
+            "append a manifest entry). Off by default to avoid silent multi-"
+            "minute docker builds during eval."
+        ),
+    )
+    parser.add_argument(
+        "--per-qa-isolation",
+        type=str,
+        default=None,
+        choices=["snapshot", "auto", "off"],
+        help=(
+            "Cross-QA isolation mode for context-engine runs (PR4 wires the "
+            "actual mechanism; PR3 only plumbs the value into config). "
+            "snapshot: freeze /workspace/state after add(), restore per QA. "
+            "auto: snapshot iff context_engine is non-empty. "
+            "off: share state across QAs (current R2 behavior)."
+        ),
+    )
+
     args = parser.parse_args()
 
     console = get_console()
@@ -196,6 +256,35 @@ async def main():
         system_config = deep_merge_config(system_config, overrides)
         console.print(
             f"  🔧 Applied dataset overrides for {args.dataset}: {list(overrides.keys())}"
+        )
+
+    # Apply CLI plugin overrides (PR3 plugin-cli-unify). When any of
+    # --memory-plugin / --context-engine / --image / --per-qa-isolation
+    # is passed, override the corresponding yaml fields. Image is auto-
+    # resolved from image_manifest.yaml when plugin overrides are passed.
+    plugin_override = apply_plugin_overrides(
+        system_config,
+        memory_plugin=args.memory_plugin,
+        context_engine=args.context_engine,
+        image=args.image,
+        per_qa_isolation=args.per_qa_isolation,
+        build_missing=args.build_missing,
+    )
+    if plugin_override.memory_mode_applied is not None:
+        console.print(
+            f"  🔧 CLI override: openclaw.memory_mode = "
+            f"{plugin_override.memory_mode_applied!r}"
+        )
+    if plugin_override.context_engine_mode_applied is not None:
+        ce_display = plugin_override.context_engine_mode_applied or "(unset)"
+        console.print(
+            f"  🔧 CLI override: openclaw.context_engine_mode = {ce_display!r}"
+        )
+    if plugin_override.image_resolved:
+        console.print(
+            f"  🔧 CLI override: openclaw_docker.image = "
+            f"{plugin_override.image_resolved!r}"
+            + (" (built on demand)" if plugin_override.triggered_build else "")
         )
 
     # Load dataset
