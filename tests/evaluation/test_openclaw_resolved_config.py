@@ -198,9 +198,10 @@ def test_noop_omits_embedding_credentials_block(monkeypatch):
     so a disabled-but-credential-bearing block fails on any deployment
     without sophnet env vars.
 
-    Even when an embedding fixture is passed (as it is in our
-    openclaw-docker-noop.yaml), the resolved config for noop mode must
-    omit provider/remote and use ``provider="auto"``.
+    Even when an embedding fixture is passed alongside memory_mode=noop
+    (e.g. via ``evaluation.cli --memory-plugin none``), the resolved
+    config for noop mode must omit provider/remote and use
+    ``provider="auto"``.
     """
     monkeypatch.delenv("SOPH_API_KEY", raising=False)
     cfg = build_openclaw_resolved_config(
