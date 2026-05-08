@@ -357,12 +357,17 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
 
     # ------------------------------------------------ per-QA isolation v1
     #
-    # Concurrency note: these methods assume per-conversation serialization
-    # of QAs (yaml ``max_inflight_queries_per_conversation: 1``). Two
-    # concurrent QAs with the same qid would race on
-    # ``.qa_states/<qid>/`` — the second restore_state_for_qa call hits
-    # ``FileExistsError``. If a future config raises that cap, add an
-    # ``asyncio.Lock`` keyed by ``(conv_id, qid)`` here.
+    # Concurrency: ``answer.max_concurrent`` (yaml) is a *global* cap on
+    # concurrent answer-stage calls, not a per-conversation cap. Two
+    # QAs from the same conversation can therefore enter
+    # ``_generate_answer_via_agent`` concurrently. The freeze is guarded
+    # by a per-sandbox ``asyncio.Lock`` so only one coroutine actually
+    # runs ``freeze_state``; subsequent waiters see ``_pr4_state_frozen``
+    # and return.
+    #
+    # Per-QA restore is naturally race-free as long as ``qid`` is unique
+    # per call (the answer stage never re-asks the same qid in the same
+    # run). The ``_safe_qid``-keyed directory therefore needs no lock.
 
     def _isolation_mode(self) -> str:
         """Resolve openclaw_docker.per_qa_isolation -> 'snapshot' | 'off'."""
@@ -384,34 +389,49 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         — the baseline must reflect post-add() state.
         Operators wanting a fresh baseline should pass --clean-groups
         or wipe the workspace.
+
+        Concurrency-safe: a per-sandbox ``asyncio.Lock`` serializes the
+        freeze across concurrent answer calls in the same conversation.
+        Without the lock, two coroutines could pass the
+        ``_pr4_state_frozen`` fast-path together and both call
+        ``freeze_state`` (which ``rmtree``-s + ``copytree``-s the
+        baseline), corrupting each other's snapshot.
         """
         if self._isolation_mode() != "snapshot":
             return
         if sandbox.get("_pr4_state_frozen"):
-            return
-        from evaluation.src.adapters.openclaw.per_qa_isolation import (
-            SNAPSHOT_DIRNAME,
-        )
-        workspace = Path(sandbox["workspace_dir"])
-        baseline_existing = (workspace / SNAPSHOT_DIRNAME).exists()
-        if baseline_existing:
+            return  # fast path before we even take the lock
+
+        # asyncio is single-threaded; setdefault is atomic across coroutines
+        # so the Lock object is shared between concurrent waiters.
+        lock = sandbox.setdefault("_pr4_freeze_lock", asyncio.Lock())
+        async with lock:
+            # Re-check the flag inside the critical section.
+            if sandbox.get("_pr4_state_frozen"):
+                return
+            from evaluation.src.adapters.openclaw.per_qa_isolation import (
+                SNAPSHOT_DIRNAME,
+            )
+            workspace = Path(sandbox["workspace_dir"])
+            baseline_existing = (workspace / SNAPSHOT_DIRNAME).exists()
+            if baseline_existing:
+                sandbox["_pr4_state_frozen"] = True
+                self._append_events(sandbox, [{
+                    "event": "per_qa_isolation_freeze_skipped_replay",
+                    "conversation_id": sandbox.get("conversation_id"),
+                    "reason": "baseline already exists from prior run",
+                }])
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, freeze_state, workspace,
+            )
             sandbox["_pr4_state_frozen"] = True
             self._append_events(sandbox, [{
-                "event": "per_qa_isolation_freeze_skipped_replay",
+                "event": "per_qa_isolation_freeze",
                 "conversation_id": sandbox.get("conversation_id"),
-                "reason": "baseline already exists from prior run",
+                "mode": "snapshot",
             }])
-            return
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, freeze_state, workspace,
-        )
-        sandbox["_pr4_state_frozen"] = True
-        self._append_events(sandbox, [{
-            "event": "per_qa_isolation_freeze",
-            "conversation_id": sandbox.get("conversation_id"),
-            "mode": "snapshot",
-        }])
 
     async def _restore_qa_state_dir(self, sandbox: dict, qid: str) -> str:
         """Restore baseline -> per-QA dir; return container-side path.

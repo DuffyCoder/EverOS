@@ -422,3 +422,55 @@ def test_e2e_replay_skips_freeze_when_baseline_exists(tmp_path: Path):
         asyncio.run(adapter._generate_answer_via_agent("Q", "conv0", "qa1"))
 
     assert (baseline / "x.txt").read_text() == "v1-clean-add-end"
+
+
+# ---------- concurrent freeze (codex P1 fix) -------------------------------
+
+def test_concurrent_ensure_state_frozen_runs_freeze_only_once(tmp_path: Path):
+    """Codex P1: answer.max_concurrent is global, so two QAs from the same
+    conv can call _ensure_state_frozen concurrently. Without the lock, both
+    would call freeze_state (rmtree + copytree) racing on the same baseline
+    dir. Verify the lock serializes them and freeze_state runs exactly once.
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "marker.txt").write_text("baseline")
+
+    adapter = _make_adapter(
+        openclaw_cfg={"context_engine_mode": "hypercompositor"},
+        docker_cfg={"per_qa_isolation": "snapshot"},
+    )
+    sandbox = _sandbox(tmp_path)
+
+    # Wrap freeze_state with a counter so we can verify call count.
+    call_count = {"n": 0}
+    real_freeze = __import__(
+        "evaluation.src.adapters.openclaw.per_qa_isolation",
+        fromlist=["freeze_state"],
+    ).freeze_state
+
+    def counting_freeze(workspace):
+        call_count["n"] += 1
+        # Sleep briefly to widen the race window if locking is wrong.
+        import time
+        time.sleep(0.02)
+        return real_freeze(workspace)
+
+    with patch(
+        "evaluation.src.adapters.openclaw_docker_adapter.freeze_state",
+        side_effect=counting_freeze,
+    ):
+        async def race():
+            # 5 concurrent calls from same sandbox.
+            await asyncio.gather(
+                *[adapter._ensure_state_frozen(sandbox) for _ in range(5)]
+            )
+        asyncio.run(race())
+
+    assert call_count["n"] == 1, (
+        f"freeze_state must run exactly once across concurrent callers; "
+        f"actually ran {call_count['n']} times"
+    )
+    # Baseline content intact (not corrupted by interleaved rmtree/copytree).
+    assert (tmp_path / SNAPSHOT_DIRNAME / "marker.txt").read_text() == "baseline"
+    assert sandbox["_pr4_state_frozen"] is True

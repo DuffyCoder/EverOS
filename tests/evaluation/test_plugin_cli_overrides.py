@@ -191,7 +191,7 @@ def test_context_engine_hypercompositor_resolves_image(tmp_path: Path):
 
 def test_context_engine_none_unsets_field(tmp_path: Path):
     cfg = _baseline_yaml()
-    cfg["openclaw"]["context_engine_mode"] = "memclaw"
+    cfg["openclaw"]["context_engine_mode"] = "memclaw-context-engine"
     apply_plugin_overrides(
         cfg,
         memory_plugin="evermemos",  # need at least one constraint for image

@@ -138,15 +138,21 @@ baseline must reflect post-add() state, not post-answer pollution.
 Operators wanting a fresh baseline should pass `--clean-groups` or wipe
 the workspace.
 
-## Concurrency caveat
+## Concurrency
 
-The current implementation assumes per-conversation serialization of
-QAs (yaml `max_inflight_queries_per_conversation: 1`). Concurrent QAs
-within the same conv would race on `restore_state_for_qa` for the same
-`qid` (collision on `.qa_states/<qid>`) — see the docstring on the
-`# per-QA isolation v1` block in `openclaw_docker_adapter.py`. Raising
-that cap requires adding an `asyncio.Lock` keyed by `(conv_id, qid)`
-inside the adapter.
+`answer.max_concurrent` (yaml) is a **global** cap on concurrent
+answer-stage calls — it is not enforced per-conversation. Two QAs from
+the same conv can therefore enter `_generate_answer_via_agent`
+concurrently. The freeze step is guarded by a per-sandbox
+`asyncio.Lock` so only the first coroutine actually runs
+`freeze_state`; subsequent waiters see `_pr4_state_frozen=True` after
+the lock releases and return.
+
+The per-QA restore (`/workspace/.qa_states/<qid>/`) does **not** need
+its own lock because each `qid` is unique per call — the answer stage
+never re-asks the same `qid` in the same run. If a future code path
+ever does, the second call hits `FileExistsError` on `copytree` —
+catch that as a programmer error rather than papering over it.
 
 ## Known follow-ups (deferred from PR1–5)
 
@@ -162,10 +168,7 @@ separately:
    the resolver coerces typos (e.g. `"snapshots"`) to `auto` silently.
    Tighten at config-load / CLI argparse so typos error out early.
 
-3. **`asyncio.Lock` for multi-inflight per conversation.** Required if
-   `max_inflight_queries_per_conversation > 1` is ever used.
-
-4. **CLI matrix runner.** `--memory-plugin X --context-engine Y`
+3. **CLI matrix runner.** `--memory-plugin X --context-engine Y`
    combinations (4–6 typical) currently require N separate invocations
    with different `--run-name`s. A `--matrix memory=A,B
    context-engine=none,C` runner would be a small ergonomic win for

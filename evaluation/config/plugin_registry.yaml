@@ -51,10 +51,16 @@ hypercompositor:
   type: npm
   npm_package: "@psiclawops/hypercompositor"
 
-memclaw:
+# Plugin id matches what openclaw-eval/harness/build.py --install-plugin-id
+# uses (`memclaw-context-engine`), which is also the plugins.slots.contextEngine
+# value entrypoint.sh writes. Existing image
+# `openclaw-eval:7da23c3-install-memclaw-context-engine-bb444b9-slim`
+# remains reachable (the rev hashes the bare spec
+# `@memclaw/memclaw-context-engine@0.9.61`).
+memclaw-context-engine:
   kind: context-engine
   type: npm
-  npm_package: "memclaw"
+  npm_package: "@memclaw/memclaw-context-engine"
 
 # README-install-mode.md uses `--memory-plugin hindsight-plugin` so the
 # entry below treats it as memory. README-context-engine.md mentions
