@@ -363,7 +363,14 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ### Plugin selection via CLI (openclaw-docker only)
 
 The `openclaw-docker` adapter accepts CLI overrides for the memory and
-context-engine slots. Same syntax as `openclaw-eval/harness/build.py`:
+context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
+
+> **Note**: the `--memory-plugin` / `--context-engine` / `--image` /
+> `--build-missing` / `--per-qa-isolation` flags are honored by the
+> `openclaw-docker` adapter only. Other adapters (mem0, memos, zep,
+> evermemos online API, …) do not consume these flags; pass them and
+> the eval will run, but the flags will have no effect on those
+> systems. The image_resolver also only applies to openclaw-docker.
 
 ```bash
 # Memory plugin only — image auto-resolved from image_manifest.yaml

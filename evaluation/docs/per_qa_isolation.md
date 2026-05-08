@@ -28,24 +28,30 @@ quality.
 
 ## What this fixes
 
-After `add()` finalizes, freeze `/workspace/state/` to a baseline. For
-each QA, restore a fresh copy of the baseline to a per-QA directory and
-point the bridge at it. Discard the per-QA directory after the answer.
+After `add()` finalizes, freeze `/workspace/state/` to a baseline.
+**Implementation note**: the freeze fires lazily on the first
+`_generate_answer_via_agent` call per conversation, not strictly at the
+end of `add()`. This makes partial-pipeline runs robust (e.g.
+`--stages search answer evaluate` skipping `add`). For each QA, restore
+a fresh copy of the baseline to a per-QA directory and point the bridge
+at it. Discard the per-QA directory after the answer.
 
 ```
-end of add() ───► freeze_state()
+first answer call ───► freeze_state()  (once per conv, idempotent)
                        │
                        ▼
-                 /workspace/.qa_state_baseline/   (immutable until --clean-groups)
-
-per QA:
+                 /workspace/.qa_state_baseline/   (preserved across
+                       │                            re-runs unless
+                       │                            workspace is wiped)
+                       │
+per QA:                ▼
   /workspace/.qa_state_baseline/  ──cp -r──►  /workspace/.qa_states/<qid>/
                                                     │
                                                     │  bridge state_dir = /workspace/.qa_states/<qid>
                                                     ▼
                                               agent_run writes here
                                                     │
-                                                    │  discard
+                                                    │  discard (try/finally)
                                                     ▼
                                               rm -rf .qa_states/<qid>
 ```
@@ -67,16 +73,24 @@ Values:
 
 | Value | Behavior |
 |-------|----------|
-| `auto` (default) | snapshot iff `openclaw.context_engine_mode` is non-empty |
+| `auto` (default) | snapshot iff yaml's `openclaw.context_engine_mode` is non-empty (or `--context-engine <id>` was passed on the CLI) |
 | `snapshot` | always snapshot, even on memory-only runs |
 | `off` | never snapshot — current R2 behavior, leaks documented |
 
-Yaml equivalent (overrideable by CLI):
+Yaml equivalent (CLI overrides):
 
 ```yaml
+openclaw:
+  context_engine_mode: hypercompositor    # the field auto mode reads
 openclaw_docker:
-  per_qa_isolation: auto    # auto | snapshot | off
+  per_qa_isolation: auto                  # auto | snapshot | off
 ```
+
+To start fresh after pollution from a prior run, pass
+`--clean-groups` (clears the conversation-scoped database state before
+the add stage; does NOT touch the workspace directory itself — wipe
+`<output_dir>/artifacts/<conv>/workspace/.qa_state_baseline` if the
+baseline itself is stale).
 
 ## What this does NOT fix
 
@@ -133,3 +147,26 @@ within the same conv would race on `restore_state_for_qa` for the same
 `# per-QA isolation v1` block in `openclaw_docker_adapter.py`. Raising
 that cap requires adding an `asyncio.Lock` keyed by `(conv_id, qid)`
 inside the adapter.
+
+## Known follow-ups (deferred from PR1–5)
+
+These are not blockers for the PR1–5 closure but should be tracked
+separately:
+
+1. **overlayfs v2** for `freeze_state` / `restore_state_for_qa`. The
+   v1 `cp -r` implementation is fine for LoCoMo-scale state (tens of
+   MB), but bigger workloads or expensive plugin state could amortize
+   per-QA cost via overlay mounts. The public API stays the same.
+
+2. **Strict validation of unknown `per_qa_isolation` values.** Today
+   the resolver coerces typos (e.g. `"snapshots"`) to `auto` silently.
+   Tighten at config-load / CLI argparse so typos error out early.
+
+3. **`asyncio.Lock` for multi-inflight per conversation.** Required if
+   `max_inflight_queries_per_conversation > 1` is ever used.
+
+4. **CLI matrix runner.** `--memory-plugin X --context-engine Y`
+   combinations (4–6 typical) currently require N separate invocations
+   with different `--run-name`s. A `--matrix memory=A,B
+   context-engine=none,C` runner would be a small ergonomic win for
+   sweep workflows.

@@ -57,9 +57,12 @@ def resolve_isolation_mode(
     setting = (isolation_setting or "auto").strip().lower()
     if setting in ("snapshot", "off"):
         return setting
-    # TODO(plugin-cli-unify PR5): tighten validation in CLI / config-load
-    # path so unknown values raise instead of falling through here.
-    # Lenient now to avoid blowing up on yaml typos before PR5 docs land.
+    if setting != "auto":
+        raise ValueError(
+            f"per_qa_isolation must be one of 'snapshot' / 'off' / 'auto'; "
+            f"got {isolation_setting!r}. Fix yaml openclaw_docker.per_qa_isolation "
+            f"or --per-qa-isolation flag."
+        )
     return "snapshot" if (context_engine_mode and context_engine_mode.strip()) else "off"
 
 

@@ -32,13 +32,18 @@ from evaluation.src.adapters.openclaw.per_qa_isolation import (
     # Default (no setting): same as auto.
     (None, "", "off"),
     (None, "hypercompositor", "snapshot"),
-    # Unknown setting falls back to auto resolution (lenient — strict
-    # validation belongs at config-load time).
-    ("bogus", "hypercompositor", "snapshot"),
-    ("bogus", "", "off"),
 ])
 def test_resolve_isolation_mode(setting, ce, expected):
     assert resolve_isolation_mode(setting, ce) == expected
+
+
+def test_resolve_isolation_mode_rejects_unknown_values():
+    """Codex review of PR5: unknown values must error early instead of
+    silently coercing to auto. Common typo example: 'snapshots' (plural)."""
+    with pytest.raises(ValueError, match="per_qa_isolation must be one of"):
+        resolve_isolation_mode("snapshots", "hypercompositor")
+    with pytest.raises(ValueError, match="per_qa_isolation must be one of"):
+        resolve_isolation_mode("bogus", "")
 
 
 # ---------- freeze_state ---------------------------------------------------
