@@ -17,7 +17,12 @@ import yaml
 VALID_KINDS = {"memory", "context-engine"}
 VALID_TYPES = {"base-extension", "bundled-source", "npm"}
 
-DEFAULT_REGISTRY_PATH = "evaluation/config/plugin_registry.yaml"
+# Anchored at the repo root so callers don't accidentally resolve it
+# against cwd. parents[3] = repo root (this file is at
+# evaluation/src/plugins/registry.py).
+DEFAULT_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[3] / "evaluation" / "config" / "plugin_registry.yaml"
+)
 
 
 class RegistryError(ValueError):
@@ -119,6 +124,14 @@ def _normalize_kinds(
             f"valid: {sorted(VALID_KINDS)}"
         )
     return frozenset(kinds)
+
+
+# NOTE: registry exposes a plain dict + functional get/by_kind helpers
+# rather than a Registry class. Reasons:
+#   - dict[str, PluginEntry] is enough for PR1-5's read-only use cases
+#   - promoting to a class is a 3-call-site refactor if/when we need to
+#     attach path/schema_version/validators
+# Reviewers: see codex review of commit 7617071 "Design Risks #3".
 
 
 def get(registry: dict[str, PluginEntry], plugin_id: str) -> PluginEntry:

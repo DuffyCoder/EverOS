@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluation.src.plugins.registry import PluginEntry, RegistryError
+from evaluation.src.plugins.registry import PluginEntry
 from evaluation.src.plugins.resolver import (
     PluginRef,
     ResolverError,
@@ -118,6 +118,18 @@ def test_parse_ref_npm_spec_with_override(reg):
     assert ref.npm_spec(override="/tmp/local.tgz") == "/tmp/local.tgz"
 
 
+def test_parse_ref_whitespace_around_at_produces_clean_spec(reg):
+    """User typo with spaces around @ should still produce a clean npm spec."""
+    ref = parse_ref(
+        "  hypercompositor @ 0.9.6  ",
+        expected_kind="context-engine",
+        registry=reg,
+    )
+    assert ref.id == "hypercompositor"
+    assert ref.version == "0.9.6"
+    assert ref.npm_spec() == "npm:@psiclawops/hypercompositor@0.9.6"
+
+
 # ---------- parse_ref: kind validation -------------------------------------
 
 def test_parse_ref_kind_mismatch_memory_into_ce(reg):
@@ -162,7 +174,7 @@ def test_parse_ref_malformed_at(reg):
 def test_npm_spec_on_bundled_raises(reg):
     ref = parse_ref("evermemos", expected_kind="memory", registry=reg)
     assert ref is not None
-    with pytest.raises(RegistryError, match="not an npm plugin"):
+    with pytest.raises(ResolverError, match="not an npm plugin"):
         ref.npm_spec()
 
 

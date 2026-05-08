@@ -111,7 +111,27 @@ def test_load_entry_missing_image(tmp_path: Path):
           built_at: t1
           plugins: {}
     """)
-    with pytest.raises(ManifestError, match="missing 'image'"):
+    with pytest.raises(ManifestError, match="missing required field 'image'"):
+        load_manifest(p)
+
+
+def test_load_entry_missing_openclaw_sha(tmp_path: Path):
+    p = _write(tmp_path, """
+        - image: img-1
+          built_at: t1
+          plugins: {}
+    """)
+    with pytest.raises(ManifestError, match="missing required field 'openclaw_sha'"):
+        load_manifest(p)
+
+
+def test_load_entry_missing_built_at(tmp_path: Path):
+    p = _write(tmp_path, """
+        - image: img-1
+          openclaw_sha: abc
+          plugins: {}
+    """)
+    with pytest.raises(ManifestError, match="missing required field 'built_at'"):
         load_manifest(p)
 
 
@@ -179,8 +199,18 @@ def test_find_image_by_ce_only():
 
 def test_find_image_no_constraints_ambiguous():
     entries = _three_image_manifest()
-    with pytest.raises(ManifestError, match="3 images match"):
+    with pytest.raises(
+        ManifestError,
+        match=r"3 images registered.*specify at least one",
+    ):
         find_image(entries, memory_plugin=None, context_engine=None)
+
+
+def test_find_image_no_constraints_single_entry_ok():
+    """When only one image is registered, both constraints None resolves to it."""
+    entries = [_entry("only-image", {"memory-core": {}})]
+    e = find_image(entries, memory_plugin=None, context_engine=None)
+    assert e.image == "only-image"
 
 
 def test_find_image_version_mismatch_no_match():
@@ -291,3 +321,75 @@ def test_manifest_entry_is_frozen():
     e = _entry("x", {"memory-core": {}})
     with pytest.raises((AttributeError, TypeError)):
         e.image = "y"  # type: ignore[misc]
+
+
+def test_manifest_entry_plugins_dict_is_immutable(tmp_path: Path):
+    """plugins must be a read-only Mapping (MappingProxyType wrap)."""
+    path = tmp_path / "manifest.yaml"
+    append_entry(path, _entry("img-1", {"memory-core": {}}))
+    [entry] = load_manifest(path)
+    # MappingProxyType raises TypeError on item assignment / deletion
+    with pytest.raises(TypeError):
+        entry.plugins["evermemos"] = ManifestPlugin(  # type: ignore[index]
+            id="evermemos", kind="memory", version="bundled",
+            rev=None, source="bundled-source",
+        )
+    with pytest.raises(TypeError):
+        del entry.plugins["memory-core"]  # type: ignore[attr-defined]
+
+
+def test_round_trip_append_then_find_image(tmp_path: Path):
+    """PR2 will use append_entry then find_image — verify round trip works."""
+    path = tmp_path / "manifest.yaml"
+    append_entry(path, _entry("baseline", {"memory-core": {}}))
+    append_entry(path, _entry("with-evermemos", {
+        "memory-core": {},
+        "evermemos": {"rev": "abc1234"},
+    }))
+    append_entry(path, _entry("with-hypercompositor", {
+        "memory-core": {},
+        "hypercompositor": {"version": "0.9.6", "kind": "context-engine"},
+    }))
+    entries = load_manifest(path)
+    e = find_image(entries, memory_plugin=("evermemos", None), context_engine=None)
+    assert e.image == "with-evermemos"
+    assert e.plugins["evermemos"].rev == "abc1234"
+
+
+def test_load_unknown_kind_rejected(tmp_path: Path):
+    """Symmetry with registry: manifest plugin kind is also validated."""
+    p = _write(tmp_path, """
+        - image: img-1
+          openclaw_sha: abc
+          built_at: t1
+          plugins:
+            x:
+              kind: time-engine
+              version: bundled
+    """)
+    with pytest.raises(ManifestError, match="unknown kind"):
+        load_manifest(p)
+
+
+def test_load_plugins_must_be_mapping(tmp_path: Path):
+    p = _write(tmp_path, """
+        - image: img-1
+          openclaw_sha: abc
+          built_at: t1
+          plugins:
+            - not-a-mapping
+    """)
+    with pytest.raises(ManifestError, match="'plugins' must be a mapping"):
+        load_manifest(p)
+
+
+def test_load_plugin_body_must_be_mapping(tmp_path: Path):
+    p = _write(tmp_path, """
+        - image: img-1
+          openclaw_sha: abc
+          built_at: t1
+          plugins:
+            x: 42
+    """)
+    with pytest.raises(ManifestError, match="body must be a mapping"):
+        load_manifest(p)

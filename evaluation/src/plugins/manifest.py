@@ -19,14 +19,23 @@ Schema (one entry per image)::
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 
 import yaml
 
+from evaluation.src.plugins.registry import VALID_KINDS
 
-DEFAULT_MANIFEST_PATH = "evaluation/config/image_manifest.yaml"
+
+# Anchored at repo root.
+DEFAULT_MANIFEST_PATH = (
+    Path(__file__).resolve().parents[3] / "evaluation" / "config" / "image_manifest.yaml"
+)
+
+REQUIRED_ENTRY_FIELDS = ("image", "openclaw_sha", "built_at")
 
 
 class ManifestError(ValueError):
@@ -47,7 +56,7 @@ class ManifestEntry:
     image: str
     openclaw_sha: str
     built_at: str
-    plugins: dict[str, ManifestPlugin]
+    plugins: Mapping[str, ManifestPlugin]   # MappingProxyType — read-only
 
     def has_plugin(self, plugin_id: str, version: str | None = None) -> bool:
         if plugin_id not in self.plugins:
@@ -76,25 +85,47 @@ def _parse_entry(item: object, manifest_path: Path) -> ManifestEntry:
             f"{manifest_path}: each entry must be a mapping, "
             f"got {type(item).__name__}"
         )
-    image = item.get("image")
-    if not image:
-        raise ManifestError(f"{manifest_path}: entry missing 'image'")
-    plugins_raw = item.get("plugins") or {}
+    for field in REQUIRED_ENTRY_FIELDS:
+        if not item.get(field):
+            raise ManifestError(
+                f"{manifest_path}: entry missing required field {field!r} "
+                f"(have keys: {sorted(item.keys())})"
+            )
+    plugins_raw = item.get("plugins")
+    if plugins_raw is None:
+        plugins_raw = {}
+    if not isinstance(plugins_raw, dict):
+        raise ManifestError(
+            f"{manifest_path}: 'plugins' must be a mapping, "
+            f"got {type(plugins_raw).__name__}"
+        )
     plugins: dict[str, ManifestPlugin] = {}
     for plugin_id, body in plugins_raw.items():
-        body = body or {}
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            raise ManifestError(
+                f"{manifest_path}: plugin '{plugin_id}' body must be a "
+                f"mapping, got {type(body).__name__}"
+            )
+        kind = body.get("kind", "")
+        if kind and kind not in VALID_KINDS:
+            raise ManifestError(
+                f"{manifest_path}: plugin '{plugin_id}' has unknown "
+                f"kind={kind!r}, valid: {sorted(VALID_KINDS)}"
+            )
         plugins[plugin_id] = ManifestPlugin(
             id=plugin_id,
-            kind=body.get("kind", ""),
+            kind=kind,
             version=body.get("version", "bundled"),
             rev=body.get("rev"),
             source=body.get("source", ""),
         )
     return ManifestEntry(
-        image=image,
-        openclaw_sha=item.get("openclaw_sha", ""),
-        built_at=item.get("built_at", ""),
-        plugins=plugins,
+        image=item["image"],
+        openclaw_sha=item["openclaw_sha"],
+        built_at=item["built_at"],
+        plugins=MappingProxyType(plugins),
     )
 
 
@@ -154,16 +185,23 @@ def find_image(
     ]
     if not candidates:
         raise ManifestError(
-            f"no image matches memory={memory_plugin} ce={context_engine}. "
-            f"build with: openclaw-eval/harness/build.py "
+            f"no image matches memory={_fmt(memory_plugin)} "
+            f"ce={_fmt(context_engine)}. build with: "
+            f"openclaw-eval/harness/build.py "
             f"--memory-plugin {_fmt(memory_plugin)} "
             f"--context-engine {_fmt(context_engine)}"
         )
     if len(candidates) > 1:
         tags = ", ".join(c.image for c in candidates)
+        if memory_plugin is None and context_engine is None:
+            raise ManifestError(
+                f"{len(candidates)} images registered ({tags}); specify at "
+                f"least one of --memory-plugin / --context-engine to "
+                f"disambiguate."
+            )
         raise ManifestError(
-            f"{len(candidates)} images match memory={memory_plugin} "
-            f"ce={context_engine}: {tags}. "
+            f"{len(candidates)} images match memory={_fmt(memory_plugin)} "
+            f"ce={_fmt(context_engine)}: {tags}. "
             f"pin a version (id@version) to disambiguate."
         )
     return candidates[0]

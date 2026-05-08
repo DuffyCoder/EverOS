@@ -163,6 +163,20 @@ def test_missing_file_rejected(tmp_path: Path):
         load_registry(tmp_path / "does-not-exist.yaml")
 
 
+def test_empty_yaml_returns_empty_registry(tmp_path: Path):
+    """yaml that parses to None (empty file) should yield {}."""
+    p = tmp_path / "empty.yaml"
+    p.write_text("")
+    assert load_registry(p) == {}
+
+
+def test_explicit_empty_mapping_returns_empty(tmp_path: Path):
+    """yaml '{}' should yield empty registry without error."""
+    p = tmp_path / "empty.yaml"
+    p.write_text("{}\n")
+    assert load_registry(p) == {}
+
+
 # ---------- query helpers --------------------------------------------------
 
 def test_get_unknown_id_friendly_error(tmp_path: Path):

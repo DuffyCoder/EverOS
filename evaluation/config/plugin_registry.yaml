@@ -56,7 +56,8 @@ memclaw:
   type: npm
   npm_package: "memclaw"
 
-hindsight-plugin:
-  kind: memory
-  type: npm
-  npm_package: "hindsight-plugin"
+# Note: hindsight-plugin removed pending kind disambiguation.
+# README-install-mode.md uses --memory-plugin hindsight-plugin (memory),
+# but README-context-engine.md lists hindsight as a context-engine
+# example. Add it back when the actual published package's kind is
+# verified.

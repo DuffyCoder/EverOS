@@ -53,13 +53,13 @@ class PluginRef:
         ``--plugin-spec``). Bundled plugins raise.
         """
         if not self.is_npm:
-            raise RegistryError(
+            raise ResolverError(
                 f"{self.id}: not an npm plugin; npm_spec applies only to type=npm"
             )
         if override is not None:
             return override
         if not self.version:
-            raise RegistryError(
+            raise ResolverError(
                 f"{self.id}: npm plugin requires explicit version"
             )
         return f"npm:{self.entry.npm_package}@{self.version}"
