@@ -1,0 +1,62 @@
+# Plugin registry — single source of truth for "id → kind + how-to-build".
+#
+# Used by:
+#   - openclaw-eval/harness/build.py     (decides what to install/stage)
+#   - evaluation.cli                      (validates --memory-plugin / --context-engine)
+#   - evaluation/src/plugins/resolver.py  (parses id@version arguments)
+#
+# Schema (per entry):
+#
+#   <id>:
+#     kind: memory | context-engine | [memory, context-engine]
+#     type: base-extension | bundled-source | npm
+#     npm_package: <name>      # required when type=npm
+#     source_dir: <path>       # optional; type=bundled-source defaults to
+#                              # openclaw-eval/plugins/<id>
+#
+# type meanings:
+#   base-extension   only included via OPENCLAW_EXTENSIONS at openclaw-base layer
+#                    (built into the openclaw binary itself; no separate dir)
+#   bundled-source   staged from openclaw-eval/plugins/<id>/ into the openclaw
+#                    repo's extensions/<id>/ and opt-in via OPENCLAW_EXTENSIONS
+#   npm              installed at eval layer via `npm pack` in Dockerfile.eval;
+#                    landed at /opt/openclaw/extensions/<id>/
+
+memory-core:
+  kind: memory
+  type: base-extension
+
+noop:
+  kind: memory
+  type: base-extension
+
+evermemos:
+  kind: memory
+  type: bundled-source
+
+mem0:
+  kind: memory
+  type: bundled-source
+
+stub:
+  kind: memory
+  type: bundled-source
+
+stub-engine:
+  kind: context-engine
+  type: bundled-source
+
+hypercompositor:
+  kind: context-engine
+  type: npm
+  npm_package: "@psiclawops/hypercompositor"
+
+memclaw:
+  kind: context-engine
+  type: npm
+  npm_package: "memclaw"
+
+hindsight-plugin:
+  kind: memory
+  type: npm
+  npm_package: "hindsight-plugin"
