@@ -19,11 +19,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
+
+from dotenv import load_dotenv
+
+
+def load_project_env() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    env_file = repo_root / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+
+
+def default_openclaw_repo_path() -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    candidate = os.environ.get("OPENCLAW_REPO_PATH") or (repo_root / ".cache" / "openclaw-src")
+    return str(Path(candidate).resolve())
 
 
 def short_sha(path: Path, ref: str = "HEAD") -> str:
@@ -225,6 +241,34 @@ def compute_keep_extensions(
     return sorted(keep)
 
 
+def env_build_args(*names: str) -> list[str]:
+    args: list[str] = []
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            args.extend(["--build-arg", f"{name}={value}"])
+    return args
+
+
+def tag_image_alias(source_tag: str, alias_tag: str) -> None:
+    if not alias_tag or alias_tag == source_tag:
+        return
+    cmd = ["docker", "tag", source_tag, alias_tag]
+    run_step(f"Tag alias {alias_tag}", cmd)
+
+
+def default_eval_alias(
+    memory_plugin: str,
+    variant: str,
+    *,
+    install_plugin_id: Optional[str] = None,
+    install_spec: Optional[str] = None,
+) -> str:
+    if install_spec and install_plugin_id:
+        return f"openclaw-eval:install-{install_plugin_id}-{variant}"
+    return f"openclaw-eval:{memory_plugin}-{variant}"
+
+
 def stage_external_plugin(
     plugins_dir: Path,
     plugin_name: str,
@@ -285,6 +329,12 @@ def build_base(
         "docker", "build",
         "--build-arg", f"OPENCLAW_EXTENSIONS={extensions}",
         "--build-arg", f"OPENCLAW_VARIANT={variant}",
+        *env_build_args(
+            "OPENCLAW_NODE_BOOKWORM_IMAGE",
+            "OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE",
+            "OPENCLAW_NODE_BOOKWORM_DIGEST",
+            "OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST",
+        ),
         "-t", tag,
         ".",
     ]
@@ -532,15 +582,28 @@ def build_eval_layer(
 
 
 def main():
+    load_project_env()
     parser = argparse.ArgumentParser()
     parser.add_argument("--memory-plugin", default="memory-core",
                         help="memory-core | noop | <external_plugin_id>")
     parser.add_argument("--openclaw-repo",
-                        default="/Data3/shutong.shan/openclaw/repo",
-                        help="path to openclaw repo")
+                        default=default_openclaw_repo_path(),
+                        help=("path to openclaw repo; defaults to "
+                              "OPENCLAW_REPO_PATH or EverOS/.cache/openclaw-src"))
     parser.add_argument("--variant", default="slim", choices=["slim", "default"])
     parser.add_argument("--rebuild-base", action="store_true",
                         help="force rebuild base image even if cached")
+    parser.add_argument(
+        "--stable-alias",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help=(
+            "Additional stable alias tag(s) to apply to the built eval image. "
+            "A default alias is always added automatically (for example "
+            "'openclaw-eval:memory-core-slim'). Repeatable."
+        ),
+    )
     parser.add_argument("--install-spec",
                         default=None,
                         help=("Install plugin via 'openclaw plugins install <spec>' "
@@ -860,6 +923,21 @@ def main():
     print(f"[build]   base_tag:  {base_tag}")
     print(f"[build]   layer_tag: {layer_tag}")
 
+    stable_aliases = [
+        default_eval_alias(
+            args.memory_plugin,
+            args.variant,
+            install_plugin_id=args.install_plugin_id,
+            install_spec=args.install_spec,
+        )
+    ]
+    for alias in args.stable_alias:
+        if alias not in stable_aliases:
+            stable_aliases.append(alias)
+    for alias in stable_aliases:
+        tag_image_alias(layer_tag, alias)
+    print(f"[build]   stable_aliases: {stable_aliases}")
+
     if args.manifest_out:
         manifest = {
             "openclaw_sha": openclaw_sha,
@@ -868,6 +946,7 @@ def main():
             "variant": args.variant,
             "base_tag": base_tag,
             "eval_tag": layer_tag,
+            "stable_aliases": stable_aliases,
         }
         Path(args.manifest_out).write_text(json.dumps(manifest, indent=2))
         print(f"[build]   manifest: {args.manifest_out}")

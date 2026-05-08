@@ -363,3 +363,175 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ## 📄 License
 
 Same as the parent project.
+
+## OpenClaw Docker Workflow
+
+This section documents the end-to-end flow for running the `openclaw-docker`
+evaluation path with a pinned local OpenClaw repository and a stable Docker
+image alias.
+
+### When to use this path
+
+Use `openclaw-docker` when you want the OpenClaw runtime to execute inside a
+container instead of directly on the host. This is the recommended baseline
+when you want a reproducible image for comparisons such as:
+
+- `OpenClaw (memory-core)`
+- `OpenClaw + OpenViking Plugin (-memory-core)`
+- `OpenClaw + OpenViking Plugin (+memory-core)`
+
+### 1. Configure `.env`
+
+At minimum, make sure the evaluation root `.env` contains:
+
+```bash
+# Local/private OpenClaw source used for the image build
+OPENCLAW_GIT_URL=/absolute/path/or/private/git/url
+OPENCLAW_GIT_REF=<commit-or-tag>
+
+# Stable image alias consumed by evaluation/config/systems/openclaw-docker.yaml
+OPENCLAW_EVAL_IMAGE=openclaw-eval:memory-core-slim
+```
+
+If the upstream OpenClaw `Dockerfile` defaults to an internal registry that is
+not reachable in your environment, override the base images explicitly:
+
+```bash
+OPENCLAW_NODE_BOOKWORM_IMAGE=node:22-bookworm@sha256:b501c082306a4f528bc4038cbf2fbb58095d583d0419a259b2114b5ac53d12e9
+OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE=node:22-bookworm-slim@sha256:9c2c405e3ff9b9afb2873232d24bb06367d649aa3e6259cbe314da59578e81e9
+```
+
+The helper scripts below automatically load `EverOS/.env`.
+
+### 2. Materialize a pinned OpenClaw checkout
+
+This creates or updates a local checkout under `EverOS/.cache/openclaw-src`
+and detaches it at the ref from `OPENCLAW_GIT_REF`.
+
+```bash
+uv run python openclaw-eval/harness/prepare_openclaw_repo.py
+```
+
+Expected output looks like:
+
+```text
+[prepare-openclaw] ready
+[prepare-openclaw]   repo_path: /.../EverOS/.cache/openclaw-src
+[prepare-openclaw]   git_url:   /.../moltbot
+[prepare-openclaw]   git_ref:   c8b4887
+[prepare-openclaw]   commit:    c8b4887
+```
+
+If you want to switch to another OpenClaw commit later, update
+`OPENCLAW_GIT_REF` and rerun this command.
+
+### 3. Build the dockerized OpenClaw eval image
+
+Build the `memory-core` baseline image:
+
+```bash
+uv run python openclaw-eval/harness/build.py --memory-plugin memory-core
+```
+
+What this does:
+
+- builds the base image from the pinned OpenClaw checkout
+- builds the eval runtime layer from `openclaw-eval/Dockerfile.eval`
+- adds a stable alias tag in addition to the SHA-based tag
+
+For the bundled `memory-core` path, the stable alias is:
+
+```bash
+openclaw-eval:memory-core-slim
+```
+
+This alias is the default image consumed by
+`evaluation/config/systems/openclaw-docker.yaml`:
+
+```yaml
+openclaw_docker:
+  image: "${OPENCLAW_EVAL_IMAGE:openclaw-eval:memory-core-slim}"
+```
+
+### 4. Verify the image exists locally
+
+```bash
+docker image inspect openclaw-eval:memory-core-slim
+```
+
+If you want to inspect all related images:
+
+```bash
+docker images | rg "openclaw-(base|eval)"
+```
+
+### 5. Run a smoke test
+
+Recommended first check:
+
+```bash
+uv run python -m evaluation.cli \
+  --dataset locomo \
+  --system openclaw-docker \
+  --smoke \
+  --smoke-messages 0 \
+  --smoke-questions 1
+```
+
+Notes:
+
+- `--smoke` enables a reduced run over the dataset
+- `--smoke-messages 0` keeps all messages in each selected conversation
+- `--smoke-questions 1` limits to at most one question per conversation
+
+During startup you should see logs like:
+
+```text
+Loaded system config: openclaw-docker
+docker run for locomo_0: image=openclaw-eval:memory-core-slim
+```
+
+### 6. Run the full experiment
+
+Once smoke passes, run the full evaluation:
+
+```bash
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker
+```
+
+If you want to rerun only later stages after a previous partial run, use the
+existing stage controls documented above, for example:
+
+```bash
+uv run python -m evaluation.cli \
+  --dataset locomo \
+  --system openclaw-docker \
+  --stages search answer evaluate
+```
+
+### 7. Output locations
+
+Results are written under:
+
+```text
+evaluation/results/locomo-openclaw-docker
+```
+
+Container-specific artifacts for each conversation are stored under:
+
+```text
+evaluation/results/locomo-openclaw-docker/artifacts/openclaw/
+```
+
+### 8. Common operational notes
+
+- Changing `OPENCLAW_GIT_REF` changes the pinned OpenClaw checkout and usually
+  produces a new SHA-based base image tag.
+- The stable alias `openclaw-eval:memory-core-slim` lets the evaluation config
+  stay fixed even when the underlying SHA changes.
+- The base-image override variables only change which public/private base image
+  is pulled during `docker build`; they do not automatically push your built
+  image anywhere.
+- Heavy OpenClaw base-image steps such as apt installs only rerun when the
+  relevant base image tag is missing locally or when you rebuild against a new
+  OpenClaw commit.
