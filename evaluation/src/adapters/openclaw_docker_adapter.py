@@ -61,7 +61,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._docker_cfg: dict = cfg
         self._image: str = cfg["image"]
         self._max_concurrent: int = int(cfg.get("max_concurrent_containers", 4))
-        self._mem_limit: str = cfg.get("mem_limit", "2g")
+        raw_mem_limit = cfg.get("mem_limit", "2g")
+        self._mem_limit: str = str(raw_mem_limit).strip() if raw_mem_limit is not None else ""
         self._docker_network: str = cfg.get("network", "bridge")
         self._exec_timeout: int = int(
             cfg.get("per_rpc_timeout_seconds",
@@ -101,11 +102,12 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "--rm",
             "--user", f"{os.getuid()}:{os.getgid()}",
             "--network", self._docker_network,
-            "--memory", self._mem_limit,
             "--label", f"eval.run_id={self._run_id or 'unknown'}",
             "--label", f"eval.conv_id={conv_id}",
             "-v", f"{volume_dir}:/workspace:rw",
         ]
+        if self._mem_limit:
+            cmd.extend(["--memory", self._mem_limit])
         # Plugins that talk to a host-side service (e.g. evermemos plugin
         # fetching the EverMemOS HTTP API at host's :1995) need
         # host.docker.internal to resolve to the host machine. Docker
