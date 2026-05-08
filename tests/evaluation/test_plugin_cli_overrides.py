@@ -147,10 +147,12 @@ def test_memory_plugin_none_wires_to_noop(tmp_path: Path):
     assert cfg["openclaw"]["memory_mode"] == "noop"
 
 
-def test_memory_plugin_memory_core_no_image_constraint(tmp_path: Path):
-    """memory-core is base-extension; sets memory_mode but doesn't filter
-    images (memory-core is in every image)."""
+def test_memory_plugin_memory_core_no_image_lookup(tmp_path: Path):
+    """memory-core is base-extension and adds no image constraint. The
+    short-circuit must trigger: yaml image stays untouched, manifest is
+    NOT consulted (so even an ambiguous multi-entry manifest is fine)."""
     cfg = _baseline_yaml()
+    yaml_image_before = cfg["openclaw_docker"]["image"]
     res = apply_plugin_overrides(
         cfg,
         memory_plugin="memory-core",
@@ -159,21 +161,13 @@ def test_memory_plugin_memory_core_no_image_constraint(tmp_path: Path):
         per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
-        manifest_path=_seeded_manifest(tmp_path),
+        manifest_path=_seeded_manifest(tmp_path),  # 3 entries; would be ambiguous
     )
-    assert cfg["openclaw"]["memory_mode"] == "memory-core"
-    # All 3 manifest entries match (no constraint), so resolution is ambiguous.
-    # Wait — no: the function only filters when constraint is non-None. With
-    # no constraints either side, find_image with both None on >1 entries
-    # raises. But our test flow only fires resolution when ONE plugin override
-    # is passed AND has a non-baseline constraint. Here memory-core is
-    # base-extension -> _ref_to_constraint returns None -> no constraint
-    # -> find_image with both None on 3 images -> ambiguous error.
-    # Verify the error path: this should sys.exit. Actually we got here in
-    # the test; let's check what happened.
-    # Actually re-read: we DO call find_image when memory_plugin is not None,
-    # even if constraint is None. That's the bug. Test will catch it.
+    # Short-circuit: yaml image preserved, no resolved image returned.
+    assert cfg["openclaw_docker"]["image"] == yaml_image_before
+    assert res.image_resolved is None
     assert res.memory_mode_applied == "memory-core"
+    assert res.triggered_build is False
 
 
 # ---------- --context-engine -----------------------------------------------
@@ -374,6 +368,151 @@ def test_build_missing_failure_exits(tmp_path: Path):
 
 
 # ---------- combined behavior ----------------------------------------------
+
+def test_apply_overrides_is_idempotent(tmp_path: Path):
+    """Calling apply_plugin_overrides twice with the same args on the
+    same dict should produce the same final state."""
+    cfg = _baseline_yaml()
+    manifest_path = _seeded_manifest(tmp_path)
+
+    res1 = apply_plugin_overrides(
+        cfg,
+        memory_plugin="evermemos",
+        context_engine=None,
+        image=None,
+        per_qa_isolation="auto",
+        build_missing=False,
+        registry_path=SHIPPED_REGISTRY,
+        manifest_path=manifest_path,
+    )
+    snapshot1 = {
+        "memory_mode": cfg["openclaw"]["memory_mode"],
+        "image": cfg["openclaw_docker"]["image"],
+        "isolation": cfg["openclaw_docker"]["per_qa_isolation"],
+    }
+
+    res2 = apply_plugin_overrides(
+        cfg,
+        memory_plugin="evermemos",
+        context_engine=None,
+        image=None,
+        per_qa_isolation="auto",
+        build_missing=False,
+        registry_path=SHIPPED_REGISTRY,
+        manifest_path=manifest_path,
+    )
+    snapshot2 = {
+        "memory_mode": cfg["openclaw"]["memory_mode"],
+        "image": cfg["openclaw_docker"]["image"],
+        "isolation": cfg["openclaw_docker"]["per_qa_isolation"],
+    }
+    assert snapshot1 == snapshot2
+    assert res1 == res2
+
+
+def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
+    """Verify the subprocess.run argv contains the plugin selection — a
+    silent regression where --memory-plugin / --context-engine got
+    dropped from the build invocation would otherwise pass earlier
+    tests (returncode=0 is enough)."""
+    cfg = _baseline_yaml()
+    manifest_path = _seeded_manifest(tmp_path)
+    target_image = "openclaw-eval:7da23c3-evermemos_install-hypercompositor-deadbee-slim"
+    captured: dict[str, list[str]] = {}
+
+    def fake_build(cmd, *a, **kw):
+        captured["argv"] = list(cmd)
+        # Append the missing entry so the second find_image succeeds.
+        append_entry(manifest_path, _entry(target_image, {
+            "memory-core": {"kind": "memory", "source": "bundled"},
+            "evermemos": {
+                "kind": "memory", "version": "bundled",
+                "rev": "9b3a1f4", "source": "bundled-source",
+            },
+            "hypercompositor": {
+                "kind": "context-engine", "version": "0.9.6",
+                "source": "npm:@psiclawops/hypercompositor",
+            },
+        }))
+        class Result:
+            returncode = 0
+        return Result()
+
+    with patch("evaluation.src.plugins.cli_overrides.subprocess.run", side_effect=fake_build):
+        apply_plugin_overrides(
+            cfg,
+            memory_plugin="evermemos",
+            context_engine="hypercompositor@0.9.6",
+            image=None,
+            per_qa_isolation=None,
+            build_missing=True,
+            registry_path=SHIPPED_REGISTRY,
+            manifest_path=manifest_path,
+        )
+
+    argv = captured["argv"]
+    # First arg = sys.executable; second = build.py path
+    assert argv[1].endswith("build.py")
+    # Must carry both plugin selections forward to build.py
+    assert "--memory-plugin" in argv
+    mp_idx = argv.index("--memory-plugin")
+    assert argv[mp_idx + 1] == "evermemos"
+    assert "--context-engine" in argv
+    ce_idx = argv.index("--context-engine")
+    assert argv[ce_idx + 1] == "hypercompositor@0.9.6"
+    # Manifest path passed through so build.py appends to the same file
+    assert "--image-manifest-out" in argv
+    mo_idx = argv.index("--image-manifest-out")
+    assert Path(argv[mo_idx + 1]) == manifest_path
+
+
+def test_build_missing_does_not_pass_none_plugin_to_build(tmp_path: Path):
+    """When --memory-plugin none is the trigger, build.py should NOT
+    receive --memory-plugin none (which would shadow build.py's default).
+
+    Use a manifest seeded only with the baseline image (no hypercompositor)
+    so the resolution miss actually triggers the build path."""
+    cfg = _baseline_yaml()
+    manifest_path = tmp_path / "manifest.yaml"
+    _seed_manifest(manifest_path, [
+        _entry("openclaw-eval:7da23c3-memory-core-0000000-slim", {
+            "memory-core": {"kind": "memory", "source": "bundled"},
+        }),
+    ])
+    target_image = "openclaw-eval:7da23c3-install-hypercompositor-deadbee-slim"
+    captured: dict[str, list[str]] = {}
+
+    def fake_build(cmd, *a, **kw):
+        captured["argv"] = list(cmd)
+        append_entry(manifest_path, _entry(target_image, {
+            "memory-core": {"kind": "memory", "source": "bundled"},
+            "hypercompositor": {
+                "kind": "context-engine", "version": "0.9.6",
+                "source": "npm:@psiclawops/hypercompositor",
+            },
+        }))
+        class Result:
+            returncode = 0
+        return Result()
+
+    with patch("evaluation.src.plugins.cli_overrides.subprocess.run", side_effect=fake_build):
+        apply_plugin_overrides(
+            cfg,
+            memory_plugin="none",
+            context_engine="hypercompositor@0.9.6",
+            image=None,
+            per_qa_isolation=None,
+            build_missing=True,
+            registry_path=SHIPPED_REGISTRY,
+            manifest_path=manifest_path,
+        )
+
+    # 'none' in eval CLI means 'wire to noop'; build.py's image only needs
+    # hypercompositor, so memory-plugin shouldn't appear in the build argv.
+    argv = captured["argv"]
+    assert "--memory-plugin" not in argv
+    assert "--context-engine" in argv
+
 
 def test_two_plugins_both_overrides_image_resolves_full_combo(tmp_path: Path):
     cfg = _baseline_yaml()

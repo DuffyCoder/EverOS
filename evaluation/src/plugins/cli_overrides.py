@@ -60,10 +60,14 @@ def apply_plugin_overrides(
     image: Optional[str],
     per_qa_isolation: Optional[str],
     build_missing: bool,
-    registry_path: Path = None,
-    manifest_path: Path = None,
+    registry_path: Optional[Path] = None,
+    manifest_path: Optional[Path] = None,
 ) -> PluginOverrideResult:
-    """Mutate ``system_config`` per CLI overrides. Returns a summary.
+    """Apply CLI plugin overrides to ``system_config``.
+
+    **This function mutates ``system_config`` in place** and also returns
+    a summary of what was applied. Callers needing the original yaml
+    intact should ``copy.deepcopy(system_config)`` before invoking this.
 
     See module docstring for precedence rules. None values for
     ``memory_plugin`` / ``context_engine`` / ``image`` /
