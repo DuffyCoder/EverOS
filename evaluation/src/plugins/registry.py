@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
 
-VALID_KINDS = {"memory", "context-engine"}
-VALID_TYPES = {"base-extension", "bundled-source", "npm"}
+PluginKind = Literal["memory", "context-engine"]
+PluginType = Literal["base-extension", "bundled-source", "npm"]
+
+VALID_KINDS: frozenset[str] = frozenset({"memory", "context-engine"})
+VALID_TYPES: frozenset[str] = frozenset({"base-extension", "bundled-source", "npm"})
 
 # Anchored at the repo root so callers don't accidentally resolve it
 # against cwd. parents[3] = repo root (this file is at
@@ -48,6 +52,10 @@ def load_registry(path: str | Path) -> dict[str, PluginEntry]:
     p = Path(path)
     if not p.exists():
         raise RegistryError(f"plugin registry not found: {p}")
+    # NOTE: intentionally bypasses evaluation.src.utils.config.load_yaml,
+    # which performs ${VAR} env-var substitution. A registry plugin id
+    # like ``${something}`` (or version embedded as ``${X}``) would
+    # silently mutate. This file is metadata, not runtime config.
     raw = yaml.safe_load(p.read_text()) or {}
     if not isinstance(raw, dict):
         raise RegistryError(
@@ -136,14 +144,6 @@ def _normalize_kinds(
             f"valid: {sorted(VALID_KINDS)}"
         )
     return frozenset(kinds)
-
-
-# NOTE: registry exposes a plain dict + functional get/by_kind helpers
-# rather than a Registry class. Reasons:
-#   - dict[str, PluginEntry] is enough for PR1-5's read-only use cases
-#   - promoting to a class is a 3-call-site refactor if/when we need to
-#     attach path/schema_version/validators
-# Reviewers: see codex review of commit 7617071 "Design Risks #3".
 
 
 def get(registry: dict[str, PluginEntry], plugin_id: str) -> PluginEntry:

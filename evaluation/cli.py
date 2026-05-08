@@ -151,11 +151,11 @@ async def main():
         ),
     )
 
-    # Plugin selection overrides (PR3 plugin-cli-unify). Same grammar as
-    # build.py: <id> | <id>@<version> | none. When passed, these override
-    # the system yaml's openclaw.memory_mode / openclaw.context_engine_mode
-    # and the docker image is auto-resolved from
-    # evaluation/config/image_manifest.yaml.
+    # Plugin selection overrides (openclaw-docker adapter only). Same
+    # grammar as build.py: <id> | <id>@<version> | none. When passed,
+    # these override the system yaml's openclaw.memory_mode /
+    # openclaw.context_engine_mode and the docker image is auto-resolved
+    # from evaluation/config/image_manifest.yaml.
     parser.add_argument(
         "--memory-plugin",
         type=str,
@@ -202,11 +202,10 @@ async def main():
         default=None,
         choices=["snapshot", "auto", "off"],
         help=(
-            "Cross-QA isolation mode for context-engine runs (PR4 wires the "
-            "actual mechanism; PR3 only plumbs the value into config). "
+            "Cross-QA isolation mode for context-engine runs. "
             "snapshot: freeze /workspace/state after add(), restore per QA. "
             "auto: snapshot iff context_engine is non-empty. "
-            "off: share state across QAs (current R2 behavior)."
+            "off: share state across QAs (R2 leakage; documented baseline)."
         ),
     )
 
@@ -258,10 +257,10 @@ async def main():
             f"  🔧 Applied dataset overrides for {args.dataset}: {list(overrides.keys())}"
         )
 
-    # Apply CLI plugin overrides (PR3 plugin-cli-unify). When any of
-    # --memory-plugin / --context-engine / --image / --per-qa-isolation
-    # is passed, override the corresponding yaml fields. Image is auto-
-    # resolved from image_manifest.yaml when plugin overrides are passed.
+    # Apply CLI plugin overrides. When any of --memory-plugin /
+    # --context-engine / --image / --per-qa-isolation is passed, override
+    # the corresponding yaml fields. Image is auto-resolved from
+    # image_manifest.yaml when plugin overrides are passed.
     plugin_override = apply_plugin_overrides(
         system_config,
         memory_plugin=args.memory_plugin,

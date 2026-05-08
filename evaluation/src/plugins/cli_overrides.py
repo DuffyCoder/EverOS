@@ -1,4 +1,4 @@
-"""CLI plugin override + image resolution for evaluation.cli (PR3).
+"""CLI plugin override + image resolution for evaluation.cli.
 
 evaluation.cli accepts the same plugin grammar as build.py:
 ``--memory-plugin <id>[@v]|none`` and ``--context-engine <id>[@v]|none``.

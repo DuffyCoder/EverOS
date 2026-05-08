@@ -1,4 +1,4 @@
-"""Workspace state snapshot/restore for per-QA isolation (PR4 plugin-cli-unify).
+"""Workspace state snapshot/restore for per-QA isolation.
 
 Memory-plugin runs already get per-QA isolation "for free" because
 their memory store is read-only after add() (see
@@ -33,8 +33,11 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
+
+IsolationMode = Literal["snapshot", "off"]
+IsolationSetting = Literal["snapshot", "off", "auto"]
 
 SNAPSHOT_DIRNAME = ".qa_state_baseline"
 QA_STATES_DIRNAME = ".qa_states"
@@ -43,7 +46,7 @@ QA_STATES_DIRNAME = ".qa_states"
 def resolve_isolation_mode(
     isolation_setting: Optional[str],
     context_engine_mode: Optional[str],
-) -> str:
+) -> IsolationMode:
     """Resolve the configured ``per_qa_isolation`` value.
 
     - ``"snapshot"`` / ``"off"`` -> returned as-is.

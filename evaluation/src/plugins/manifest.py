@@ -71,6 +71,9 @@ def load_manifest(path: str | Path) -> list[ManifestEntry]:
     p = Path(path)
     if not p.exists():
         return []
+    # NOTE: intentionally bypasses evaluation.src.utils.config.load_yaml's
+    # env-var substitution. Image tags / plugin ids must round-trip
+    # verbatim; ``${VAR}``-shaped fields would silently mutate.
     raw = yaml.safe_load(p.read_text()) or []
     if not isinstance(raw, list):
         raise ManifestError(

@@ -33,6 +33,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import shutil
@@ -77,6 +78,7 @@ def short_sha(path: Path, ref: str = "HEAD") -> str:
     return res.stdout.strip()
 
 
+@functools.lru_cache(maxsize=None)
 def plugin_content_hash(plugin_dir: Path) -> str:
     """Hash of plugin source files for tag reproducibility.
 
@@ -85,6 +87,11 @@ def plugin_content_hash(plugin_dir: Path) -> str:
     path, which always rejected files when the plugin lived under
     ``.claude/worktrees/...`` — every file got filtered, leaving the empty
     sha256 prefix ``e3b0c44`` as the rev for any plugin in a worktree.
+
+    Memoized: ``compute_plugin_rev`` and ``build_manifest_plugins`` both
+    hash the same plugin during one build invocation. Cache lifetime is
+    process-scoped, so a single build run sees a stable hash even if the
+    plugin source were modified mid-build (which would be a separate bug).
     """
     if not plugin_dir.exists():
         return "0000000"
@@ -312,10 +319,9 @@ def build_eval_layer(
     and the entrypoint adds their extension dirs to
     ``plugins.load.paths`` via EXTRA_INSTALL_PLUGIN_IDS env.
 
-    ``tag_override`` lets the new (PR2 plugin-cli-unify) caller pass
-    in a tag computed from BOTH plugin slots together. The legacy
-    branch below derives a single-plugin tag and would otherwise
-    mislabel two-plugin builds.
+    ``tag_override`` lets the new caller pass in a tag computed from
+    BOTH plugin slots together. The legacy branch below derives a
+    single-plugin tag and would otherwise mislabel two-plugin builds.
     """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
@@ -352,7 +358,7 @@ def build_eval_layer(
     return tag
 
 
-# ---- New plugin-resolution helpers (PR2 plugin-cli-unify) ----------------
+# ---- Plugin-resolution helpers -------------------------------------------
 
 def _tag_segment(ref: Optional[PluginRef]) -> Optional[str]:
     """One plugin's contribution to an image tag, or None if it doesn't appear.

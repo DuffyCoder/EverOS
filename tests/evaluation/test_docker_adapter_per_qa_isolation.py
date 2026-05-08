@@ -1,4 +1,4 @@
-"""Integration tests for DockerizedOpenclawAdapter PR4 per-QA isolation wiring.
+"""Integration tests for DockerizedOpenclawAdapter per-QA isolation wiring.
 
 Verifies that the adapter's `_isolation_mode`, `_ensure_state_frozen`,
 `_restore_qa_state_dir`, and `_discard_qa_state` methods correctly
@@ -30,9 +30,18 @@ def _make_adapter(
     docker_cfg: dict | None = None,
 ):
     """Bypass __init__ so we don't need a real image / mongo / etc."""
+    from evaluation.src.adapters.openclaw.per_qa_isolation import (
+        resolve_isolation_mode,
+    )
     adapter = DockerizedOpenclawAdapter.__new__(DockerizedOpenclawAdapter)
     adapter._openclaw_cfg = openclaw_cfg
     adapter._docker_cfg = docker_cfg or {}
+    # Mirror the bits of __init__ that the per-QA isolation methods read.
+    adapter._isolation_mode_cache = resolve_isolation_mode(
+        adapter._docker_cfg.get("per_qa_isolation"),
+        adapter._openclaw_cfg.get("context_engine_mode"),
+    )
+    adapter._freeze_locks = {}
     # _append_events writes to sandbox-level events; tests don't care.
     adapter._append_events = lambda sandbox, events: None
     return adapter
@@ -103,7 +112,7 @@ def test_ensure_state_frozen_no_op_when_isolation_off(tmp_path: Path):
     # No baseline created.
     assert not (tmp_path / SNAPSHOT_DIRNAME).exists()
     # Sandbox not marked as frozen.
-    assert "_pr4_state_frozen" not in sandbox
+    assert "_state_frozen" not in sandbox
 
 
 def test_ensure_state_frozen_creates_baseline_when_snapshot(tmp_path: Path):
@@ -118,7 +127,7 @@ def test_ensure_state_frozen_creates_baseline_when_snapshot(tmp_path: Path):
     sandbox = _sandbox(tmp_path)
     asyncio.run(adapter._ensure_state_frozen(sandbox))
     assert (tmp_path / SNAPSHOT_DIRNAME / "memory.sqlite").read_bytes() == b"abc"
-    assert sandbox["_pr4_state_frozen"] is True
+    assert sandbox["_state_frozen"] is True
 
 
 def test_ensure_state_frozen_is_idempotent(tmp_path: Path):
@@ -210,24 +219,23 @@ def test_discard_qa_state_no_op_when_off(tmp_path: Path):
 
 # ---------- bridge state_dir override --------------------------------------
 
-def test_arun_bridge_via_docker_respects_caller_state_dir():
-    """When caller passes state_dir, _arun_bridge_via_docker must NOT
-    overwrite it with the default. Verify by inspecting the payload that
-    would have been sent (we monkeypatch docker exec)."""
-    captured: dict[str, dict] = {}
-
-    async def fake_create(*cmd, stdin, stdout, stderr):
+def _fake_subprocess_exec(captured: dict, response: bytes = b'{"ok": true}'):
+    """Build a fake asyncio.create_subprocess_exec that captures the JSON
+    payload sent over stdin and returns ``response`` on stdout."""
+    async def _exec(*cmd, stdin, stdout, stderr):
         class _P:
             returncode = 0
             async def communicate(self, input):
-                captured["payload"] = __import__("json").loads(input.decode())
-                return (b'{"ok": true}', b"")
-            def kill(self):
-                pass
-            async def wait(self):
-                pass
+                captured["payload"] = json.loads(input.decode())
+                return (response, b"")
+            def kill(self): pass
+            async def wait(self): pass
         return _P()
+    return _exec
 
+
+def _make_bridge_adapter():
+    """Bare-minimum adapter for _arun_bridge_via_docker tests."""
     adapter = _make_adapter(
         openclaw_cfg={"agent_llm": {"env_vars": []}},
         docker_cfg={},
@@ -237,75 +245,57 @@ def test_arun_bridge_via_docker_respects_caller_state_dir():
         "volume_dir": "/tmp/ws",
         "image": "fake-image",
     }}
+    return adapter
 
-    import asyncio as _asyncio
-    orig = _asyncio.create_subprocess_exec
-    _asyncio.create_subprocess_exec = fake_create
-    try:
-        payload = {
-            "command": "agent_run",
-            "state_dir": "/workspace/.qa_states/qa17",
-            "session_id": "conv0__qa17",
-            "message": "hello",
-        }
+
+def test_arun_bridge_via_docker_respects_caller_state_dir():
+    """When caller passes state_dir, _arun_bridge_via_docker must NOT
+    overwrite it with the default."""
+    captured: dict = {}
+    adapter = _make_bridge_adapter()
+    with patch(
+        "asyncio.create_subprocess_exec",
+        side_effect=_fake_subprocess_exec(captured),
+    ):
         asyncio.run(adapter._arun_bridge_via_docker(
-            "conv0", payload, timeout=10.0,
+            "conv0",
+            {
+                "command": "agent_run",
+                "state_dir": "/workspace/.qa_states/qa17",
+                "session_id": "conv0__qa17",
+                "message": "hello",
+            },
+            timeout=10.0,
         ))
-    finally:
-        _asyncio.create_subprocess_exec = orig
-
     assert captured["payload"]["state_dir"] == "/workspace/.qa_states/qa17"
-    # Other defaults still applied.
     assert captured["payload"]["repo_path"] == "/app"
     assert captured["payload"]["workspace_dir"] == "/workspace"
 
 
 def test_arun_bridge_via_docker_default_state_dir_when_caller_omits():
     """No caller state_dir -> default /workspace/state."""
-    captured: dict[str, dict] = {}
-
-    async def fake_create(*cmd, stdin, stdout, stderr):
-        class _P:
-            returncode = 0
-            async def communicate(self, input):
-                captured["payload"] = __import__("json").loads(input.decode())
-                return (b'{"ok": true}', b"")
-            def kill(self):
-                pass
-            async def wait(self):
-                pass
-        return _P()
-
-    adapter = _make_adapter(
-        openclaw_cfg={"agent_llm": {"env_vars": []}},
-        docker_cfg={},
-    )
-    adapter._docker_handles = {"conv0": {
-        "container_id": "fake-container",
-        "volume_dir": "/tmp/ws",
-        "image": "fake-image",
-    }}
-
-    import asyncio as _asyncio
-    orig = _asyncio.create_subprocess_exec
-    _asyncio.create_subprocess_exec = fake_create
-    try:
+    captured: dict = {}
+    adapter = _make_bridge_adapter()
+    with patch(
+        "asyncio.create_subprocess_exec",
+        side_effect=_fake_subprocess_exec(captured),
+    ):
         asyncio.run(adapter._arun_bridge_via_docker(
             "conv0",
             {"command": "agent_run", "session_id": "x", "message": "y"},
             timeout=10.0,
         ))
-    finally:
-        _asyncio.create_subprocess_exec = orig
-
     assert captured["payload"]["state_dir"] == "/workspace/state"
 
 
-# ---------- e2e _generate_answer_via_agent (PR4 review fix) ----------------
+# ---------- e2e _generate_answer_via_agent --------------------------------
 
 def _make_e2e_adapter(workspace: Path, ce_mode: str | None = None):
     """Build an adapter capable of running _generate_answer_via_agent
     end-to-end (with mocked subprocess invocation)."""
+    from evaluation.src.adapters.openclaw.per_qa_isolation import (
+        resolve_isolation_mode,
+    )
     adapter = DockerizedOpenclawAdapter.__new__(DockerizedOpenclawAdapter)
     adapter._openclaw_cfg = {
         "agent_llm": {"env_vars": []},
@@ -313,6 +303,11 @@ def _make_e2e_adapter(workspace: Path, ce_mode: str | None = None):
         **({"context_engine_mode": ce_mode} if ce_mode else {}),
     }
     adapter._docker_cfg = {"per_qa_isolation": "snapshot" if ce_mode else "off"}
+    adapter._isolation_mode_cache = resolve_isolation_mode(
+        adapter._docker_cfg.get("per_qa_isolation"),
+        adapter._openclaw_cfg.get("context_engine_mode"),
+    )
+    adapter._freeze_locks = {}
     adapter._exec_timeout = 30
     adapter._docker_handles = {"conv0": {
         "container_id": "fake", "volume_dir": str(workspace), "image": "fake",
@@ -425,13 +420,14 @@ def test_e2e_replay_skips_freeze_when_baseline_exists(tmp_path: Path):
     assert (baseline / "x.txt").read_text() == "v1-clean-add-end"
 
 
-# ---------- concurrent freeze (codex P1 fix) -------------------------------
+# ---------- concurrent freeze ---------------------------------------------
 
 def test_concurrent_ensure_state_frozen_runs_freeze_only_once(tmp_path: Path):
-    """Codex P1: answer.max_concurrent is global, so two QAs from the same
-    conv can call _ensure_state_frozen concurrently. Without the lock, both
-    would call freeze_state (rmtree + copytree) racing on the same baseline
-    dir. Verify the lock serializes them and freeze_state runs exactly once.
+    """answer.max_concurrent is global, so two QAs from the same conv can
+    call _ensure_state_frozen concurrently. Without the lock, both would
+    call freeze_state (rmtree + copytree) racing on the same baseline
+    dir. Verify the lock serializes them and freeze_state runs exactly
+    once.
     """
     state = tmp_path / "state"
     state.mkdir()
@@ -480,4 +476,4 @@ def test_concurrent_ensure_state_frozen_runs_freeze_only_once(tmp_path: Path):
     )
     # Baseline content intact (not corrupted by interleaved rmtree/copytree).
     assert (tmp_path / SNAPSHOT_DIRNAME / "marker.txt").read_text() == "baseline"
-    assert sandbox["_pr4_state_frozen"] is True
+    assert sandbox["_state_frozen"] is True
