@@ -140,11 +140,22 @@ class OpenClawAdapter(BaseAdapter):
                 # files/chunks. Skip flush/settle in that case — there's
                 # no memory state to verify. Agent_local + noop is a
                 # legitimate combo for the memory-sensitivity gate.
+                _early_flush_mode = sandbox.get("flush_mode", "shared_llm")
                 if memory_mode == "noop":
                     sandbox["visibility_state"] = "settled"
                     self._append_events(sandbox, [{
                         "event": "flush_skipped",
                         "reason": "memory_mode=noop",
+                    }])
+                elif _early_flush_mode == "agent_replay":
+                    # agent_replay path: memory creation is deferred to the
+                    # post-prebootstrap replay below. Skip the early
+                    # flush-and-settle (it would query an empty index and
+                    # fail the 'settled' assertion). Settlement runs after
+                    # replay+index instead.
+                    self._append_events(sandbox, [{
+                        "event": "flush_settle_deferred",
+                        "reason": "flush_mode=agent_replay",
                     }])
                 else:
                     # _flush_and_settle_if_needed is authoritative for
@@ -163,24 +174,58 @@ class OpenClawAdapter(BaseAdapter):
                 if answer_mode == "agent_local":
                     await self._prebootstrap_workspace(sandbox)
 
-                # Stage 3 Phase 5 R2 routing: when context_engine_mode is
-                # set AND yaml opts in via context_engine_ingest_mode!=none,
-                # replay conv messages through agent_run so the engine's
-                # afterTurn ingests them. Replies are discarded — engine
-                # session state is what QA relies on.
+                # Per-message agent_run replay through the gateway. Two
+                # independent triggers:
                 #
-                # Cost reality (LoCoMo): ~380 msgs/conv × ~80s each =
-                # ~8.5 hours per conv at sequential rate. The "none"
-                # default gives a wiring/prototype scorecard with empty
-                # session state (engine assemble injects only system prompt
-                # addition, no recall); "all" mode is operator-driven for
-                # true scoring runs.
+                #   (a) Stage 3 Phase 5 R2: context_engine_mode is set AND
+                #       yaml opts in via context_engine_ingest_mode!=none.
+                #       Replay drives the engine's afterTurn so its session
+                #       state is populated.
+                #
+                #   (b) flush_mode == "agent_replay": replay drives the
+                #       memory plugin's natural ingest path (memory-core's
+                #       runMemoryFlushIfNeeded fires when accumulated tokens
+                #       cross the threshold; OV-style afterTurn captures
+                #       per turn). No framework-side LLM, no fake flush.
+                #
+                # Cost reality (LoCoMo): ~380 msgs/conv × ~10-30s each.
+                # With 4 parallel containers, ~1-2h per conv set; total
+                # ~3-6h for full LoCoMo on 10 conversations.
                 ce_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
                 ingest_mode = (
                     self._openclaw_cfg.get("context_engine_ingest_mode") or "none"
                 ).strip()
-                if ce_mode and answer_mode == "agent_local" and ingest_mode != "none":
-                    await self._replay_conv_for_context_engine(sandbox, conv)
+                flush_mode_cfg = sandbox.get("flush_mode", "shared_llm")
+                ce_replay = ce_mode and ingest_mode != "none"
+                fm_replay = flush_mode_cfg == "agent_replay"
+                if (ce_replay or fm_replay) and answer_mode == "agent_local":
+                    await self._replay_conv_via_agent_run(sandbox, conv)
+                    # For agent_replay we deferred ingest-time index call
+                    # from _ingest_conversation; run it + the settle check
+                    # now so the FTS/vector index covers any memory/*.md
+                    # the agent's native flush wrote during replay, and
+                    # the visibility_state contract is honored.
+                    if fm_replay:
+                        index_resp = await self._invoke_bridge(
+                            sandbox,
+                            {**self._bridge_base_payload(sandbox),
+                             "command": "index"},
+                            timeout=self._index_timeout(),
+                        )
+                        sandbox["last_index_epoch"] = int(
+                            index_resp.get("index_epoch") or 0
+                        )
+                        sandbox["visibility_state"] = "ingested"
+                        self._append_events(
+                            sandbox,
+                            [{"event": "index_complete_post_replay",
+                              "index_epoch": sandbox["last_index_epoch"]}],
+                        )
+                        if memory_mode != "noop":
+                            await self._flush_and_settle_if_needed(sandbox)
+                            self._assert_visibility_contract(sandbox)
+                        else:
+                            sandbox["visibility_state"] = "settled"
             except Exception as err:
                 sandbox["run_status"] = "failed"
                 self._write_handle(sandbox, add_summary={"error": str(err)})
@@ -742,6 +787,7 @@ class OpenClawAdapter(BaseAdapter):
             context_engine_mode=context_engine_mode,
             agent_llm=agent_llm,
             embedding=self._openclaw_cfg.get("embedding"),
+            compaction_overrides=self._openclaw_cfg.get("compaction_overrides"),
         )
         resolved_config_path = Path(paths["config_path"])
         resolved_config_path.write_text(
@@ -785,7 +831,7 @@ class OpenClawAdapter(BaseAdapter):
                 json.dumps(add_summary, ensure_ascii=False, indent=2)
             )
 
-    async def _replay_conv_for_context_engine(
+    async def _replay_conv_via_agent_run(
         self, sandbox: dict, conv: Conversation
     ) -> None:
         """Replay each conv message through agent_run to seed the
@@ -803,9 +849,18 @@ class OpenClawAdapter(BaseAdapter):
         """Render each session as markdown and ask OpenClaw to build its FTS/vector index.
 
         flush_mode selects between:
-          * ``disabled``: raw transcript dumped to memory/session-*.md
-          * ``native``  : LLM-driven selective retention (OpenClaw's
-                         production memoryFlush behaviour approximated)
+          * ``disabled``    : raw transcript dumped to memory/session-*.md
+          * ``shared_llm``  : framework-LLM-driven selective retention
+                              (approximation of OpenClaw production flush;
+                              kept for backward compat with llm-backbone
+                              evals).
+          * ``agent_replay``: skip ingest-time markdown writing entirely.
+                              Memory creation is delegated to OpenClaw's
+                              own reply pipeline via per-message agent_run
+                              replay (driven by the post-ingest hook in
+                              add() above). For memory-core this hits the
+                              token-budget memoryFlush path; for context-
+                              engine plugins (OV) it hits afterTurn.
 
         The index step is always the real ``openclaw memory index --force``
         via the bridge - that is the point of faithful ingest. A bridge
@@ -813,6 +868,18 @@ class OpenClawAdapter(BaseAdapter):
         run_status=failed rather than silently producing an empty sandbox.
         """
         flush_mode = sandbox.get("flush_mode", "shared_llm")
+
+        # agent_replay: skip framework-side LLM flush + markdown write.
+        # Real memory creation happens via _replay_conv_via_agent_run
+        # (called from add() after this method returns). The bridge index
+        # call must run AFTER replay so it picks up whatever memory/ files
+        # the agent's flush eventually wrote — handled by add()'s post-
+        # replay branch, not here.
+        if flush_mode == "agent_replay":
+            self._append_events(sandbox, [{"event": "ingest_mode_agent_replay"}])
+            sandbox["visibility_state"] = "pending_replay"
+            return
+
         llm_generate = self._make_flush_generate() if flush_mode == "shared_llm" else None
 
         flush_plan: Optional[dict] = None

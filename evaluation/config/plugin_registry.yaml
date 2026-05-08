@@ -46,6 +46,17 @@ stub-engine:
   kind: context-engine
   type: bundled-source
 
+# OpenViking plugin — vendored from
+#   /Data3/shutong.shan/memory/refs/OpenViking/examples/openclaw-plugin/
+# into openclaw-eval/plugins/openviking/. kind=context-engine because the
+# plugin registers via api.registerContextEngine and uses afterTurn /
+# before_reset hooks for memory capture (it doesn't fill the memory slot).
+# Pair with --memory-plugin noop (OV-only) or --memory-plugin memory-core
+# (memory-core's flush left off; OV alone owns memory).
+openviking:
+  kind: context-engine
+  type: bundled-source
+
 hypercompositor:
   kind: context-engine
   type: npm

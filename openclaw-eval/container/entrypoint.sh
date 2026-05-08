@@ -58,6 +58,30 @@ else
   MEMORY_SEARCH_ENABLED='true'
 fi
 
+# memoryFlush controls (Phase 1: agent_replay support).
+#
+# Env vars (passed by openclaw_docker_adapter._docker_env_for_container
+# from yaml openclaw.compaction_overrides):
+#   MEMORY_FLUSH_ENABLED                  bool, default "false" (preserves
+#                                         legacy behavior — fake flush at
+#                                         ingest, no native turn-end flush).
+#   MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS    int, optional. softThresholdTokens
+#                                         override; openclaw default 4000.
+#   MEMORY_FLUSH_RESERVE_TOKENS_FLOOR     int, optional. reserveTokensFloor
+#                                         override; openclaw default 20000.
+#   MEMORY_FLUSH_FORCE_FLUSH_TRANSCRIPT_BYTES   int|str, optional. byte
+#                                         threshold for force flush; openclaw
+#                                         default 2MB. Accepts numbers or
+#                                         strings ("100kb", "2mb").
+#
+# Empty values mean "don't override" — the field is omitted from the
+# rendered config, so OpenClaw's own defaults from
+# extensions/memory-core/src/flush-plan.ts apply.
+MEMORY_FLUSH_ENABLED="${MEMORY_FLUSH_ENABLED:-false}"
+MEMORY_FLUSH_SOFT="${MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS:-}"
+MEMORY_FLUSH_RESERVE="${MEMORY_FLUSH_RESERVE_TOKENS_FLOOR:-}"
+MEMORY_FLUSH_FORCE_BYTES="${MEMORY_FLUSH_FORCE_FLUSH_TRANSCRIPT_BYTES:-}"
+
 # Model id/name defaults (can be overridden via env).
 LLM_MODEL_ID="${LLM_MODEL:-gpt-4.1-mini}"
 LLM_MODEL_NAME="${LLM_MODEL_NAME:-${LLM_MODEL_ID} (sophnet)}"
@@ -108,11 +132,25 @@ jq \
   --argjson enabled "$MEMORY_SEARCH_ENABLED" \
   --argjson loadPaths "$INSTALL_LOAD_PATHS" \
   --arg ceSlot "$CONTEXT_ENGINE_PLUGIN" \
+  --argjson flushEnabled "$MEMORY_FLUSH_ENABLED" \
+  --arg flushSoft "$MEMORY_FLUSH_SOFT" \
+  --arg flushReserve "$MEMORY_FLUSH_RESERVE" \
+  --arg flushForceBytes "$MEMORY_FLUSH_FORCE_BYTES" \
   '
   .plugins.allow = $allow
   | .plugins.slots.memory = $slot
   | .plugins.entries = $entries
   | .agents.defaults.memorySearch.enabled = $enabled
+  | .agents.defaults.compaction.memoryFlush.enabled = $flushEnabled
+  | (if $flushSoft != ""
+       then .agents.defaults.compaction.memoryFlush.softThresholdTokens = ($flushSoft | tonumber)
+       else . end)
+  | (if $flushReserve != ""
+       then .agents.defaults.compaction.reserveTokensFloor = ($flushReserve | tonumber)
+       else . end)
+  | (if $flushForceBytes != ""
+       then .agents.defaults.compaction.memoryFlush.forceFlushTranscriptBytes = $flushForceBytes
+       else . end)
   | (if ($loadPaths | length) > 0 then .plugins.load.paths = $loadPaths else . end)
   | (if ($ceSlot | length) > 0 then .plugins.slots.contextEngine = $ceSlot else . end)
   ' "$TPL" \
@@ -125,7 +163,7 @@ jq \
 # Validate it parses as JSON.
 jq empty "$OUT" 2>&1 || { echo "ERROR: rendered $OUT is not valid JSON" >&2; cat "$OUT" >&2; exit 1; }
 
-echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED)" >&2
+echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED memoryFlush.enabled=$MEMORY_FLUSH_ENABLED soft=$MEMORY_FLUSH_SOFT reserve=$MEMORY_FLUSH_RESERVE force_bytes=$MEMORY_FLUSH_FORCE_BYTES)" >&2
 
 # Optional plugin sidecar (e.g. mem0 FastAPI server). Started in
 # background so the container's main CMD (sleep infinity) keeps running

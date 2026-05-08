@@ -201,6 +201,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         ce_mode = self._openclaw_cfg.get("context_engine_mode")
         if isinstance(ce_mode, str) and ce_mode.strip():
             pairs.append(("CONTEXT_ENGINE_PLUGIN_ID", ce_mode.strip()))
+
+        # agent_replay ingest: forward compaction_overrides so entrypoint
+        # renders agents.defaults.compaction.memoryFlush with the overrides.
+        # Container default (env unset) keeps memoryFlush.enabled=false to
+        # preserve legacy behavior. yaml openclaw.compaction_overrides shape:
+        #   compaction_overrides:
+        #     enabled: true
+        #     soft_threshold_tokens: 90000     # forces flush at low input
+        #     reserve_tokens_floor: 20000
+        #     force_flush_transcript_bytes: "100kb"
+        overrides = self._openclaw_cfg.get("compaction_overrides") or {}
+        if isinstance(overrides, dict):
+            if "enabled" in overrides:
+                pairs.append((
+                    "MEMORY_FLUSH_ENABLED",
+                    "true" if overrides.get("enabled") else "false",
+                ))
+            if overrides.get("soft_threshold_tokens") is not None:
+                pairs.append((
+                    "MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS",
+                    str(overrides["soft_threshold_tokens"]),
+                ))
+            if overrides.get("reserve_tokens_floor") is not None:
+                pairs.append((
+                    "MEMORY_FLUSH_RESERVE_TOKENS_FLOOR",
+                    str(overrides["reserve_tokens_floor"]),
+                ))
+            if overrides.get("force_flush_transcript_bytes") is not None:
+                pairs.append((
+                    "MEMORY_FLUSH_FORCE_FLUSH_TRANSCRIPT_BYTES",
+                    str(overrides["force_flush_transcript_bytes"]),
+                ))
         # Pass-through secret + endpoint env vars from process env, only if
         # the yaml whitelist contains them (defense-in-depth: container only
         # ever receives env vars its config explicitly opted into).
@@ -751,7 +783,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "via": "docker",
         }])
 
-    async def _replay_conv_for_context_engine(
+    async def _replay_conv_via_agent_run(
         self, sandbox: dict, conv
     ) -> None:
         """Stage 3 Phase 5 R2 routing: feed each conv message through

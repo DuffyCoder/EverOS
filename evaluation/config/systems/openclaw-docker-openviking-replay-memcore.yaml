@@ -1,0 +1,102 @@
+# OV + memory-core on LoCoMo via per-message agent_run replay.
+#
+# Wiring (B1 — memory-core in memory slot, OV in context-engine slot,
+# memory-core flush OFF so the two systems don't write competing memory):
+#   * memory_mode=memory-core: agent gets memory_search/memory_get tools.
+#     memorySearch active over the OpenClaw FTS+vector store.
+#   * memoryFlush.enabled stays OFF (compaction_overrides.enabled=false)
+#     — memory-core's flush would write its own memory/*.md files in
+#     parallel with OV's afterTurn captures. We want a clean OV-only
+#     ingest semantic; memory-core acts as a passive read-side surface.
+#   * context_engine_mode=openviking: OV's afterTurn captures per turn,
+#     auto-recall via before_prompt_build injects OV memories.
+#
+# At QA time the agent has BOTH:
+#   - OV's auto-recall content prepended via context-engine assemble
+#   - memory_search tool (over memory-core's index, empty since flush off)
+#
+# This is the "stacked surfaces" eval: does OV alongside memory-core's
+# tool surface change agent behavior vs OV-only (B2)?
+#
+# Image: same tag as the noop variant — context-engine is the only
+# bundled-source plugin, memory-core is base-extension. Runtime memory
+# slot is selected by MEMORY_PLUGIN_ID env (set by docker adapter from
+# yaml memory_mode).
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  max_concurrent: 4
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "agent_replay"
+  answer_mode: "agent_local"
+  memory_mode: "memory-core"
+  context_engine_mode: "openviking"
+  context_engine_ingest_mode: "all"
+  agent_timeout_seconds: 90
+  # B1: memory-core's flush stays off. memorySearch is still active so
+  # the agent has the tool, but the index has no entries. Real recall
+  # comes from OV's before_prompt_build hook.
+  compaction_overrides:
+    enabled: false
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+      - "OPENVIKING_BASE_URL"
+      - "OPENVIKING_API_KEY"
+      - "OPENVIKING_AGENT_PREFIX"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "agent_replay"
+    answer_mode: "shared"
+
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-openviking-b7e6bcb-slim"
+  max_concurrent_containers: 4
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 150
+  add_host_gateway: true

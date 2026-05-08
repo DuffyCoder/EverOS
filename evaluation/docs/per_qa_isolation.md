@@ -100,7 +100,7 @@ asymmetries documented in `evaluation/docs/openclaw_adapter.md`:
 
 1. **add-phase work**: memory plugins one-shot ingest into a markdown
    store; CE plugins replay every conv message through `agent_run`
-   (see `_replay_conv_for_context_engine` in `openclaw_docker_adapter.py`).
+   (see `_replay_conv_via_agent_run` in `openclaw_docker_adapter.py`).
    Different cost basis, different prompt-shaping.
 
 2. **retrieval mechanism**: memory plugin = LLM-driven explicit tool

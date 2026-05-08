@@ -47,6 +47,7 @@ def build_openclaw_resolved_config(
     context_engine_mode: Optional[str] = None,
     agent_llm: Optional[dict] = None,
     embedding: Optional[dict] = None,
+    compaction_overrides: Optional[dict] = None,
 ) -> dict:
     """Return the dict that OpenClaw CLI expects at OPENCLAW_CONFIG_PATH.
 
@@ -115,10 +116,39 @@ def build_openclaw_resolved_config(
         )
         memory_search["remote"] = _build_embedding_remote(embedding or {})
 
-    # Only deliberate deviation from OpenClaw native: keep the in-search
-    # flush off because we drive flush ourselves at ingest. Everything
-    # else under compaction.* is left implicit so OpenClaw applies its
-    # own defaults.
+    # compaction.memoryFlush:
+    #
+    # * shared_llm / disabled flush_mode: bench drives flush itself at
+    #   ingest, so OpenClaw's in-turn flush stays OFF (legacy behavior).
+    #
+    # * agent_replay flush_mode: bench delegates flush to OpenClaw's own
+    #   reply pipeline, so the in-turn flush must be ON. yaml may also
+    #   provide compaction_overrides to tune softThresholdTokens etc. so
+    #   the threshold is reachable within LoCoMo conversation sizes.
+    overrides = compaction_overrides or {}
+    if flush_mode == "agent_replay":
+        memory_flush_block: dict[str, Any] = {
+            "enabled": bool(overrides.get("enabled", True)),
+        }
+    else:
+        memory_flush_block = {
+            "enabled": bool(overrides.get("enabled", False)),
+        }
+    if overrides.get("soft_threshold_tokens") is not None:
+        memory_flush_block["softThresholdTokens"] = int(
+            overrides["soft_threshold_tokens"]
+        )
+    if overrides.get("force_flush_transcript_bytes") is not None:
+        # Native parser accepts numbers OR strings ("100kb", "2mb").
+        memory_flush_block["forceFlushTranscriptBytes"] = overrides[
+            "force_flush_transcript_bytes"
+        ]
+    compaction_block: dict[str, Any] = {"memoryFlush": memory_flush_block}
+    if overrides.get("reserve_tokens_floor") is not None:
+        compaction_block["reserveTokensFloor"] = int(
+            overrides["reserve_tokens_floor"]
+        )
+
     resolved: dict[str, Any] = {
         "memory": {"backend": "builtin"},
         "agents": {
@@ -126,9 +156,7 @@ def build_openclaw_resolved_config(
                 "workspace": workspace_dir,
                 "userTimezone": "UTC",
                 "memorySearch": memory_search,
-                "compaction": {
-                    "memoryFlush": {"enabled": False},
-                },
+                "compaction": compaction_block,
             }
         },
     }
