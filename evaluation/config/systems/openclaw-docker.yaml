@@ -63,8 +63,10 @@ openclaw:
 
 # v0.7 Stage 1: docker-specific config
 openclaw_docker:
-  image: "${OPENCLAW_EVAL_IMAGE:openclaw-eval:memory-core-slim}"
+  image: "openclaw-eval:memory-core-baseline-slim"
+  # openclaw-eval:memory-core-baseline-slim is a version with memory-core based on
+  # the basic cleaned image ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim
   max_concurrent_containers: 4
-  mem_limit: "2g"
+  mem_limit: "" # depends on the environment and machine resources, some cases this parameter can be omitted
   network: "bridge"
   per_rpc_timeout_seconds: 210
