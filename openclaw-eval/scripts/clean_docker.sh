@@ -38,7 +38,7 @@ echo "[clean] step 1: stopping running eval containers..."
 running=$(docker ps --filter "ancestor=openclaw-eval:*" --format '{{.ID}}' 2>/dev/null || true)
 # also match by name prefix from our smoke gates
 running="$running $(docker ps --format '{{.ID}} {{.Names}}' \
-  | grep -E 'stub-engine-gate|hyper-(probe|run|mt|mt2|mt3|r[0-9]+)|memclaw-(probe|run)' \
+  | grep -E 'stub-engine-gate|hyper-(probe|run|mt|mt2|mt3|r[0-9]+)|memclaw(-context-engine)?-(probe|run)' \
   | awk '{print $1}' || true)"
 running=$(echo "$running" | tr ' ' '\n' | sort -u | grep -v '^$' || true)
 if [ -n "$running" ]; then

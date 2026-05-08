@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -451,8 +452,14 @@ def test_concurrent_ensure_state_frozen_runs_freeze_only_once(tmp_path: Path):
 
     def counting_freeze(workspace):
         call_count["n"] += 1
-        # Sleep briefly to widen the race window if locking is wrong.
-        import time
+        # time.sleep is intentional here, not asyncio.sleep: freeze_state
+        # is invoked via loop.run_in_executor (i.e. on a thread pool
+        # worker), so blocking the worker does NOT block the event loop.
+        # The loop remains free to schedule the other 4 coroutines, which
+        # will either contend on the lock (correct behavior) or call
+        # freeze_state again (regression). Empirically validated by
+        # temporarily removing the lock — without it, this test fails
+        # with FileExistsError on the second copytree.
         time.sleep(0.02)
         return real_freeze(workspace)
 
