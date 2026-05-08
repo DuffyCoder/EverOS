@@ -33,7 +33,10 @@ import time
 from pathlib import Path
 from typing import Any, List, Optional
 
-from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
+from evaluation.src.adapters.openclaw.adapter import (
+    OpenClawAdapter,
+    _default_context_engine_env_vars,
+)
 from evaluation.src.adapters.openclaw.runtime import (
     BridgeError,
     BridgeTimeout,
@@ -64,6 +67,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         raw_mem_limit = cfg.get("mem_limit", "2g")
         self._mem_limit: str = str(raw_mem_limit).strip() if raw_mem_limit is not None else ""
         self._docker_network: str = cfg.get("network", "bridge")
+        self._disable_healthcheck: bool = bool(cfg.get("disable_healthcheck", False))
         self._exec_timeout: int = int(
             cfg.get("per_rpc_timeout_seconds",
                     self._openclaw_cfg.get("agent_timeout_seconds", 180) + 30)
@@ -108,6 +112,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         ]
         if self._mem_limit:
             cmd.extend(["--memory", self._mem_limit])
+        if self._disable_healthcheck:
+            cmd.append("--no-healthcheck")
         # Plugins that talk to a host-side service (e.g. evermemos plugin
         # fetching the EverMemOS HTTP API at host's :1995) need
         # host.docker.internal to resolve to the host machine. Docker
@@ -146,16 +152,23 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
     def _docker_env_for_container(
         self, conv_id: Optional[str] = None
     ) -> list[tuple[str, Optional[str]]]:
-        """Compute -e flags for `docker run`. Mirrors bridge envForSandbox
-        whitelist semantics: only forwards yaml-declared env_vars.
+        """Compute -e flags for `docker run`.
+
+        Mirrors bridge envForSandbox semantics: yaml-declared env vars are
+        forwarded, and known context-engine plugins get a tiny implicit
+        allowlist so ``context_engine_mode`` alone is enough for the common
+        case.
 
         ``conv_id`` (when provided) is propagated as ``EVERMEMOS_GROUP_ID``
         so the evermemos plugin scopes its memory_search to the active
         LoCoMo conversation. Other plugins ignore the var.
         """
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
-        embedding = self._openclaw_cfg.get("embedding") or {}
-        env_vars: list[str] = list(agent_llm.get("env_vars") or [])
+        context_engine_mode = self._openclaw_cfg.get("context_engine_mode")
+        env_vars: list[str] = sorted({
+            *[name for name in (agent_llm.get("env_vars") or []) if isinstance(name, str)],
+            *_default_context_engine_env_vars(context_engine_mode),
+        })
         # Always forward MEMORY_PLUGIN_ID + MEMORY_MODE (entrypoint reads them).
         memory_plugin_id = self._openclaw_cfg.get("memory_mode", "memory-core")
         memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")

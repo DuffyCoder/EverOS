@@ -70,6 +70,11 @@ def test_derive_plugin_id_marketplace():
     assert build.derive_plugin_id_from_spec("marketplace:my-engine") == "my-engine"
 
 
+def test_derive_plugin_id_local():
+    build = _import_build()
+    assert build.derive_plugin_id_from_spec("local:openviking") == "openviking"
+
+
 def test_derive_plugin_id_unknown_returns_none():
     build = _import_build()
     assert build.derive_plugin_id_from_spec("./local-path") is None

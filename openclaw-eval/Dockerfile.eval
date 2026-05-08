@@ -158,12 +158,20 @@ RUN mkdir -p /opt/openclaw && chown -R node:node /opt/openclaw
 # to plugins.load.paths so the runtime sees them like any other plugin.
 #
 # Spec format: same as `openclaw plugins install` (npm spec like
-# "@scope/name@version" or "name@version"). We strip an optional "npm:"
-# prefix for compatibility with build.py docs/examples.
+# "@scope/name@version" or "name@version"), plus `local:<name>` which
+# resolves to `openclaw-eval/plugins/<name>/` from the docker build context.
+# We strip an optional "npm:" prefix for compatibility with build.py docs/examples.
 USER node
-RUN if [ -n "${INSTALL_SPEC}" ]; then \
+RUN --mount=type=bind,source=plugins,target=/eval-plugins,ro if [ -n "${INSTALL_SPEC}" ]; then \
       echo "[Dockerfile.eval] installing plugin: ${INSTALL_SPEC} (id=${INSTALL_PLUGIN_ID})"; \
-      spec="${INSTALL_SPEC#npm:}"; \
+      resolve_spec() { \
+        case "$1" in \
+          npm:*) printf '%s' "${1#npm:}" ;; \
+          local:*) printf '%s' "/eval-plugins/${1#local:}" ;; \
+          *) printf '%s' "$1" ;; \
+        esac; \
+      }; \
+      spec="$(resolve_spec "${INSTALL_SPEC}")"; \
       mkdir -p "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
       cd "/opt/openclaw/extensions/${INSTALL_PLUGIN_ID}"; \
       tarball="$(npm pack "$spec" --silent)"; \
@@ -172,14 +180,21 @@ RUN if [ -n "${INSTALL_SPEC}" ]; then \
       npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true; \
       ls -la /opt/openclaw/extensions/; \
     fi
-RUN if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
+RUN --mount=type=bind,source=plugins,target=/eval-plugins,ro if [ -n "${EXTRA_INSTALL_SPECS}" ]; then \
       ids="${EXTRA_INSTALL_PLUGIN_IDS}"; \
       i=0; \
+      resolve_spec() { \
+        case "$1" in \
+          npm:*) printf '%s' "${1#npm:}" ;; \
+          local:*) printf '%s' "/eval-plugins/${1#local:}" ;; \
+          *) printf '%s' "$1" ;; \
+        esac; \
+      }; \
       for spec in ${EXTRA_INSTALL_SPECS}; do \
         i=$((i+1)); \
         pid=$(echo $ids | cut -d ' ' -f $i); \
         echo "[Dockerfile.eval] installing extra plugin: $spec (id=$pid)"; \
-        spec_clean="${spec#npm:}"; \
+        spec_clean="$(resolve_spec "$spec")"; \
         mkdir -p "/opt/openclaw/extensions/$pid"; \
         cd "/opt/openclaw/extensions/$pid"; \
         tarball="$(npm pack "$spec_clean" --silent)"; \

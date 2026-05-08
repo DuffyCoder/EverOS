@@ -360,6 +360,86 @@ cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_
 uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ```
 
+
+### OpenViking Docker Evaluation
+
+For the baseline memory-core docker image, the simplest build command is:
+
+```bash
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin memory-core \
+  --stable-alias openclaw-eval:memory-core-baseline-slim
+```
+
+That command automatically reuses the published eval-base image
+`ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim`
+unless you override it with `OPENCLAW_EVAL_BASE_IMAGE` or `--eval-base-image`.
+
+The repository also includes two `openclaw-docker` system configs for an
+external `openviking-server` used as an OpenClaw `context-engine` plugin:
+
+- `openclaw-docker-openviking`: OpenViking-only (`memory_mode=noop`)
+- `openclaw-docker-openviking-memory-core`: OpenViking + `memory-core`
+
+Both configs reuse the same answer LLM and Docker runtime defaults, disable
+the inherited image `HEALTHCHECK` noise, and expect OpenViking to be reachable
+from the container at `OPENVIKING_BASE_URL` (default
+`http://host.docker.internal:1933`).
+
+For the common case, `context_engine_mode: "openviking"` is the only plugin
+switch you need. If `context_engine_mode` is empty, no context-engine slot is
+rendered. The OpenViking plugin reads its remote endpoint directly from env,
+so you do not need a separate `context_engine:` block just to pass `baseUrl`.
+
+Build the plugin image from a pulled eval-base image:
+
+```bash
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin memory-core \
+  --install-spec "local:openviking" \
+  --stable-alias openviking-only-slim \
+  --eval-base-image ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim
+
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin memory-core \
+  --install-spec "local:openviking" \
+  --stable-alias openviking-memory-core-slim \
+  --eval-base-image ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim
+
+Required `.env` additions are documented in `env.template`:
+
+```bash
+OPENVIKING_BASE_URL=http://host.docker.internal:1933
+```
+
+If your remote OpenViking server explicitly enables auth, add
+`OPENVIKING_API_KEY` to your real `.env`; otherwise you can leave it absent.
+
+Recommended wiring verification:
+
+```bash
+# 1. Check the server from the Docker host first.
+curl "$OPENVIKING_BASE_URL/health"
+
+# 2. Run a 1-conversation smoke test.
+uv run python -m evaluation.cli --dataset locomo \
+  --system openclaw-docker-openviking \
+  --smoke --smoke-messages 10 --smoke-questions 1
+
+# 3. Repeat with memory-core kept on.
+uv run python -m evaluation.cli --dataset locomo \
+  --system openclaw-docker-openviking-memory-core \
+  --smoke --smoke-messages 10 --smoke-questions 1
+```
+
+When the wiring is correct, inspect the run artifacts under
+`evaluation/results/.../artifacts/openclaw/` and confirm:
+
+- `openclaw.json` contains `plugins.slots.contextEngine = "openviking"`
+- `plugins.entries.openviking.enabled` is true (config can stay empty)
+- bridge / agent logs include `openviking: registered context-engine`
+- the OpenViking server receives `/health`, search, and session traffic during the run
+
 ## 📄 License
 
 Same as the parent project.

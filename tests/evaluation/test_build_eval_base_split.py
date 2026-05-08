@@ -118,15 +118,68 @@ def test_eval_base_image_and_build_eval_base_are_mutually_exclusive(
     assert "mutually exclusive" in err
 
 
-def test_eval_base_image_requires_install_spec(monkeypatch, capsys):
-    """Pre-built eval-base only works for install-spec mode (bundled
-    plugins still need to bake into openclaw-base, not the eval-base layer)."""
+def test_eval_base_image_without_install_spec_rejects_external_plugin(monkeypatch, capsys):
+    """Pre-built eval-base without install-spec is only valid for bundled
+    baseline modes like memory-core/noop."""
     err = _call_main_expect_exit(
         monkeypatch, capsys,
         "--eval-base-image", "ghcr.io/foo/openclaw-eval-base:abc-clean-XXX-slim",
         "--memory-plugin", "stub-engine",
     )
-    assert "only supports install-spec mode" in err
+    assert "only supports bundled baseline modes" in err
+
+
+def test_default_eval_base_image_for_memory_core():
+    build = _import_build()
+    assert build.default_eval_base_image("memory-core", None) == (
+        "ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim"
+    )
+
+
+def test_short_sha_from_eval_base_image():
+    build = _import_build()
+    assert build.short_sha_from_eval_base_image(
+        "ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim"
+    ) == "7da23c3"
+
+
+def test_eval_base_image_allows_memory_core_without_install_spec(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    monkeypatch.setattr(_BUILD, "short_sha", lambda _repo: "7da23c3")
+    monkeypatch.setattr(_BUILD, "docker_image_exists", lambda _tag: False)
+    monkeypatch.setattr(_BUILD, "load_project_env", lambda: None)
+    monkeypatch.setattr(_BUILD.shutil, "which", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(
+        _BUILD, "run_step",
+        lambda label, cmd, cwd=None: captured.append((label, cmd)),
+    )
+
+    fake_repo = tmp_path / "openclaw-src"
+    fake_repo.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "build.py",
+            "--memory-plugin", "memory-core",
+            "--openclaw-repo", str(fake_repo),
+            "--stable-alias", "openclaw-eval:memory-core-baseline-slim",
+        ],
+    )
+
+    _BUILD.main()
+
+    assert any("Dockerfile.eval-plugin" in " ".join(cmd) for _, cmd in captured)
+    assert any(
+        cmd[:3] == ["docker", "tag", "openclaw-eval:7da23c3-memory-core-0000000-slim"]
+        and cmd[3] == "openclaw-eval:memory-core-baseline-slim"
+        for _, cmd in captured
+    )
+    assert any(
+        "ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim" in " ".join(cmd)
+        for _, cmd in captured
+    )
 
 
 # -------------------------------------------------------------- push_eval_base

@@ -184,6 +184,18 @@ def test_resolved_config_memory_core_default_when_no_memory_mode():
     assert cfg["agents"]["defaults"]["memorySearch"]["enabled"] is True
 
 
+def test_resolved_config_context_engine_mode_alone_is_enough():
+    cfg = build_openclaw_resolved_config(
+        **_BASE,
+        memory_mode="noop",
+        context_engine_mode="openviking",
+    )
+    entry = cfg["plugins"]["entries"]["openviking"]
+    assert cfg["plugins"]["slots"]["contextEngine"] == "openviking"
+    assert entry["enabled"] is True
+    assert "config" not in entry
+
+
 # --- noop disables memorySearch -------------------------------------
 
 def test_noop_disables_memory_search_enabled():

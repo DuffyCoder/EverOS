@@ -57,6 +57,16 @@ _DEFAULT_ANSWER_PROMPT = (
 )
 
 
+def _default_context_engine_env_vars(mode: Any) -> set[str]:
+    """Minimal implicit env passthrough for known context-engine plugins."""
+    if not isinstance(mode, str):
+        return set()
+    normalized = mode.strip()
+    if normalized == "openviking":
+        return {"OPENVIKING_BASE_URL", "OPENVIKING_URL", "OPENVIKING_API_KEY"}
+    return set()
+
+
 @register_adapter("openclaw")
 class OpenClawAdapter(BaseAdapter):
     def __init__(self, config: dict, output_dir: Any = None):
@@ -653,13 +663,15 @@ class OpenClawAdapter(BaseAdapter):
 
         v0.7: agent_llm_env_vars is the explicit whitelist of env var
         names that ``envForSandbox`` will pass through to the openclaw
-        subprocess. The resolved config carries ``${VAR}`` template
-        strings for secrets (apiKey); without env passthrough OpenClaw
-        throws MissingEnvVarError on those templates. List comes from
-        yaml ``openclaw.agent_llm.env_vars`` (defaults to []).
+        subprocess. For context-engine plugins we additionally apply a
+        tiny built-in allowlist keyed by ``context_engine_mode`` so the
+        common case works without any extra yaml config just to forward
+        the remote endpoint env var.
         """
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
-        env_vars = agent_llm.get("env_vars") or []
+        context_engine_mode = self._openclaw_cfg.get("context_engine_mode")
+        env_vars = set(agent_llm.get("env_vars") or [])
+        env_vars.update(_default_context_engine_env_vars(context_engine_mode))
         return {
             "repo_path": self._openclaw_repo_path,
             "config_path": sandbox.get("resolved_config_path", ""),
@@ -667,7 +679,9 @@ class OpenClawAdapter(BaseAdapter):
             "state_dir": sandbox.get("native_store_dir", ""),
             "home_dir": sandbox.get("home_dir", ""),
             "cwd_dir": sandbox.get("cwd_dir", ""),
-            "agent_llm_env_vars": list(env_vars) if isinstance(env_vars, list) else [],
+            "agent_llm_env_vars": sorted(
+                name for name in env_vars if isinstance(name, str)
+            ),
         }
 
     # ===================================================== internal helpers
@@ -854,6 +868,12 @@ class OpenClawAdapter(BaseAdapter):
             },
             timeout=self._index_timeout(),
         )
+        if not index_resp.get("ok"):
+            raise RuntimeError(
+                "openclaw index failed for "
+                f"{sandbox.get('conversation_id')!r}: "
+                f"{index_resp.get('error') or index_resp!r}"
+            )
         sandbox["last_index_epoch"] = int(index_resp.get("index_epoch") or 0)
         sandbox["visibility_state"] = "ingested"
         self._append_events(
@@ -906,6 +926,12 @@ class OpenClawAdapter(BaseAdapter):
             {**self._bridge_base_payload(sandbox), "command": "status"},
             timeout=self._status_timeout(),
         )
+        if not status_resp.get("ok"):
+            raise RuntimeError(
+                "openclaw status failed for "
+                f"{sandbox.get('conversation_id')!r}: "
+                f"{status_resp.get('error') or status_resp!r}"
+            )
         sandbox["last_flush_epoch"] = int(status_resp.get("flush_epoch") or 0)
         settled = status_resp.get("settled") is True
         self._append_events(

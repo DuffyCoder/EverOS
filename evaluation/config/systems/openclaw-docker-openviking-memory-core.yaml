@@ -1,0 +1,77 @@
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  max_concurrent: 4
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "disabled"
+  answer_mode: "agent_local"
+  memory_mode: "memory-core"
+  # Non-empty => inject that context-engine plugin; empty => no context-engine slot.
+  context_engine_mode: "openviking"
+  agent_timeout_seconds: 180
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "disabled"
+    answer_mode: "shared"
+
+openclaw_docker:
+  # Build with:
+  # uv run python openclaw-eval/harness/build.py \
+  #   --memory-plugin memory-core \
+  #   --install-spec "local:openviking" \
+  #   --stable-alias openviking-memory-core-slim \
+  #   --eval-base-image openclaw-eval-base:7da23c3-clean-edf6d4d-slim
+  image: "openclaw-eval:openviking-memory-core-slim"
+  max_concurrent_containers: 4
+  mem_limit: ""
+  network: "bridge"
+  per_rpc_timeout_seconds: 210
+  add_host_gateway: true
+  disable_healthcheck: true

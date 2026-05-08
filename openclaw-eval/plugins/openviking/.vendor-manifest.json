@@ -1,0 +1,19 @@
+{
+  "source": "/home/ze.qian/workspace/OpenViking/examples/openclaw-plugin",
+  "copied_files": [
+    "package.json",
+    "openclaw.plugin.json",
+    "index.ts",
+    "client.ts",
+    "context-engine.ts",
+    "config.ts",
+    "auto-recall.ts",
+    "memory-ranking.ts",
+    "process-manager.ts",
+    "runtime-utils.ts",
+    "session-transcript-repair.ts",
+    "text-utils.ts",
+    "tool-call-id.ts",
+    "commands/setup.ts"
+  ]
+}

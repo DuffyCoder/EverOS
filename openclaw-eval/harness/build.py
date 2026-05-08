@@ -29,6 +29,11 @@ from typing import Optional
 from dotenv import load_dotenv
 
 
+DEFAULT_MEMORY_CORE_EVAL_BASE = (
+    "ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim"
+)
+
+
 def load_project_env() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     env_file = repo_root / ".env"
@@ -40,6 +45,31 @@ def default_openclaw_repo_path() -> str:
     repo_root = Path(__file__).resolve().parents[2]
     candidate = os.environ.get("OPENCLAW_REPO_PATH") or (repo_root / ".cache" / "openclaw-src")
     return str(Path(candidate).resolve())
+
+
+def default_eval_base_image(memory_plugin: str, install_spec: Optional[str]) -> Optional[str]:
+    """Default split-build source for bundled baselines.
+
+    Keep the simplest baseline command working:
+      uv run python openclaw-eval/harness/build.py --memory-plugin memory-core
+
+    by reusing the published plugin-agnostic eval-base instead of forcing a
+    local openclaw repo checkout/build.
+    """
+    if install_spec:
+        return None
+    if memory_plugin in ("memory-core", "noop"):
+        return os.environ.get("OPENCLAW_EVAL_BASE_IMAGE") or DEFAULT_MEMORY_CORE_EVAL_BASE
+    return None
+
+
+def short_sha_from_eval_base_image(image: str) -> Optional[str]:
+    """Extract the upstream OpenClaw short sha from an eval-base tag."""
+    tag = image.rsplit(":", 1)[-1]
+    if "-clean-" not in tag:
+        return None
+    prefix = tag.split("-clean-", 1)[0]
+    return prefix if len(prefix) == 7 else None
 
 
 def short_sha(path: Path, ref: str = "HEAD") -> str:
@@ -161,7 +191,25 @@ def derive_plugin_id_from_spec(spec: str) -> Optional[str]:
         return rest[slash + 1:] if slash >= 0 else rest
     if s.startswith("marketplace:"):
         return s[len("marketplace:"):]
+    if s.startswith("local:"):
+        local_name = s[len("local:"):].strip().strip("/")
+        return local_name or None
     return None
+
+
+def local_plugin_name_from_spec(spec: str) -> Optional[str]:
+    s = spec.strip()
+    if not s.startswith("local:"):
+        return None
+    local_name = s[len("local:"):].strip().strip("/")
+    return local_name or None
+
+
+def local_plugin_dir_from_spec(eval_dir: Path, spec: str) -> Optional[Path]:
+    local_name = local_plugin_name_from_spec(spec)
+    if not local_name:
+        return None
+    return eval_dir / "plugins" / local_name
 
 
 def run_step(label: str, cmd: list[str], cwd: Optional[Path] = None) -> None:
@@ -267,6 +315,28 @@ def default_eval_alias(
     if install_spec and install_plugin_id:
         return f"openclaw-eval:install-{install_plugin_id}-{variant}"
     return f"openclaw-eval:{memory_plugin}-{variant}"
+
+
+def resolve_stable_aliases(
+    memory_plugin: str,
+    variant: str,
+    *,
+    install_plugin_id: Optional[str] = None,
+    install_spec: Optional[str] = None,
+    requested_aliases: Optional[list[str]] = None,
+) -> list[str]:
+    aliases = [
+        default_eval_alias(
+            memory_plugin,
+            variant,
+            install_plugin_id=install_plugin_id,
+            install_spec=install_spec,
+        )
+    ]
+    for alias in requested_aliases or []:
+        if alias not in aliases:
+            aliases.append(alias)
+    return aliases
 
 
 def stage_external_plugin(
@@ -610,7 +680,8 @@ def main():
                               "inside the eval-layer image instead of staging from "
                               "openclaw-eval/plugins/. Examples: "
                               "'npm:@mem0/openclaw-plugin@1.2.0', "
-                              "'clawhub:owner/name', 'marketplace:foo'. When set, "
+                              "'clawhub:owner/name', 'marketplace:foo', "
+                              "'local:openviking'. When set, "
                               "--memory-plugin must equal the installed plugin id "
                               "(or the slot will not bind). See "
                               "docs/superpowers/specs/2026-04-30-plugin-kinds-design-note.md"))
@@ -690,10 +761,17 @@ def main():
             "BASE_IMAGE for the eval-plugin layer (Dockerfile.eval-plugin). "
             "Typically a registry-qualified tag pulled from the shared "
             "registry, e.g. ghcr.io/duffycoder/openclaw-eval-base:"
-            "7da23c3-clean-XXXXXXX-slim. Only valid with --install-spec."
+            "7da23c3-clean-XXXXXXX-slim. If omitted for bundled baseline "
+            "modes like memory-core/noop, build.py falls back to the default "
+            "published eval-base image."
         ),
     )
     args = parser.parse_args()
+
+    if not args.eval_base_image:
+        args.eval_base_image = default_eval_base_image(args.memory_plugin, args.install_spec)
+        if args.eval_base_image:
+            print(f"[build] using default eval-base image: {args.eval_base_image}")
 
     if args.push_eval_base and not args.build_eval_base:
         print("[build] ERROR: --push-eval-base requires --build-eval-base", file=sys.stderr)
@@ -708,10 +786,11 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
-    if args.eval_base_image and not args.install_spec:
+    if args.eval_base_image and not args.install_spec and args.memory_plugin not in ("memory-core", "noop"):
         print(
-            "[build] ERROR: --eval-base-image only supports install-spec mode "
-            "(bundled plugins still need to be staged into openclaw-base)",
+            "[build] ERROR: --eval-base-image without --install-spec only supports "
+            "bundled baseline modes (memory-core/noop). External plugins still need "
+            "install-spec or a full openclaw-base build.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -754,6 +833,14 @@ def main():
             sys.exit(1)
         # Stash resolved id back so downstream code uses it uniformly.
         args.install_plugin_id = plugin_id
+        local_dir = local_plugin_dir_from_spec(Path(__file__).resolve().parents[1], args.install_spec)
+        if local_dir is not None and not local_dir.exists():
+            print(
+                f"[build] ERROR: local install spec '{args.install_spec}' expected "
+                f"plugin sources at {local_dir}, but the directory does not exist.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Resolve extra install specs into (spec, plugin_id) pairs.
     extra_pairs: list[tuple[str, str]] = []
@@ -792,6 +879,14 @@ def main():
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            local_dir = local_plugin_dir_from_spec(Path(__file__).resolve().parents[1], spec)
+            if local_dir is not None and not local_dir.exists():
+                print(
+                    f"[build] ERROR: extra local install spec '{spec}' expected "
+                    f"plugin sources at {local_dir}, but the directory does not exist.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             extra_pairs.append((spec, pid))
     args._extra_pairs = extra_pairs
 
@@ -799,21 +894,30 @@ def main():
         print("[build] ERROR: docker not in PATH", file=sys.stderr)
         sys.exit(1)
 
-    openclaw_repo = Path(args.openclaw_repo).resolve()
-    if not (openclaw_repo / "Dockerfile").exists():
-        print(f"[build] ERROR: {openclaw_repo}/Dockerfile not found", file=sys.stderr)
-        sys.exit(1)
-
     here = Path(__file__).resolve().parents[1]
     if not (here / "Dockerfile.eval").exists():
         print(f"[build] ERROR: {here}/Dockerfile.eval not found", file=sys.stderr)
         sys.exit(1)
 
-    openclaw_sha = short_sha(openclaw_repo)
+    split_baseline_mode = bool(
+        args.eval_base_image and not args.install_spec and args.memory_plugin in ("memory-core", "noop")
+    )
+    openclaw_repo = Path(args.openclaw_repo).resolve()
+    if split_baseline_mode:
+        openclaw_sha = short_sha_from_eval_base_image(args.eval_base_image or "") or "unknown"
+    else:
+        if not (openclaw_repo / "Dockerfile").exists():
+            print(f"[build] ERROR: {openclaw_repo}/Dockerfile not found", file=sys.stderr)
+            sys.exit(1)
+        openclaw_sha = short_sha(openclaw_repo)
     plugin_rev = "0000000"
     if args.install_spec:
-        # rev derived from spec (different versions => different images)
-        plugin_rev = install_spec_hash(args.install_spec)
+        local_dir = local_plugin_dir_from_spec(here, args.install_spec)
+        if local_dir is not None:
+            plugin_rev = plugin_content_hash(local_dir)
+        else:
+            # rev derived from spec (different versions => different images)
+            plugin_rev = install_spec_hash(args.install_spec)
     elif args.memory_plugin not in ("memory-core", "noop"):
         plugin_dir = here / "plugins" / args.memory_plugin
         plugin_rev = plugin_content_hash(plugin_dir)
@@ -872,10 +976,20 @@ def main():
             install_plugin_id=args.install_plugin_id,
             extra_install_specs=args._extra_pairs or None,
         )
+        stable_aliases = resolve_stable_aliases(
+            args.memory_plugin,
+            args.variant,
+            install_plugin_id=args.install_plugin_id,
+            install_spec=args.install_spec,
+            requested_aliases=args.stable_alias,
+        )
+        for alias in stable_aliases:
+            tag_image_alias(layer_tag, alias)
         print()
         print("[build] DONE (plugin layer)")
         print(f"[build]   eval_base:  {args.eval_base_image}")
         print(f"[build]   layer_tag:  {layer_tag}")
+        print(f"[build]   stable_aliases: {stable_aliases}")
         if args.manifest_out:
             Path(args.manifest_out).write_text(json.dumps({
                 "openclaw_sha": openclaw_sha,
@@ -884,6 +998,7 @@ def main():
                 "variant": args.variant,
                 "eval_base_image": args.eval_base_image,
                 "eval_tag": layer_tag,
+                "stable_aliases": stable_aliases,
             }, indent=2))
             print(f"[build]   manifest:   {args.manifest_out}")
         return
@@ -923,17 +1038,13 @@ def main():
     print(f"[build]   base_tag:  {base_tag}")
     print(f"[build]   layer_tag: {layer_tag}")
 
-    stable_aliases = [
-        default_eval_alias(
-            args.memory_plugin,
-            args.variant,
-            install_plugin_id=args.install_plugin_id,
-            install_spec=args.install_spec,
-        )
-    ]
-    for alias in args.stable_alias:
-        if alias not in stable_aliases:
-            stable_aliases.append(alias)
+    stable_aliases = resolve_stable_aliases(
+        args.memory_plugin,
+        args.variant,
+        install_plugin_id=args.install_plugin_id,
+        install_spec=args.install_spec,
+        requested_aliases=args.stable_alias,
+    )
     for alias in stable_aliases:
         tag_image_alias(layer_tag, alias)
     print(f"[build]   stable_aliases: {stable_aliases}")

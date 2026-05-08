@@ -143,7 +143,10 @@ def build_openclaw_resolved_config(
         resolved["agents"]["defaults"]["model"] = model_ref
 
     # === plugins (allow + slots + entries) (v0.7) ========================
-    resolved["plugins"] = _build_plugins_section(memory_mode, context_engine_mode)
+    resolved["plugins"] = _build_plugins_section(
+        memory_mode,
+        context_engine_mode,
+    )
 
     return resolved
 

@@ -36,6 +36,7 @@ bundled ones.
 | `npm:<name>@<version>` | name (after `@scope/` if scoped) | `npm:@mem0/openclaw-plugin@1.2.0` -> `openclaw-plugin` |
 | `clawhub:<owner>/<name>` | name | `clawhub:acme/cool-plugin` -> `cool-plugin` |
 | `marketplace:<name>` | name | `marketplace:my-engine` -> `my-engine` |
+| `local:<name>` | name | `local:openviking` -> `openviking` |
 | Local path / archive | not derivable | must pass `--install-plugin-id <id>` |
 
 ## When `--install-plugin-id` is required
@@ -47,6 +48,14 @@ python3 openclaw-eval/harness/build.py \
     --memory-plugin foo \
     --install-spec /tmp/foo-1.0.tgz \
     --install-plugin-id foo
+```
+
+For vendored local plugins under `openclaw-eval/plugins/<name>/`, prefer:
+
+```bash
+python3 openclaw-eval/harness/build.py \
+    --memory-plugin memory-core \
+    --install-spec local:openviking
 ```
 
 For npm/clawhub/marketplace specs, derivation is automatic; pass
