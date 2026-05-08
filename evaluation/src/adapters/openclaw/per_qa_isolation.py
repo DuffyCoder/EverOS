@@ -57,10 +57,9 @@ def resolve_isolation_mode(
     setting = (isolation_setting or "auto").strip().lower()
     if setting in ("snapshot", "off"):
         return setting
-    if setting != "auto":
-        # Fall through: unknown values are coerced to auto rather than
-        # raising. Validation belongs at CLI / config-load time.
-        pass
+    # TODO(plugin-cli-unify PR5): tighten validation in CLI / config-load
+    # path so unknown values raise instead of falling through here.
+    # Lenient now to avoid blowing up on yaml typos before PR5 docs land.
     return "snapshot" if (context_engine_mode and context_engine_mode.strip()) else "off"
 
 
@@ -79,7 +78,11 @@ def freeze_state(workspace_dir: Path) -> Path:
     if snapshot.exists():
         shutil.rmtree(snapshot)
     if state.exists():
-        shutil.copytree(state, snapshot, symlinks=True, dirs_exist_ok=False)
+        # symlinks=False (default): dereference symlinks. If a plugin
+        # writes a symlink in /workspace/state pointing outside the
+        # workspace (e.g. /tmp/shared_cache), preserving the link would
+        # silently make every QA share the real file, breaking isolation.
+        shutil.copytree(state, snapshot, dirs_exist_ok=False)
     else:
         snapshot.mkdir(parents=True)
     return snapshot
@@ -103,7 +106,8 @@ def restore_state_for_qa(workspace_dir: Path, qid: str) -> Path:
         shutil.rmtree(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if baseline.exists():
-        shutil.copytree(baseline, target, symlinks=True, dirs_exist_ok=False)
+        # symlinks=False to keep isolation guarantees (see freeze_state).
+        shutil.copytree(baseline, target, dirs_exist_ok=False)
     else:
         target.mkdir()
     return target
@@ -130,12 +134,22 @@ def container_state_dir(qa_state_host: Path, workspace_dir: Path) -> str:
 def _safe_qid(qid: str) -> str:
     """Sanitize a question id for filesystem use.
 
-    Replaces path separators and whitespace with underscores so callers
-    can't escape the per-QA root or collide via implicit normalization.
+    Replaces path separators, whitespace, and ASCII control characters
+    (including NUL, which would truncate filenames at the kernel level)
+    with underscores. Rejects pure ``.`` / ``..`` after sanitization to
+    block path-traversal corner cases.
     """
-    safe = (
-        qid.replace("/", "_").replace("\\", "_").replace(" ", "_")
-    )
+    out_chars = []
+    for ch in qid:
+        cp = ord(ch)
+        if ch in ("/", "\\", " "):
+            out_chars.append("_")
+        elif cp < 0x20 or cp == 0x7F:
+            # ASCII control chars: NUL, tab, newline, etc.
+            out_chars.append("_")
+        else:
+            out_chars.append(ch)
+    safe = "".join(out_chars)
     if not safe or safe in (".", ".."):
         raise ValueError(f"qid {qid!r} sanitizes to an invalid filename")
     return safe

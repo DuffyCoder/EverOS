@@ -356,6 +356,13 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._docker_handles.clear()
 
     # ------------------------------------------------ per-QA isolation v1
+    #
+    # Concurrency note: these methods assume per-conversation serialization
+    # of QAs (yaml ``max_inflight_queries_per_conversation: 1``). Two
+    # concurrent QAs with the same qid would race on
+    # ``.qa_states/<qid>/`` — the second restore_state_for_qa call hits
+    # ``FileExistsError``. If a future config raises that cap, add an
+    # ``asyncio.Lock`` keyed by ``(conv_id, qid)`` here.
 
     def _isolation_mode(self) -> str:
         """Resolve openclaw_docker.per_qa_isolation -> 'snapshot' | 'off'."""
@@ -369,14 +376,35 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
 
         Lazy freeze (vs eager at end of add()) is robust to partial
         pipelines (e.g. ``--stages search answer evaluate`` skipping add).
+
+        On replay (workspace already has ``.qa_state_baseline`` from a
+        previous run), we **do not** re-freeze. Re-freezing would
+        capture whatever post-answer writes accumulated in
+        ``/workspace/state`` during the previous run, which is wrong
+        — the baseline must reflect post-add() state.
+        Operators wanting a fresh baseline should pass --clean-groups
+        or wipe the workspace.
         """
         if self._isolation_mode() != "snapshot":
             return
         if sandbox.get("_pr4_state_frozen"):
             return
+        from evaluation.src.adapters.openclaw.per_qa_isolation import (
+            SNAPSHOT_DIRNAME,
+        )
+        workspace = Path(sandbox["workspace_dir"])
+        baseline_existing = (workspace / SNAPSHOT_DIRNAME).exists()
+        if baseline_existing:
+            sandbox["_pr4_state_frozen"] = True
+            self._append_events(sandbox, [{
+                "event": "per_qa_isolation_freeze_skipped_replay",
+                "conversation_id": sandbox.get("conversation_id"),
+                "reason": "baseline already exists from prior run",
+            }])
+            return
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, freeze_state, Path(sandbox["workspace_dir"]),
+            None, freeze_state, workspace,
         )
         sandbox["_pr4_state_frozen"] = True
         self._append_events(sandbox, [{

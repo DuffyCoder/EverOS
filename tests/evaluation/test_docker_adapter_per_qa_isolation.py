@@ -9,7 +9,9 @@ test_per_qa_isolation.py; this file covers the adapter glue.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -296,3 +298,127 @@ def test_arun_bridge_via_docker_default_state_dir_when_caller_omits():
         _asyncio.create_subprocess_exec = orig
 
     assert captured["payload"]["state_dir"] == "/workspace/state"
+
+
+# ---------- e2e _generate_answer_via_agent (PR4 review fix) ----------------
+
+def _make_e2e_adapter(workspace: Path, ce_mode: str | None = None):
+    """Build an adapter capable of running _generate_answer_via_agent
+    end-to-end (with mocked subprocess invocation)."""
+    adapter = DockerizedOpenclawAdapter.__new__(DockerizedOpenclawAdapter)
+    adapter._openclaw_cfg = {
+        "agent_llm": {"env_vars": []},
+        "agent_timeout_seconds": 30,
+        **({"context_engine_mode": ce_mode} if ce_mode else {}),
+    }
+    adapter._docker_cfg = {"per_qa_isolation": "snapshot" if ce_mode else "off"}
+    adapter._exec_timeout = 30
+    adapter._docker_handles = {"conv0": {
+        "container_id": "fake", "volume_dir": str(workspace), "image": "fake",
+    }}
+    adapter._sandbox_by_conversation_id = {
+        "conv0": {
+            "conversation_id": "conv0",
+            "workspace_dir": str(workspace),
+        },
+    }
+    adapter._sandbox_for = lambda conv_id: adapter._sandbox_by_conversation_id[conv_id]
+    adapter._bridge_base_payload = lambda sb: {}
+    adapter._append_events = lambda sb, evs: None
+    return adapter
+
+
+def _fake_proc_factory(captured: list, ok_reply: bytes = b'{"ok": true, "reply": "ans", "stop_reason": "end_turn"}'):
+    async def _create(*cmd, stdin, stdout, stderr):
+        class _P:
+            returncode = 0
+            async def communicate(self, input):
+                captured.append(json.loads(input.decode()))
+                return (ok_reply, b"")
+            def kill(self): pass
+            async def wait(self): pass
+        return _P()
+    return _create
+
+
+def test_e2e_two_qas_freeze_once_restore_each_discard_each(tmp_path: Path):
+    """End-to-end: two QAs in same conv with snapshot mode. Freeze fires
+    once, each QA gets its own state_dir, all per-QA dirs discarded."""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "memory.sqlite").write_bytes(b"baseline")
+
+    adapter = _make_e2e_adapter(tmp_path, ce_mode="hypercompositor")
+    captured: list = []
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_proc_factory(captured)):
+        async def two_qas():
+            r1 = await adapter._generate_answer_via_agent("Q1", "conv0", "qa1")
+            r2 = await adapter._generate_answer_via_agent("Q2", "conv0", "qa2")
+            return r1, r2
+        r1, r2 = asyncio.run(two_qas())
+
+    assert r1 == "ans" and r2 == "ans"
+    assert len(captured) == 2
+    assert captured[0]["state_dir"] == "/workspace/.qa_states/qa1"
+    assert captured[1]["state_dir"] == "/workspace/.qa_states/qa2"
+    assert (tmp_path / SNAPSHOT_DIRNAME / "memory.sqlite").read_bytes() == b"baseline"
+    qa_root = tmp_path / QA_STATES_DIRNAME
+    assert not qa_root.exists() or list(qa_root.iterdir()) == []
+
+
+def test_e2e_discard_runs_in_finally_on_bridge_error(tmp_path: Path):
+    """If bridge raises BridgeError, the finally block still discards
+    the per-QA state directory."""
+    from evaluation.src.adapters.openclaw.runtime import BridgeError
+
+    state = tmp_path / "state"
+    state.mkdir()
+
+    adapter = _make_e2e_adapter(tmp_path, ce_mode="hypercompositor")
+
+    async def boom_bridge(conv_id, payload, timeout):
+        raise BridgeError("simulated docker exec failure")
+
+    adapter._arun_bridge_via_docker = boom_bridge
+
+    out = asyncio.run(adapter._generate_answer_via_agent("Q", "conv0", "qa-fail"))
+    assert out == ""
+    qa_dir = tmp_path / QA_STATES_DIRNAME / "qa-fail"
+    assert not qa_dir.exists()
+
+
+def test_e2e_isolation_off_skips_freeze_restore_discard(tmp_path: Path):
+    """isolation=off: no snapshot machinery runs; bridge sees default state_dir."""
+    state = tmp_path / "state"
+    state.mkdir()
+
+    adapter = _make_e2e_adapter(tmp_path, ce_mode=None)
+    captured: list = []
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_proc_factory(captured)):
+        asyncio.run(adapter._generate_answer_via_agent("Q", "conv0", "qa1"))
+
+    assert not (tmp_path / SNAPSHOT_DIRNAME).exists()
+    assert not (tmp_path / QA_STATES_DIRNAME).exists()
+    assert captured[0]["state_dir"] == "/workspace/state"
+
+
+def test_e2e_replay_skips_freeze_when_baseline_exists(tmp_path: Path):
+    """Risk 3 fix: pre-existing baseline (replay scenario) must NOT be
+    overwritten by lazy-freeze."""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "x.txt").write_text("v2-post-answer-pollution")
+
+    baseline = tmp_path / SNAPSHOT_DIRNAME
+    baseline.mkdir()
+    (baseline / "x.txt").write_text("v1-clean-add-end")
+
+    adapter = _make_e2e_adapter(tmp_path, ce_mode="hypercompositor")
+    captured: list = []
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_proc_factory(captured)):
+        asyncio.run(adapter._generate_answer_via_agent("Q", "conv0", "qa1"))
+
+    assert (baseline / "x.txt").read_text() == "v1-clean-add-end"
