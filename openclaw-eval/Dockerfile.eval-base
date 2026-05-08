@@ -1,0 +1,125 @@
+# syntax=docker/dockerfile:1.7
+#
+# Plugin-agnostic eval-base layer. Pushed to a shared registry so
+# downstream evaluators don't re-pay the apt install + minimal-prune cost
+# on every plugin variant.
+#
+# Layered on top of openclaw-base:<sha>-memory-core-<variant> (the
+# upstream OpenClaw Dockerfile output, plus memory-core extension only).
+#
+# Pipeline:
+#   harness/build.py --build-eval-base [--push-eval-base]
+#     -> docker build -f openclaw-eval/Dockerfile.eval-base
+#        --build-arg BASE_IMAGE=openclaw-base:<sha>-memory-core-<variant>
+#        -t openclaw-eval-base:<sha>-clean-<variant>
+#
+# Downstream plugin layers consume this via:
+#   harness/build.py --eval-base-image <pulled-eval-base-tag> --install-spec ...
+#     -> docker build -f openclaw-eval/Dockerfile.eval-plugin
+#        --build-arg BASE_IMAGE=<eval-base-tag>
+#        -t openclaw-eval:<sha>-install-<plugin>-<rev>-<variant>
+#
+# What lives in this layer (plugin-agnostic):
+#   * apt: jq + python3 + python3-venv + python3-pip
+#   * minimal-prune (KEEP_EXTENSIONS keeps memory-core + bootstrap public surfaces)
+#   * eval-layer assets: bridge.mjs, bridge_lib.mjs, entrypoint.sh, template.json
+#   * /opt/openclaw extensions root (plugin layer chowns into it)
+#   * generic ENV for OpenClaw runtime (OPENCLAW_HOME, WORKSPACE_DIR, ...)
+#
+# What is NOT here (lives in eval-plugin layer):
+#   * sidecar/ contents + Python deps + sentence-transformers cache
+#   * installed plugin (npm pack + tar -x)
+#   * MEMORY_PLUGIN_ID / INSTALL_PLUGIN_ID / EXTRA_INSTALL_PLUGIN_IDS
+
+ARG BASE_IMAGE=openclaw-base:latest
+FROM ${BASE_IMAGE}
+
+ARG OPENCLAW_COMMIT=unknown
+ARG EVAL_BASE_REV=unknown
+# Whitelist of upstream extension dirs to keep under /app/extensions and
+# /app/dist/extensions. Empty value disables pruning (debug). For shared
+# eval-base we hard-code memory-core + BOOTSTRAP_KEEP_EXTENSIONS — plugin
+# layer installs land under /opt/openclaw/extensions/, which this prune
+# step never touches, so the whitelist doesn't need to know which plugin
+# will be installed downstream.
+ARG KEEP_EXTENSIONS=""
+ARG PRUNE_NODE_MODULES_PACKAGES=""
+LABEL eval.openclaw_commit=${OPENCLAW_COMMIT} \
+      eval.eval_base_rev=${EVAL_BASE_REV} \
+      eval.keep_extensions=${KEEP_EXTENSIONS} \
+      eval.prune_node_modules=${PRUNE_NODE_MODULES_PACKAGES} \
+      eval.layer=eval-base
+
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      jq python3 python3-venv python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /eval /workspace /etc/openclaw /sidecar /opt/openclaw \
+ && chown -R node:node /eval /workspace /etc/openclaw /sidecar /opt/openclaw
+
+# Minimal-prune: strip upstream openclaw bloat the harness never uses.
+# Saves ~810M (210M dist/extensions of unused plugins, 54M extensions/ source,
+# 4.8M control-ui, 1.5M skills+qa, 547M node_modules) so per-conv `docker run`
+# stays fast and plugin-loader has fewer dirs to stat.
+#
+# /app/docs is INTENTIONALLY NOT pruned: docs/reference/templates contains
+# AGENTS.md / SOUL.md / IDENTITY.md / CLAUDE.md / BOOT.md / BOOTSTRAP.md /
+# HEARTBEAT.md which `openclaw agent --local` reads to bootstrap a workspace.
+RUN set -eux; \
+    if [ -n "${KEEP_EXTENSIONS}" ]; then \
+      echo "[Dockerfile.eval-base] minimal-prune: KEEP_EXTENSIONS=${KEEP_EXTENSIONS}"; \
+      for tree in /app/extensions /app/dist/extensions; do \
+        [ -d "$tree" ] || continue; \
+        for entry in "$tree"/*/; do \
+          [ -d "$entry" ] || continue; \
+          name="$(basename "$entry")"; \
+          keep=0; \
+          for k in ${KEEP_EXTENSIONS}; do \
+            [ "$name" = "$k" ] && keep=1 && break; \
+          done; \
+          if [ "$keep" -eq 0 ]; then \
+            rm -rf "$entry"; \
+          fi; \
+        done; \
+      done; \
+      rm -rf /app/skills /app/qa /app/dist/control-ui; \
+    fi; \
+    if [ -n "${PRUNE_NODE_MODULES_PACKAGES}" ] && [ -d /app/node_modules ]; then \
+      echo "[Dockerfile.eval-base] minimal-prune node_modules: ${PRUNE_NODE_MODULES_PACKAGES}"; \
+      for pkg in ${PRUNE_NODE_MODULES_PACKAGES}; do \
+        target="/app/node_modules/${pkg}"; \
+        if [ -e "$target" ] || [ -L "$target" ]; then \
+          rm -rf "$target"; \
+        fi; \
+      done; \
+    fi; \
+    du -sh /app 2>/dev/null || true
+
+# Eval-layer plugin-agnostic assets.
+COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
+COPY --chown=node:node container/entrypoint.sh /eval/entrypoint.sh
+COPY --chown=node:node container/openclaw_eval_bridge.mjs /eval/openclaw_eval_bridge.mjs
+COPY --chown=node:node container/openclaw_eval_bridge_lib.mjs /eval/openclaw_eval_bridge_lib.mjs
+RUN chmod 755 /eval/entrypoint.sh
+
+# OpenClaw runtime layout.
+ENV OPENCLAW_HOME=/opt/openclaw \
+    WORKSPACE_DIR=/workspace \
+    OPENCLAW_CONFIG_PATH=/workspace/openclaw.docker.json \
+    OPENCLAW_STATE_DIR=/workspace/state \
+    HOME=/workspace/home
+
+# Defaults that may be overridden via -e at docker run time. The
+# plugin-specific ENV (MEMORY_PLUGIN_ID, INSTALL_PLUGIN_ID,
+# EXTRA_INSTALL_PLUGIN_IDS, sidecar settings) live in the plugin layer.
+ENV LLM_BASE_URL= \
+    LLM_API_KEY= \
+    LLM_MODEL=gpt-4.1-mini \
+    SOPH_API_KEY= \
+    SOPH_EMBED_URL= \
+    SOPH_EMBED_EASYLLM_ID=
+
+USER node
+ENTRYPOINT ["/eval/entrypoint.sh"]
+CMD ["sleep", "infinity"]
