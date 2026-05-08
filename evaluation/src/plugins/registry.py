@@ -63,6 +63,18 @@ def _parse_entry(plugin_id: str, body: object, registry_path: Path) -> PluginEnt
             f"got {type(body).__name__}"
         )
 
+    # Build/eval tags join multiple plugin ids with '_'; ids containing '_'
+    # would create ambiguous tag bundles (e.g. 'a_b' could mean one plugin
+    # 'a_b' or two plugins 'a' + 'b'). Constrain ids to dash/dot/alnum.
+    if not plugin_id or "_" in plugin_id or any(
+        c.isspace() or c in "/\\:@+" for c in plugin_id
+    ):
+        raise RegistryError(
+            f"{registry_path}: plugin id {plugin_id!r} is not allowed; "
+            f"use lowercase letters, digits, '-', '.' (no '_' or whitespace) "
+            f"so build tags stay unambiguous."
+        )
+
     kinds = _normalize_kinds(plugin_id, body.get("kind"), registry_path)
 
     plugin_type = body.get("type")

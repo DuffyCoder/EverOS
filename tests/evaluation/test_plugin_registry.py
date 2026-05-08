@@ -177,6 +177,41 @@ def test_explicit_empty_mapping_returns_empty(tmp_path: Path):
     assert load_registry(p) == {}
 
 
+def test_id_with_underscore_rejected(tmp_path: Path):
+    """Build/eval tags join plugin ids with '_'; ids containing '_' would
+    create ambiguous bundles (a_b vs a + b)."""
+    p = _write(tmp_path, """
+        bad_id:
+          kind: memory
+          type: bundled-source
+    """)
+    with pytest.raises(RegistryError, match="not allowed"):
+        load_registry(p)
+
+
+def test_id_with_whitespace_rejected(tmp_path: Path):
+    p = _write(tmp_path, """
+        "bad id":
+          kind: memory
+          type: bundled-source
+    """)
+    with pytest.raises(RegistryError, match="not allowed"):
+        load_registry(p)
+
+
+def test_id_with_at_or_slash_rejected(tmp_path: Path):
+    """'@' is the version delimiter; '/' is path separator — both unsafe."""
+    for bad in ("a@b", "a/b", "a+b"):
+        p = tmp_path / f"bad_{hash(bad)}.yaml"
+        p.write_text(textwrap.dedent(f"""
+            "{bad}":
+              kind: memory
+              type: bundled-source
+        """))
+        with pytest.raises(RegistryError, match="not allowed"):
+            load_registry(p)
+
+
 # ---------- query helpers --------------------------------------------------
 
 def test_get_unknown_id_friendly_error(tmp_path: Path):

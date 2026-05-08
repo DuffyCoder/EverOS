@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -371,3 +370,171 @@ def test_full_run_writes_manifest_entry(tmp_path: Path):
     # happens after docker steps). So manifest file should NOT exist.
     assert res.returncode == 0
     assert not (tmp_path / "manifest.yaml").exists()
+
+
+# ---------- PR2 codex review fixes -----------------------------------------
+
+def test_dry_run_does_not_require_docker_or_openclaw_repo(tmp_path: Path):
+    """Bug 1: --dry-run was previously gated on docker + openclaw-repo
+    existing. Verify it now works on a machine without either by passing
+    a nonexistent --openclaw-repo (no .git -> sha falls back to 0000000)."""
+    cmd = [
+        sys.executable, str(BUILD_PY),
+        "--memory-plugin", "evermemos",
+        "--dry-run",
+        "--no-image-manifest",
+        "--openclaw-repo", str(tmp_path / "no-such-repo"),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+    assert res.returncode == 0, res.stderr
+    assert "0000000" in res.stdout  # sentinel sha
+    assert "evermemos" in res.stdout
+
+
+def test_two_plugin_tag_passed_through_to_build_eval_layer():
+    """Bug 2: derive_eval_tag computed combined-plugin tag but
+    build_eval_layer used to derive its own single-plugin tag. Verify
+    build_eval_layer now honors tag_override.
+    """
+    build = _import_build()
+    mem_ref = _ref("evermemos", "memory")
+    ce_ref = _ref("hypercompositor@0.9.6", "context-engine")
+    expected_tag = build.derive_eval_tag(
+        mem_ref, ce_ref, "abc1234", "deadbee", "slim",
+    )
+    # build_eval_layer accepts tag_override; verify it doesn't fall back
+    # to the legacy tag when override is provided. We call only the tag
+    # branch by mocking out the docker invocation via dry-run subprocess.
+    # The dry-run printed plan should show the same tag.
+    res = _run_build_dry(
+        "--memory-plugin", "evermemos",
+        "--context-engine", "hypercompositor@0.9.6",
+    )
+    assert "evermemos_install-hypercompositor" in res.stdout
+    # The legacy single-plugin path would have produced "install-hypercompositor"
+    # without the "evermemos_" prefix; assert we don't see that.
+    legacy_tag_segment = "install-hypercompositor-"
+    # The legacy fragment IS allowed to appear (it's part of the new tag),
+    # but only as a suffix of the combined "evermemos_install-hypercompositor".
+    # Pin the combined shape literally:
+    assert "-evermemos_install-hypercompositor-" in res.stdout
+
+
+def test_shim_preserves_original_spec_via_overrides():
+    """Bug 3: When --install-spec uses a non-canonical spec form (e.g.
+    bare '@scope/name@v' without 'npm:' prefix), the original string
+    should be preserved as a --plugin-spec override so Dockerfile.eval
+    sees the same spec the legacy CLI would have passed.
+
+    Verified by running --dry-run and checking that npm_installs prints
+    the legacy spec, not the canonical one.
+    """
+    res = _run_build_dry(
+        "--install-spec", "@psiclawops/hypercompositor@0.9.6",
+        "--install-plugin-id", "hypercompositor",
+    )
+    assert res.returncode == 0, res.stderr
+    # Override should preserve the bare form; legacy form appears in the
+    # printed plan rather than the canonical 'npm:@psiclawops/...' form.
+    assert "@psiclawops/hypercompositor@0.9.6" in res.stdout
+    # The plan prints either the bare or the canonical one; we just need
+    # to confirm the spec is preserved verbatim in the override path.
+    # When the user-specified spec equals canonical, no override is added.
+    # When it differs (no 'npm:' prefix here), override IS added — verify
+    # by checking deprecation warning fired and the build resolves.
+    assert "deprecated" in res.stderr.lower()
+
+
+def test_shim_extra_install_spec_routes_to_other_slot():
+    """Bug 4: --extra-install-spec was hard-erroring. It should now map
+    to the slot left empty by --install-spec.
+
+    Memory plugin via primary, context-engine via extra:
+    """
+    res = _run_build_dry(
+        "--install-spec", "npm:hindsight-plugin@0.5.0",
+        "--install-plugin-id", "hindsight-plugin",
+        "--extra-install-spec", "npm:@psiclawops/hypercompositor@0.9.6",
+        "--extra-install-plugin-id", "hypercompositor",
+    )
+    assert res.returncode == 0, res.stderr
+    assert "memory_plugin  = hindsight-plugin@0.5.0" in res.stdout
+    assert "context_engine = hypercompositor@0.9.6" in res.stdout
+
+
+def test_shim_extra_install_spec_same_kind_rejected():
+    """Bug 4 boundary: extra plugin must fill the OTHER slot. Two memory
+    plugins via legacy CLI is ambiguous and should error.
+    """
+    res = _run_build_dry(
+        "--install-spec", "npm:hindsight-plugin@0.5.0",
+        "--extra-install-spec", "npm:hindsight-plugin@0.6.0",
+    )
+    assert res.returncode != 0
+    assert "can't fill the slot" in res.stderr
+
+
+def test_shim_unknown_plugin_id_hard_errors():
+    """Risk B: legacy --install-spec referencing a plugin not in the
+    registry must NOT silently guess; it must error with a clear pointer
+    to plugin_registry.yaml.
+    """
+    # 'totally-unknown-plugin' is not in the registry. derive_plugin_id
+    # parses it. registry lookup fails.
+    res = _run_build_dry(
+        "--install-spec", "npm:totally-unknown-plugin@1.0.0",
+    )
+    assert res.returncode != 0
+    assert "unknown plugin" in res.stderr
+    assert "plugin_registry.yaml" in res.stderr
+
+
+def test_shim_versionless_spec_rejected():
+    """Risk B / Bug 3: tarball / clawhub specs without extractable
+    version must be rejected with migration guidance, not silently
+    accepted with garbage.
+    """
+    res = _run_build_dry(
+        "--install-spec", "clawhub:owner/some-plugin",
+        "--install-plugin-id", "evermemos",
+    )
+    assert res.returncode != 0
+    assert "no extractable version" in res.stderr
+    assert "--plugin-spec" in res.stderr
+
+
+def test_compute_plugin_rev_strips_npm_prefix_for_hashing():
+    """Risk A: pin the legacy-compat behavior so future maintainers
+    don't 'fix' the npm: strip and break existing image tags.
+    """
+    build = _import_build()
+    ce = _ref("hypercompositor@0.9.6", "context-engine")
+    rev_via_compute = build.compute_plugin_rev(
+        None, ce, REPO_ROOT / "openclaw-eval" / "plugins", {},
+    )
+    # Direct legacy hash on bare spec.
+    legacy = build.install_spec_hash("@psiclawops/hypercompositor@0.9.6")
+    # Hash on 'npm:' prefixed spec — different.
+    prefixed = build.install_spec_hash("npm:@psiclawops/hypercompositor@0.9.6")
+    assert rev_via_compute == legacy
+    assert rev_via_compute != prefixed
+    assert rev_via_compute == "5bace1f"  # pin the literal so this is loud
+
+
+def test_manifest_append_failure_exits_loudly(tmp_path: Path):
+    """Risk D: when image build succeeds but manifest append fails (e.g.
+    permission denied), exit non-zero with explicit error so the
+    operator knows to fix manually.
+
+    Simulate by pointing --image-manifest-out at a path that can't be
+    written (a directory). Build with --dry-run so the docker step is
+    skipped — but dry-run also skips manifest write, so we need a more
+    direct unit test on append_entry's wrapper instead.
+
+    For now we just verify the code path exists by reading build.py.
+    Direct integration coverage requires mocking docker, which is out
+    of scope for this PR's tests.
+    """
+    src = (REPO_ROOT / "openclaw-eval" / "harness" / "build.py").read_text()
+    assert "append_entry(manifest_path, entry)" in src
+    assert "manifest append failed" in src

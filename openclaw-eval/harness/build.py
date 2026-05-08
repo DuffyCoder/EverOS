@@ -294,6 +294,7 @@ def build_eval_layer(
     install_spec: Optional[str] = None,
     install_plugin_id: Optional[str] = None,
     extra_install_specs: Optional[list[tuple[str, str]]] = None,
+    tag_override: Optional[str] = None,
 ) -> str:
     """Step 2: layer eval-runtime on top of openclaw-base.
 
@@ -310,11 +311,18 @@ def build_eval_layer(
     primary memory plugin). They are installed in the same build step
     and the entrypoint adds their extension dirs to
     ``plugins.load.paths`` via EXTRA_INSTALL_PLUGIN_IDS env.
+
+    ``tag_override`` lets the new (PR2 plugin-cli-unify) caller pass
+    in a tag computed from BOTH plugin slots together. The legacy
+    branch below derives a single-plugin tag and would otherwise
+    mislabel two-plugin builds.
     """
     if plugins_dir is not None:
         stage_active_sidecar(eval_dir, plugins_dir, memory_plugin)
-    if install_spec:
-        # install-mode rev replaces source-content rev
+    if tag_override:
+        tag = tag_override
+    elif install_spec:
+        # legacy install-mode: rev derived from spec only
         tag_extra = f"-x{len(extra_install_specs or [])}" if extra_install_specs else ""
         tag = f"openclaw-eval:{openclaw_sha}-install-{install_plugin_id}{tag_extra}-{plugin_rev}-{variant}"
     else:
@@ -418,6 +426,14 @@ def compute_plugin_rev(
     - npm: spec hash (so different versions => different image tags)
     - base-extension: contributes nothing
     Single contribution -> use as-is. Multiple -> sha256(joined).
+
+    For npm specs we hash the BARE spec (without ``npm:`` prefix) on
+    purpose: legacy --install-spec callers (e.g. smoke_stage3.sh) passed
+    the spec without the prefix; Dockerfile.eval strips it before
+    ``npm pack`` either way. Keeping the bare-spec hash here means
+    existing image tags (``...-install-hypercompositor-5bace1f-slim``)
+    are reachable from the new CLI without operators rebuilding.
+    Pinned by ``test_compute_plugin_rev_single_npm_matches_legacy_hash``.
     """
     contributions: list[str] = []
     for ref in (memory_ref, ce_ref):
@@ -504,17 +520,62 @@ def _version_from_npm_spec(spec: str) -> Optional[str]:
     return None
 
 
+def _migrate_one_spec(
+    spec: str,
+    explicit_id: Optional[str],
+    registry: dict[str, PluginEntry],
+) -> tuple[str, str]:
+    """Resolve a single legacy install spec into (plugin_id, version).
+
+    Mutates only its arguments. Calls ``sys.exit`` on unrecoverable
+    errors (preserving the old wording where possible so legacy
+    operator scripts see familiar diagnostics).
+    """
+    derived_id = derive_plugin_id_from_spec(spec)
+    plugin_id = explicit_id or derived_id
+    if not plugin_id:
+        sys.exit(
+            f"[build] ERROR: --install-spec '{spec}' could not "
+            f"derive a plugin id; pass --install-plugin-id explicitly."
+        )
+    if plugin_id in ("memory-core", "noop"):
+        sys.exit(
+            f"[build] ERROR: --install-spec is not supported for "
+            f"'{plugin_id}' (bundled plugin, not an install target)."
+        )
+    if plugin_id not in registry:
+        sys.exit(
+            f"[build] ERROR: legacy --install-spec maps to unknown plugin "
+            f"id '{plugin_id}'. Add it to evaluation/config/plugin_registry.yaml "
+            f"first (set kind to memory or context-engine and type=npm), "
+            f"or migrate to the new --memory-plugin / --context-engine flags."
+        )
+    version = _version_from_npm_spec(spec)
+    if not version:
+        sys.exit(
+            f"[build] ERROR: legacy --install-spec '{spec}' has no extractable "
+            f"version. New CLI requires --memory-plugin <id>@<version> or "
+            f"--context-engine <id>@<version>. For tarballs / clawhub specs, "
+            f"add an entry to plugin_registry.yaml and use --plugin-spec "
+            f"<id>=<spec>."
+        )
+    return plugin_id, version
+
+
 def migrate_old_install_args(
     args: argparse.Namespace,
     registry: dict[str, PluginEntry],
-) -> tuple[Optional[str], Optional[str]]:
-    """Map deprecated --install-spec / --install-plugin-id / --extra-* into
+) -> tuple[Optional[str], Optional[str], dict[str, str]]:
+    """Map deprecated --install-spec / --install-plugin-id / --extra-* onto
     new --memory-plugin / --context-engine values.
 
-    Returns (memory_arg, ce_arg) suitable for ``parse_ref``. Either may
-    be None for "no plugin in this slot". Calls ``sys.exit`` on
-    unrecoverable mismatches (preserving the old error wording so legacy
-    operator scripts get the same diagnostics).
+    Returns ``(memory_arg, ce_arg, extra_overrides)``. ``extra_overrides``
+    is a dict feeding back into ``--plugin-spec`` so the original spec
+    string (especially for clawhub: / marketplace: / tarball forms) is
+    preserved through to ``Dockerfile.eval``.
+
+    Old --extra-install-spec maps to whichever slot --install-spec did
+    NOT take. If the old user had both, both slots get filled.
     """
     warnings.warn(
         "--install-spec / --install-plugin-id / --extra-install-spec are "
@@ -524,56 +585,81 @@ def migrate_old_install_args(
         stacklevel=2,
     )
 
-    derived_id = derive_plugin_id_from_spec(args.install_spec)
-    plugin_id = args.install_plugin_id or derived_id
-    if not plugin_id:
-        sys.exit(
-            f"[build] ERROR: --install-spec '{args.install_spec}' could not "
-            f"derive a plugin id; pass --install-plugin-id explicitly."
-        )
-    if plugin_id in ("memory-core", "noop"):
-        sys.exit(
-            f"[build] ERROR: --install-spec is not supported for "
-            f"'{plugin_id}' (bundled plugin, not an install target)."
-        )
+    primary_id, primary_version = _migrate_one_spec(
+        args.install_spec, args.install_plugin_id, registry,
+    )
 
-    version = _version_from_npm_spec(args.install_spec)
+    # Decide primary slot from registry kind. (Plugin must be registered;
+    # _migrate_one_spec already exited if not.)
+    primary_kinds = registry[primary_id].kinds
+    primary_is_memory = "memory" in primary_kinds
+    primary_is_ce = "context-engine" in primary_kinds
 
-    # Decide which slot the spec is for. Prefer registry kind when known;
-    # fall back to "if --memory-plugin is bundled, install-spec must be ce".
-    if plugin_id in registry:
-        kinds = registry[plugin_id].kinds
-        is_memory = "memory" in kinds
-        is_ce = "context-engine" in kinds
-    else:
-        is_memory = args.memory_plugin not in (None, "memory-core", "noop")
-        is_ce = not is_memory
+    extra_overrides: dict[str, str] = {}
+    # Preserve the original spec verbatim so clawhub/tarball/private-registry
+    # forms aren't lost. Only override when the spec deviates from what the
+    # registry would synthesize (npm:<package>@<version>).
+    canonical = f"npm:{registry[primary_id].npm_package}@{primary_version}" \
+        if registry[primary_id].npm_package else None
+    if args.install_spec.strip() != (canonical or ""):
+        extra_overrides[primary_id] = args.install_spec
 
-    if is_memory and not is_ce:
+    if primary_is_memory and not primary_is_ce:
+        memory_arg = f"{primary_id}@{primary_version}"
         if args.memory_plugin not in ("memory-core", "noop", None) \
-                and args.memory_plugin != plugin_id:
+                and args.memory_plugin != primary_id:
             sys.exit(
                 f"[build] ERROR: --memory-plugin '{args.memory_plugin}' must "
-                f"match installed plugin id '{plugin_id}' when --install-spec "
-                f"is a memory plugin. Re-run with --memory-plugin {plugin_id} "
+                f"match installed plugin id '{primary_id}' when --install-spec "
+                f"is a memory plugin. Re-run with --memory-plugin {primary_id} "
                 f"or --memory-plugin memory-core for context-engine plugins."
             )
-        memory_arg = f"{plugin_id}@{version}" if version else plugin_id
         ce_arg = None
     else:
         memory_arg = None
-        ce_arg = f"{plugin_id}@{version}" if version else plugin_id
+        ce_arg = f"{primary_id}@{primary_version}"
 
+    # Process --extra-install-spec into the OTHER slot.
     if args.extra_install_spec:
-        # Stage 3 had --extra-install-spec for "ce alongside memory". The
-        # new CLI expresses this directly via --memory-plugin + --context-engine
-        # so the legacy combo isn't supported via shim — too easy to misroute.
-        sys.exit(
-            "[build] ERROR: --extra-install-spec is no longer supported in "
-            "the deprecation shim. Use --memory-plugin <a>@<v> "
-            "--context-engine <b>@<v> directly."
+        if len(args.extra_install_spec) > 1:
+            sys.exit(
+                "[build] ERROR: legacy shim accepts at most one "
+                "--extra-install-spec (paired with --install-spec). Multiple "
+                "extras require migration to the new CLI: --memory-plugin "
+                "<a>@<v> --context-engine <b>@<v>."
+            )
+        extra_spec = args.extra_install_spec[0]
+        explicit_extra_id = (
+            args.extra_install_plugin_id[0]
+            if args.extra_install_plugin_id else None
         )
-    return memory_arg, ce_arg
+        extra_id, extra_version = _migrate_one_spec(
+            extra_spec, explicit_extra_id, registry,
+        )
+        extra_kinds = registry[extra_id].kinds
+        extra_is_memory = "memory" in extra_kinds
+        extra_is_ce = "context-engine" in extra_kinds
+
+        if memory_arg is None and extra_is_memory:
+            memory_arg = f"{extra_id}@{extra_version}"
+        elif ce_arg is None and extra_is_ce:
+            ce_arg = f"{extra_id}@{extra_version}"
+        else:
+            sys.exit(
+                f"[build] ERROR: --extra-install-spec '{extra_spec}' resolves "
+                f"to plugin '{extra_id}' (kinds={sorted(extra_kinds)}) which "
+                f"can't fill the slot left by --install-spec '{args.install_spec}'. "
+                f"Migrate to --memory-plugin / --context-engine directly."
+            )
+
+        extra_canonical = (
+            f"npm:{registry[extra_id].npm_package}@{extra_version}"
+            if registry[extra_id].npm_package else None
+        )
+        if extra_spec.strip() != (extra_canonical or ""):
+            extra_overrides[extra_id] = extra_spec
+
+    return memory_arg, ce_arg, extra_overrides
 
 
 _NEW_CLI_DESCRIPTION = (
@@ -683,8 +769,11 @@ def main():
     # Conflict only when the *bare* plugin id differs (legacy callers passed
     # --memory-plugin <id> without a version; the migrated form is <id>@<v>
     # — same id, more specific).
+    shim_overrides: dict[str, str] = {}
     if args.install_spec:
-        migrated_memory, migrated_ce = migrate_old_install_args(args, registry)
+        migrated_memory, migrated_ce, shim_overrides = migrate_old_install_args(
+            args, registry,
+        )
 
         def _bare(arg):
             return arg.split("@", 1)[0] if arg else None
@@ -708,6 +797,16 @@ def main():
 
     try:
         overrides = parse_plugin_spec_overrides(args.plugin_spec)
+        # Shim-derived overrides preserve the original tarball / clawhub /
+        # private-registry spec strings so they pass through to Dockerfile.eval.
+        for ovr_id, ovr_spec in shim_overrides.items():
+            if ovr_id in overrides and overrides[ovr_id] != ovr_spec:
+                sys.exit(
+                    f"[build] ERROR: --plugin-spec {ovr_id}=... conflicts with "
+                    f"the spec extracted from --install-spec ({ovr_spec!r}). "
+                    f"Drop one."
+                )
+            overrides.setdefault(ovr_id, ovr_spec)
         memory_ref = parse_ref(
             args.memory_plugin, expected_kind="memory", registry=registry,
         )
@@ -725,19 +824,30 @@ def main():
                 f"selected plugin (selected: {sorted(selected_ids) or 'none'})"
             )
 
-    if shutil.which("docker") is None:
-        sys.exit("[build] ERROR: docker not in PATH")
-
-    openclaw_repo = Path(args.openclaw_repo).resolve()
-    if not (openclaw_repo / "Dockerfile").exists():
-        sys.exit(f"[build] ERROR: {openclaw_repo}/Dockerfile not found")
-
     here = Path(__file__).resolve().parents[1]
-    if not (here / "Dockerfile.eval").exists():
-        sys.exit(f"[build] ERROR: {here}/Dockerfile.eval not found")
-
     plugins_dir = here / "plugins"
-    openclaw_sha = short_sha(openclaw_repo)
+
+    # When --dry-run is set we just resolve plugins and print the plan.
+    # Defer docker / openclaw-repo / Dockerfile.eval checks so dry-run
+    # works on any machine even without docker installed or the openclaw
+    # checkout present.
+    if args.dry_run:
+        # Best-effort sha; fall back to a sentinel when openclaw repo is
+        # absent so the plan still prints.
+        openclaw_repo = Path(args.openclaw_repo).resolve()
+        if (openclaw_repo / ".git").exists():
+            openclaw_sha = short_sha(openclaw_repo)
+        else:
+            openclaw_sha = "0000000"
+    else:
+        if shutil.which("docker") is None:
+            sys.exit("[build] ERROR: docker not in PATH")
+        openclaw_repo = Path(args.openclaw_repo).resolve()
+        if not (openclaw_repo / "Dockerfile").exists():
+            sys.exit(f"[build] ERROR: {openclaw_repo}/Dockerfile not found")
+        if not (here / "Dockerfile.eval").exists():
+            sys.exit(f"[build] ERROR: {here}/Dockerfile.eval not found")
+        openclaw_sha = short_sha(openclaw_repo)
 
     plugin_rev = compute_plugin_rev(memory_ref, ce_ref, plugins_dir, overrides)
     eval_tag_target = derive_eval_tag(
@@ -804,6 +914,7 @@ def main():
         install_spec=primary_install_spec,
         install_plugin_id=primary_install_id,
         extra_install_specs=extra_install_specs or None,
+        tag_override=eval_tag_target,
     )
 
     print()
@@ -812,6 +923,10 @@ def main():
     print(f"[build]   layer_tag: {layer_tag}")
 
     # Append entry to image_manifest.yaml unless explicitly disabled.
+    # If this fails AFTER docker succeeded, the image exists but is not
+    # discoverable by evaluation.cli; surface the error loudly so the
+    # operator can append by hand or rerun build.py with --rebuild-base
+    # to retry. We exit non-zero to make the failure obvious in CI.
     if not args.no_image_manifest:
         manifest_path = (
             Path(args.image_manifest_out)
@@ -824,7 +939,15 @@ def main():
             built_at=now_iso(),
             plugins=build_manifest_plugins(memory_ref, ce_ref, plugins_dir),
         )
-        append_entry(manifest_path, entry)
+        try:
+            append_entry(manifest_path, entry)
+        except OSError as e:
+            sys.exit(
+                f"[build] WARN: image build succeeded ({layer_tag}) but "
+                f"manifest append failed: {e}\n"
+                f"[build] Image is usable; either add the entry manually or "
+                f"rerun with --rebuild-base after fixing the manifest path."
+            )
         print(f"[build]   image_manifest: {manifest_path}")
 
     # Deprecated --manifest-out: per-build JSON summary, kept for backward compat.
