@@ -63,7 +63,7 @@ openclaw:
 
 # v0.7 Stage 1: docker-specific config
 openclaw_docker:
-  image: "openclaw-eval:7da23c3-memory-core-0000000-slim"
+  image: "${OPENCLAW_EVAL_IMAGE:openclaw-eval:memory-core-slim}"
   max_concurrent_containers: 4
   mem_limit: "2g"
   network: "bridge"
