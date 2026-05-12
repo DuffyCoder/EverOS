@@ -6,7 +6,7 @@
 # The harness drives `docker exec` per RPC; this script just bootstraps
 # config and keeps the container alive.
 #
-# v0.7 secret hygiene: yaml/template uses ${LLM_API_KEY} / ${SOPH_API_KEY}
+# Secret hygiene: yaml/template uses ${LLM_API_KEY} / ${SOPH_API_KEY}
 # template strings; openclaw resolves them from this container's env at
 # CLI invocation time. This script does NOT substitute secret values into
 # the file written to disk.
@@ -35,18 +35,14 @@ else
   PLUGIN_ENTRIES='{"memory-core": {"enabled": false}, "'$PLUGIN'": {"enabled": true}}'
 fi
 
-# Stage 3 Phase 1: optionally splice in the context-engine plugin.
-# When CONTEXT_ENGINE_PLUGIN_ID is set, we (a) add it to plugins.allow,
-# (b) register an enabled entry, (c) emit slots.contextEngine via jq below.
-# When unset, no behavioral change vs bundled memory mode (Phase 0
-# re-audit confirmed openclaw resolves slots.contextEngine to "legacy"
-# default when the slot key is absent from the rendered config).
+# Optionally splice in the context-engine plugin. When CONTEXT_ENGINE_PLUGIN_ID
+# is set, we (a) add it to plugins.allow, (b) register an enabled entry,
+# (c) emit slots.contextEngine via jq below. When unset, openclaw resolves
+# slots.contextEngine to "legacy" default when the slot key is absent from
+# the rendered config.
 CONTEXT_ENGINE_PLUGIN="${CONTEXT_ENGINE_PLUGIN_ID:-}"
 if [ -n "$CONTEXT_ENGINE_PLUGIN" ]; then
-  # Splice ce plugin id into PLUGIN_ALLOW (jq makes the union safe).
   PLUGIN_ALLOW=$(echo "$PLUGIN_ALLOW" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" '. + [$ce] | unique')
-  # Add entry to PLUGIN_ENTRIES — enabled so the loader actually runs
-  # the plugin's register() and registerContextEngine() fires.
   PLUGIN_ENTRIES=$(echo "$PLUGIN_ENTRIES" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" \
     '.[$ce] = {"enabled": true}')
 fi
@@ -58,29 +54,11 @@ else
   MEMORY_SEARCH_ENABLED='true'
 fi
 
-# memoryFlush controls (Phase 1: agent_replay support).
-#
-# Env vars (passed by openclaw_docker_adapter._docker_env_for_container
-# from yaml openclaw.compaction_overrides):
-#   MEMORY_FLUSH_ENABLED                  bool, default "false" (preserves
-#                                         legacy behavior — fake flush at
-#                                         ingest, no native turn-end flush).
-#   MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS    int, optional. softThresholdTokens
-#                                         override; openclaw default 4000.
-#   MEMORY_FLUSH_RESERVE_TOKENS_FLOOR     int, optional. reserveTokensFloor
-#                                         override; openclaw default 20000.
-#   MEMORY_FLUSH_FORCE_FLUSH_TRANSCRIPT_BYTES   int|str, optional. byte
-#                                         threshold for force flush; openclaw
-#                                         default 2MB. Accepts numbers or
-#                                         strings ("100kb", "2mb").
-#
-# Empty values mean "don't override" — the field is omitted from the
-# rendered config, so OpenClaw's own defaults from
-# extensions/memory-core/src/flush-plan.ts apply.
-MEMORY_FLUSH_ENABLED="${MEMORY_FLUSH_ENABLED:-false}"
-MEMORY_FLUSH_SOFT="${MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS:-}"
-MEMORY_FLUSH_RESERVE="${MEMORY_FLUSH_RESERVE_TOKENS_FLOOR:-}"
-MEMORY_FLUSH_FORCE_BYTES="${MEMORY_FLUSH_FORCE_FLUSH_TRANSCRIPT_BYTES:-}"
+# Vector store toggle. When set to "false", memorySearch.store.vector.enabled
+# is rendered false (FTS-only retrieval, no embedding calls). Default
+# preserves the legacy template value (true). Useful when the embedding
+# provider is unavailable, avoiding hard-fail at `openclaw memory index` time.
+MEMORY_VECTOR_ENABLED="${MEMORY_VECTOR_ENABLED:-true}"
 
 # Model id/name defaults (can be overridden via env).
 LLM_MODEL_ID="${LLM_MODEL:-gpt-4.1-mini}"
@@ -99,7 +77,6 @@ mkdir -p "$WS" "$WS/state/memory" "$WS/home" "$WS/memory"
 # Install-mode (build.py --install-spec): if INSTALL_PLUGIN_ID is set
 # and the install dir exists, register it via plugins.load.paths so the
 # runtime can find the installed plugin alongside any bundled ones.
-# Empty/missing -> jq emits no load section (default behavior).
 INSTALL_LOAD_PATHS='[]'
 OPENCLAW_HOME_DIR="${OPENCLAW_HOME:-/opt/openclaw}"
 if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
@@ -111,8 +88,8 @@ if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
     echo "[entrypoint] WARN: INSTALL_PLUGIN_ID=$INSTALL_PLUGIN_ID set but $INSTALL_DIR not found" >&2
   fi
 fi
-# Stage 3 Phase 5: append each EXTRA_INSTALL_PLUGIN_IDS dir (space-separated)
-# so paired plugins (e.g. context-engine + memory) both load.
+# Append each EXTRA_INSTALL_PLUGIN_IDS dir (space-separated) so paired
+# plugins (e.g. context-engine + memory) both load.
 if [ -n "${EXTRA_INSTALL_PLUGIN_IDS:-}" ]; then
   for extra_id in ${EXTRA_INSTALL_PLUGIN_IDS}; do
     EXTRA_DIR="${OPENCLAW_HOME_DIR}/extensions/${extra_id}"
@@ -125,6 +102,14 @@ if [ -n "${EXTRA_INSTALL_PLUGIN_IDS:-}" ]; then
   done
 fi
 
+# memoryFlush autoCapture toggle. openclaw memory-core's flush-plan.ts
+# default is enabled-when-undefined; only explicit ``enabled === false``
+# disables. Honor the MEMORY_FLUSH_ENABLED env var from the docker
+# adapter (default true) so memcore can be benchmarked under its
+# upstream autoCapture behavior (matches OV team's reference setup
+# that produced the 35.65% memcore / 51.23% OV+memcore numbers).
+MEMORY_FLUSH_ENABLED="${MEMORY_FLUSH_ENABLED:-true}"
+
 jq \
   --argjson allow "$PLUGIN_ALLOW" \
   --arg slot "$MEMORY_SLOT" \
@@ -132,25 +117,15 @@ jq \
   --argjson enabled "$MEMORY_SEARCH_ENABLED" \
   --argjson loadPaths "$INSTALL_LOAD_PATHS" \
   --arg ceSlot "$CONTEXT_ENGINE_PLUGIN" \
+  --argjson vectorEnabled "$MEMORY_VECTOR_ENABLED" \
   --argjson flushEnabled "$MEMORY_FLUSH_ENABLED" \
-  --arg flushSoft "$MEMORY_FLUSH_SOFT" \
-  --arg flushReserve "$MEMORY_FLUSH_RESERVE" \
-  --arg flushForceBytes "$MEMORY_FLUSH_FORCE_BYTES" \
   '
   .plugins.allow = $allow
   | .plugins.slots.memory = $slot
   | .plugins.entries = $entries
   | .agents.defaults.memorySearch.enabled = $enabled
+  | .agents.defaults.memorySearch.store.vector.enabled = $vectorEnabled
   | .agents.defaults.compaction.memoryFlush.enabled = $flushEnabled
-  | (if $flushSoft != ""
-       then .agents.defaults.compaction.memoryFlush.softThresholdTokens = ($flushSoft | tonumber)
-       else . end)
-  | (if $flushReserve != ""
-       then .agents.defaults.compaction.reserveTokensFloor = ($flushReserve | tonumber)
-       else . end)
-  | (if $flushForceBytes != ""
-       then .agents.defaults.compaction.memoryFlush.forceFlushTranscriptBytes = $flushForceBytes
-       else . end)
   | (if ($loadPaths | length) > 0 then .plugins.load.paths = $loadPaths else . end)
   | (if ($ceSlot | length) > 0 then .plugins.slots.contextEngine = $ceSlot else . end)
   ' "$TPL" \
@@ -163,7 +138,7 @@ jq \
 # Validate it parses as JSON.
 jq empty "$OUT" 2>&1 || { echo "ERROR: rendered $OUT is not valid JSON" >&2; cat "$OUT" >&2; exit 1; }
 
-echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED memoryFlush.enabled=$MEMORY_FLUSH_ENABLED soft=$MEMORY_FLUSH_SOFT reserve=$MEMORY_FLUSH_RESERVE force_bytes=$MEMORY_FLUSH_FORCE_BYTES)" >&2
+echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED vector=$MEMORY_VECTOR_ENABLED)" >&2
 
 # Optional plugin sidecar (e.g. mem0 FastAPI server). Started in
 # background so the container's main CMD (sleep infinity) keeps running
