@@ -1,0 +1,21 @@
+# docker compose override for OV server when running LoCoMo eval against
+# a host-side embedding proxy. Adds extra_hosts so the container can
+# resolve host.docker.internal -> host-gateway, matching the convention
+# used by openclaw_docker_adapter for evermemos memory_mode.
+#
+# Usage:
+#   cd /Data3/shutong.shan/memory/refs/OpenViking
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f /Data3/shutong.shan/memory/refs/EverMemOS/openclaw-eval/scripts/openviking-compose.override.yml \
+#     up -d
+#
+# Also passes LLM_API_KEY through so ov.conf's ${LLM_API_KEY} resolves to
+# the host's Sophnet key (used for VLM, since the same key works for
+# chat completions even though it lacks embedding permission).
+services:
+  openviking:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY}
