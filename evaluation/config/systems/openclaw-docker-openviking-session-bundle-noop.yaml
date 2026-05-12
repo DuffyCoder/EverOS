@@ -66,16 +66,15 @@ openclaw:
     base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
     api_key_env: "OPENVIKING_API_KEY"
     account_id: "default"
-    # Shared OV namespace (no user_id) — matches OV team's reference
-    # ``import_to_ov.py --no-user-agent-id`` flag, which writes the same
-    # default namespace the openclaw OV plugin reads from at QA time.
-    # Empty user_id_template returns "" from _resolve_ov_tenant_field,
-    # suppressing the X-OpenViking-User header in OVIngestClient and
-    # skipping the OPENVIKING_USER_ID env injection into the container.
-    # Cross-conv name collisions are resolved by the rerank stage at QA
-    # time, not by per-conv tenant isolation (reranker scoring beats
-    # tenant filtering when retrieval pool quality is high enough).
-    user_id_template: ""
+    # Shared OV namespace via fixed ``user_id`` — matches openclaw-eval's
+    # default ``--user eval-1`` behavior. All 10 LoCoMo conversations write
+    # to and read from the same ``viking://user/eval-1/...`` namespace.
+    # Empty user_id would have produced HTTP 400 from the OV server
+    # because its multi-tenant mode (root_api_key set in ov.conf) requires
+    # tenant-scoped requests to include X-OpenViking-Account and
+    # X-OpenViking-User headers. Cross-conv name collisions are resolved
+    # by the rerank stage at QA time.
+    user_id: "eval-1"
     # agent_id intentionally unset — both SDK ingest and plugin
     # resolve to the OV server's "default" agent, keeping ingest +
     # retrieval aligned without per-conv agent fragmentation.

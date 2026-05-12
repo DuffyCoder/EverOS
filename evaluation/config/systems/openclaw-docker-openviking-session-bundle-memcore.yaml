@@ -64,13 +64,13 @@ openclaw:
     base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
     api_key_env: "OPENVIKING_API_KEY"
     account_id: "default"
-    # Shared OV namespace (no user_id) — match OV team's --no-user-agent-id.
-    # Setting template to empty string returns "" from _resolve_ov_tenant_field,
-    # which suppresses the X-OpenViking-User header in OVIngestClient and
-    # also skips the OPENVIKING_USER_ID env injection into the docker
-    # container. Both SDK ingest and the in-container OV plugin then read
-    # from the OV default namespace.
-    user_id_template: ""
+    # Shared OV namespace via fixed ``user_id`` — matches openclaw-eval's
+    # default ``--user eval-1`` behavior so SDK ingest and the in-container
+    # OV plugin both read from ``viking://user/eval-1/...``. Empty user_id
+    # would have produced HTTP 400 because OV server's multi-tenant mode
+    # (root_api_key set) requires X-OpenViking-User header on every
+    # tenant-scoped request.
+    user_id: "eval-1"
     task_timeout_sec: 600
   agent_llm:
     provider_id: "sophnet"
