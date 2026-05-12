@@ -412,6 +412,18 @@ async def main():
                 # Cleanup failure doesn't affect main process
                 console.print(f"[dim]⚠️  Failed to cleanup adapter resources: {e}[/dim]")
 
+        # Stop any per-conversation containers spawned by docker-backed
+        # adapters (DockerizedOpenclawAdapter). Without this the smoke /
+        # full eval leaves N containers running per conv until the docker
+        # daemon's --rm reap fires (which only happens on stop), filling
+        # the volume cache and eventually exhausting disk space.
+        if hasattr(adapter, 'cleanup') and callable(getattr(adapter, 'cleanup')):
+            try:
+                await adapter.cleanup()
+                console.print("[dim]🧹 Stopped adapter containers[/dim]")
+            except Exception as e:
+                console.print(f"[dim]⚠️  Failed to stop containers: {e}[/dim]")
+
         # Only systems using rerank need cleanup
         systems_need_rerank = ["evermemos"]
         if args.system in systems_need_rerank:

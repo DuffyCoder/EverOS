@@ -30,7 +30,6 @@ _BASE = {
     "workspace_dir": "/tmp/ws",
     "native_store_dir": "/tmp/state",
     "backend_mode": "hybrid",
-    "flush_mode": "shared_llm",
 }
 
 
@@ -235,7 +234,6 @@ def test_resolved_config_minimal_backward_compatible():
         workspace_dir="/tmp/ws",
         native_store_dir="/tmp/state",
         backend_mode="hybrid",
-        flush_mode="shared_llm",
         embedding={
             "provider": "sophnet",
             "model": "text-embeddings",
@@ -274,7 +272,6 @@ def test_resolved_config_fts_only_uses_auto_provider():
         workspace_dir="/tmp/ws",
         native_store_dir="/tmp/state",
         backend_mode="fts_only",
-        flush_mode="shared_llm",
     )
     ms = cfg["agents"]["defaults"]["memorySearch"]
     assert ms["provider"] == "auto"

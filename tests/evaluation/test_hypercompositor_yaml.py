@@ -85,7 +85,6 @@ class TestResolvedConfigIntegration:
             workspace_dir="/ws",
             native_store_dir="/ws/state",
             backend_mode=oc["backend_mode"],
-            flush_mode=oc["flush_mode"],
             memory_mode=oc["memory_mode"],
             context_engine_mode=oc["context_engine_mode"],
             agent_llm=agent_llm,

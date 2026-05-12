@@ -7,6 +7,20 @@ We emit only the fields we actually override; everything else is left out so
 OpenClaw's own defaults from src/agents/memory-search.ts (tokenizer,
 chunking, cache, sync debounce, hybrid weights, mmr/temporal-decay toggles,
 etc.) apply. Native defaults we explicitly mirror here have citations.
+
+Compaction policy:
+    Native ``runMemoryFlushIfNeeded`` is force-OFF in every mode emitted
+    by this builder. The agent-backbone evals run per-session bundle
+    ingest with explicit transcript archive between sessions; native
+    flush would either fire mid-replay (writing partial memory) or never
+    fire at all (token budget never crosses). Either way the eval semantic
+    is owned by the adapter, not openclaw's runtime.
+
+    LLM-backbone evals (flush_mode == shared_llm | disabled) bypass
+    in-turn flush by design — the framework writes memory/*.md before
+    the agent runs.
+
+    Yaml ``openclaw.compaction_overrides`` is removed; passing it raises.
 """
 from __future__ import annotations
 
@@ -30,9 +44,6 @@ logger = logging.getLogger(__name__)
 #   hybrid.candidateMultiplier ................. memory-search.ts:108 -> 4
 #   chunking.tokens / overlap .................. memory-search.ts:98/99
 #   cache.enabled .............................. memory-search.ts:113 -> true
-#   compaction.memoryFlush.softThresholdTokens . flush-plan.ts:10    -> 4000
-#   compaction.memoryFlush.forceFlushTranscriptBytes ... flush-plan.ts:11 -> 2MB
-#   compaction.reserveTokensFloor .............. pi-settings.ts:4    -> 20000
 #   memory.backend ............................. backend-config.ts:79 -> "builtin"
 #   plugins.allow / plugins.slots / plugins.entries ... types.plugins.ts
 
@@ -42,12 +53,10 @@ def build_openclaw_resolved_config(
     workspace_dir: str,
     native_store_dir: str,
     backend_mode: str,
-    flush_mode: str,
     memory_mode: str = "memory-core",
     context_engine_mode: Optional[str] = None,
     agent_llm: Optional[dict] = None,
     embedding: Optional[dict] = None,
-    compaction_overrides: Optional[dict] = None,
 ) -> dict:
     """Return the dict that OpenClaw CLI expects at OPENCLAW_CONFIG_PATH.
 
@@ -55,7 +64,6 @@ def build_openclaw_resolved_config(
         workspace_dir: per-conversation isolated workspace root
         native_store_dir: per-conversation isolated state dir (memory db lives here)
         backend_mode: ``fts_only`` | ``vector`` | ``hybrid``
-        flush_mode: passed through for compatibility (currently unused here)
         memory_mode: ``memory-core`` (baseline), ``noop`` (memorySearch disabled),
             or any other plugin id
         agent_llm: optional agent LLM provider config. If provided, emits
@@ -63,7 +71,7 @@ def build_openclaw_resolved_config(
             for ``answer_mode=agent_local``.
         embedding: optional embedding provider config (sophnet etc.)
 
-    Secret handling (v0.7):
+    Secret handling:
         - ``agent_llm.api_key_env`` and ``embedding.api_key_env`` are bare env
           variable names (e.g. ``"LLM_API_KEY"``). The function constructs
           ``${VAR}`` template strings so OpenClaw resolves them at startup
@@ -86,12 +94,11 @@ def build_openclaw_resolved_config(
     sqlite_path = str(Path(native_store_dir) / "memory" / "default.sqlite")
 
     # === memorySearch (incl. sophnet embedding) ==========================
-    # v0.7 fix (Codex r7 F1): when memory_mode == "noop", omit the
-    # embedding provider/model/remote block entirely. OpenClaw's env
-    # substitution evaluates ALL ${VAR} placeholders at startup before
-    # runtime can decide to ignore them based on enabled=false. Leaving
-    # ${SOPH_API_KEY} in a "disabled" block makes noop runs fail in any
-    # environment without sophnet credentials.
+    # When memory_mode == "noop", omit the embedding provider/model/remote
+    # block entirely. OpenClaw's env substitution evaluates ALL ${VAR}
+    # placeholders at startup before runtime can decide to ignore them
+    # based on enabled=false, so leaving ${SOPH_API_KEY} in a "disabled"
+    # block makes noop runs fail in any environment without sophnet creds.
     is_noop = memory_mode == "noop"
 
     memory_search: dict[str, Any] = {
@@ -116,38 +123,11 @@ def build_openclaw_resolved_config(
         )
         memory_search["remote"] = _build_embedding_remote(embedding or {})
 
-    # compaction.memoryFlush:
-    #
-    # * shared_llm / disabled flush_mode: bench drives flush itself at
-    #   ingest, so OpenClaw's in-turn flush stays OFF (legacy behavior).
-    #
-    # * agent_replay flush_mode: bench delegates flush to OpenClaw's own
-    #   reply pipeline, so the in-turn flush must be ON. yaml may also
-    #   provide compaction_overrides to tune softThresholdTokens etc. so
-    #   the threshold is reachable within LoCoMo conversation sizes.
-    overrides = compaction_overrides or {}
-    if flush_mode == "agent_replay":
-        memory_flush_block: dict[str, Any] = {
-            "enabled": bool(overrides.get("enabled", True)),
-        }
-    else:
-        memory_flush_block = {
-            "enabled": bool(overrides.get("enabled", False)),
-        }
-    if overrides.get("soft_threshold_tokens") is not None:
-        memory_flush_block["softThresholdTokens"] = int(
-            overrides["soft_threshold_tokens"]
-        )
-    if overrides.get("force_flush_transcript_bytes") is not None:
-        # Native parser accepts numbers OR strings ("100kb", "2mb").
-        memory_flush_block["forceFlushTranscriptBytes"] = overrides[
-            "force_flush_transcript_bytes"
-        ]
-    compaction_block: dict[str, Any] = {"memoryFlush": memory_flush_block}
-    if overrides.get("reserve_tokens_floor") is not None:
-        compaction_block["reserveTokensFloor"] = int(
-            overrides["reserve_tokens_floor"]
-        )
+    # compaction.memoryFlush is force-OFF. The new session-bundle ingest
+    # owns memory writes via the agent's in-turn file_write tool calls
+    # (driven by the tail directive); native flush would either fire
+    # too early (mid-replay) or never (token budget never crosses).
+    compaction_block: dict[str, Any] = {"memoryFlush": {"enabled": False}}
 
     resolved: dict[str, Any] = {
         "memory": {"backend": "builtin"},
@@ -161,7 +141,7 @@ def build_openclaw_resolved_config(
         },
     }
 
-    # === agent LLM provider (v0.7) =======================================
+    # === agent LLM provider ==============================================
     if agent_llm:
         provider_id, provider_cfg, model_ref = _build_agent_provider(agent_llm)
         models_cfg = resolved.setdefault("models", {})
@@ -170,7 +150,7 @@ def build_openclaw_resolved_config(
         providers[provider_id] = provider_cfg
         resolved["agents"]["defaults"]["model"] = model_ref
 
-    # === plugins (allow + slots + entries) (v0.7) ========================
+    # === plugins (allow + slots + entries) ===============================
     resolved["plugins"] = _build_plugins_section(memory_mode, context_engine_mode)
 
     return resolved
@@ -253,7 +233,7 @@ def _build_plugins_section(
 ) -> dict[str, Any]:
     """Build plugins.allow / slots / entries from memory + context-engine modes.
 
-    Memory side (legacy):
+    Memory side:
     - memory-core or noop: only memory-core in allow + slot, enabled
       (noop disables memorySearch via its enabled flag, not via plugin
       removal, so memory-core stays loaded but has nothing to do)
@@ -261,18 +241,13 @@ def _build_plugins_section(
       slot fallback for some openclaw paths) but its entry disabled;
       target plugin allowed + slot owner + entry enabled
 
-    Context-engine side (Stage 3 Phase 2):
+    Context-engine side:
     - When ``context_engine_mode`` is a non-empty string, splice the engine
       id into ``allow`` + register an enabled ``entries[<id>]`` + emit
       ``slots.contextEngine``. Empty/None leaves the slot absent so
       openclaw resolves to its default ``"legacy"`` engine.
     - The two modes compose freely: a plugin can be in the memory slot
       while a different plugin sits in the context-engine slot.
-
-    Phase 0 re-audit (2026-05-01) confirmed that omitting
-    ``slots.contextEngine`` when unused is the correct disable mechanism;
-    do NOT use sentinels like "__none__" (Codex r1: resolveContextEngine
-    throws on unregistered ids).
     """
     if memory_mode in ("memory-core", "noop"):
         section: dict[str, Any] = {

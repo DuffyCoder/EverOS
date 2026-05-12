@@ -250,7 +250,12 @@ async def main():
             for group in all_grades.values():
                 for response in group:
                     if judgment_key in response["llm_judgments"]:
-                        if response["llm_judgments"][judgment_key]:
+                        val = response["llm_judgments"][judgment_key]
+                        if val is None:
+                            # Judge unavailable for this run; skip from
+                            # denominator (mirror llm_judge.py aggregation).
+                            continue
+                        if val:
                             current_run_correct_count += 1
                         current_run_total_count += 1
 
