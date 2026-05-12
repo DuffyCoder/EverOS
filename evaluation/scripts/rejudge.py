@@ -7,25 +7,34 @@ Usage:
     .venv/bin/python evaluation/scripts/rejudge.py \\
         --run-dir evaluation/results/<run-name> \\
         --dataset-config evaluation/config/datasets/locomo.yaml \\
-        --concurrency 4
+        --concurrency 1
+        # writes <run-dir>/eval_results_rejudged.json (does NOT overwrite
+        # the original eval_results.json by default)
 
-Outputs:
-    Overwrites <run-dir>/eval_results.json
-    Overwrites <run-dir>/report.txt (rebuilt from rejudged numbers)
+Outputs (default):
+    Writes <run-dir>/eval_results_rejudged.json
+    Writes <run-dir>/report_rejudged.txt
+    Pass --overwrite to replace eval_results.json + report.txt instead.
+
+Concurrency:
+    Default 1 (serial). The rate-limit storm that produces silent-zero
+    accuracy comes from running 4 concurrent judge calls against a
+    single-key Sophnet endpoint; serial calls reliably succeed at full
+    Sophnet QPS. For runs known to be small or against a roomier
+    endpoint, raise via --concurrency.
 
 Why this exists:
-    The full pipeline takes hours (LoCoMo 50Q × 10 conv + ingest); judges
-    are dirt-cheap by comparison (~10 min for 150 LLM calls). When the
-    judge fails late in the run, throwing away the agent answers and
-    re-running is wasteful. This script reuses the saved AnswerResult
-    artifacts and just reruns the judge with retry/backoff.
+    The full pipeline takes hours (LoCoMo 1540Q × 10 conv + ingest);
+    judges are dirt-cheap by comparison. When the judge silently fails
+    under rate limits, throwing away the agent answers and re-running is
+    wasteful. This script reuses the saved AnswerResult artifacts and
+    just reruns the judge with retry/backoff.
 
-Reliability:
-    As of Stage 2 R-S2-3 hardening (2026-05-05), the in-pipeline LLMJudge
-    has the same retry/concurrency behavior as this script. rejudge.py
-    is now mainly useful for re-evaluating legacy runs whose answers
-    were saved before the hardening, and as a knob for tuning judge
-    behavior without touching the live yaml.
+    The in-pipeline LLMJudge now returns ``None`` (judge unavailable)
+    instead of a coerced False on retry-exhaust / parse failure, so
+    legacy runs whose eval_results.json looks like 0% accuracy can be
+    redeemed by re-running this tool — fresh judgments will replace the
+    silent-False rows with proper True / False / None.
 """
 from __future__ import annotations
 
@@ -152,10 +161,18 @@ async def main_async() -> int:
                    help="evaluation/results/<run-name>")
     p.add_argument("--dataset-config", required=True, type=Path,
                    help="dataset yaml with evaluation.llm config")
-    p.add_argument("--concurrency", type=int, default=4,
-                   help="judge concurrency (default 4; in-pipeline default is 10)")
+    p.add_argument("--concurrency", type=int, default=1,
+                   help="judge concurrency (default 1 = serial, avoids "
+                        "Sophnet rate-limit storms; raise for roomier endpoints)")
+    p.add_argument("--max-retries", type=int, default=8,
+                   help="per-call retry budget on transient errors (default 8)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="overwrite eval_results.json + report.txt in place "
+                        "(default writes *_rejudged.json / *_rejudged.txt "
+                        "next to them, preserving the original)")
     p.add_argument("--out", type=Path, default=None,
-                   help="override eval_results.json output path")
+                   help="explicit eval_results path (takes precedence over "
+                        "--overwrite naming)")
     args = p.parse_args()
 
     answer_results_path = args.run_dir / "answer_results.json"
@@ -169,6 +186,7 @@ async def main_async() -> int:
     print(f"[rejudge] loading {answer_results_path}")
     answer_results = _load_answer_results(answer_results_path)
     print(f"[rejudge] loaded {len(answer_results)} answers")
+    print(f"[rejudge] concurrency={args.concurrency}  max_retries={args.max_retries}")
 
     cfg = _build_judge_config(args.dataset_config, args.concurrency)
     if not cfg["llm"]["api_key"]:
@@ -176,10 +194,21 @@ async def main_async() -> int:
               file=sys.stderr)
         return 1
 
-    judge = _build_resilient_judge(cfg, concurrency=args.concurrency)
+    judge = _build_resilient_judge(
+        cfg, concurrency=args.concurrency, max_retries=args.max_retries,
+    )
     eval_result = await judge.evaluate(answer_results)
 
-    out_path = args.out or (args.run_dir / "eval_results.json")
+    if args.out:
+        out_path = args.out
+        report_path = args.run_dir / "report.txt"
+    elif args.overwrite:
+        out_path = args.run_dir / "eval_results.json"
+        report_path = args.run_dir / "report.txt"
+    else:
+        out_path = args.run_dir / "eval_results_rejudged.json"
+        report_path = args.run_dir / "report_rejudged.txt"
+
     out_path.write_text(json.dumps(
         {
             "total_questions": eval_result.total_questions,
@@ -192,10 +221,15 @@ async def main_async() -> int:
     ))
     print(f"[rejudge] wrote {out_path}")
 
-    report_path = args.run_dir / "report.txt"
     report_path.write_text(_format_report(eval_result, args.run_dir.name, args.run_dir))
     print(f"[rejudge] wrote {report_path}")
-    print(f"[rejudge] accuracy: {eval_result.accuracy:.2%} ({eval_result.correct}/{eval_result.total_questions})")
+    unavail = (eval_result.metadata or {}).get("unavailable_per_run") or []
+    print(
+        f"[rejudge] accuracy: {eval_result.accuracy:.2%} "
+        f"({eval_result.correct}/{eval_result.total_questions})"
+    )
+    if any(unavail):
+        print(f"[rejudge] judge unavailable per run: {unavail} (excluded from denominator)")
     return 0
 
 

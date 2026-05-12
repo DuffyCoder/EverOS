@@ -160,9 +160,11 @@ class TestTransientRetry:
         assert result is True
         assert calls["count"] == 3
 
-    async def test_retry_exhausted_returns_false_with_logged_error(self, capsys):
-        """When all retries fail on transient error, judge returns False
-        but emits a clear error log (not silent like before)."""
+    async def test_retry_exhausted_returns_none_with_logged_error(self, capsys):
+        """When all retries fail on transient error, judge returns None
+        (judge unavailable) and emits a clear error log. ``None`` keeps
+        the question out of the accuracy denominator instead of coercing
+        to WRONG (the Stage 2 R-S2-3 silent-zero bug)."""
         judge = _make_judge(max_retries=2)
 
         async def always_fail(**kwargs):
@@ -170,7 +172,7 @@ class TestTransientRetry:
 
         judge.client.chat.completions.create = always_fail
         result = await judge._judge_answer("q", "g", "a")
-        assert result is False
+        assert result is None
         captured = capsys.readouterr()
         # Must not be silent — error tail should mention the cause
         assert "judge" in captured.out.lower() or "error" in captured.out.lower()
@@ -179,7 +181,8 @@ class TestTransientRetry:
 @pytest.mark.asyncio
 class TestPermanentErrorBypassesRetry:
     async def test_json_decode_error_no_retry(self):
-        """Bad JSON in response is permanent — no retry."""
+        """Bad JSON in response is treated as judge-unavailable (None) so
+        a confused / refusing model doesn't silently get scored as WRONG."""
         judge = _make_judge(max_retries=5)
         calls = {"count": 0}
 
@@ -195,12 +198,12 @@ class TestPermanentErrorBypassesRetry:
 
         judge.client.chat.completions.create = returns_garbage
         result = await judge._judge_answer("q", "g", "a")
-        assert result is False
-        # Permanent error: no retry. Should call exactly once.
+        assert result is None
+        # No retry on parse failures. Should call exactly once.
         assert calls["count"] == 1
 
     async def test_empty_content_no_retry(self):
-        """Empty model output is treated as permanent (model gave up)."""
+        """Empty model output is treated as judge-unavailable (None)."""
         judge = _make_judge(max_retries=5)
         calls = {"count": 0}
 
@@ -216,5 +219,5 @@ class TestPermanentErrorBypassesRetry:
 
         judge.client.chat.completions.create = returns_empty
         result = await judge._judge_answer("q", "g", "a")
-        assert result is False
+        assert result is None
         assert calls["count"] == 1

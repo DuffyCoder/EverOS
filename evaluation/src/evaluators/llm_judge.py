@@ -5,12 +5,20 @@ Aligned with evaluation_archive logic:
 - Keep independent judgments for each run (judgment_1, judgment_2, judgment_3)
 - Calculate accuracy for each run separately
 - Output mean and std
+
+Three judgment outcomes per call:
+  * True   — judge returned CORRECT
+  * False  — judge returned WRONG
+  * None   — judge unavailable (transient retries exhausted, empty/invalid
+             response, permanent error). Excluded from accuracy denominator
+             so a Sophnet rate-limit storm during evaluate doesn't silently
+             collapse the score to 0.
 """
 
 import asyncio
 import json
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 from openai import AsyncOpenAI
 from tqdm import tqdm
@@ -125,6 +133,11 @@ class LLMJudge(BaseEvaluator):
             lambda: {"correct": [0] * self.num_runs, "total": 0}
         )
 
+        # Per-run accuracy: skip None ("judge unavailable") values from the
+        # denominator so a transient rate-limit storm doesn't silently push
+        # the score toward 0. ``unavailable_count`` is preserved in
+        # metadata so downstream tooling can flag low-coverage runs.
+        unavailable_per_run = [0] * self.num_runs
         for i in range(self.num_runs):
             judgment_key = f"judgment_{i+1}"
             correct_count = 0
@@ -135,15 +148,22 @@ class LLMJudge(BaseEvaluator):
                 category = result.get("category")
 
                 if judgment_key in llm_judgments:
-                    total_count += 1
-                    if llm_judgments[judgment_key]:
-                        correct_count += 1
-                        if category is not None:
-                            category_stats[category]["correct"][i] += 1
+                    val = llm_judgments[judgment_key]
+                    if val is None:
+                        unavailable_per_run[i] += 1
+                        # Don't count toward category total either —
+                        # category accuracy uses each category's own
+                        # per-run available judgment count below.
+                    else:
+                        total_count += 1
+                        if val:
+                            correct_count += 1
+                            if category is not None:
+                                category_stats[category]["correct"][i] += 1
 
-                    # Count category total (only need once)
-                if i == 0 and category is not None:
-                    category_stats[category]["total"] += 1
+                    if i == 0 and category is not None:
+                        if val is not None:
+                            category_stats[category]["total"] += 1
 
             if total_count > 0:
                 run_accuracy = correct_count / total_count
@@ -175,6 +195,11 @@ class LLMJudge(BaseEvaluator):
         print(f"   - Mean accuracy: {mean_accuracy:.4f} ({mean_accuracy*100:.2f}%)")
         print(f"   - Std deviation: {std_accuracy:.4f}")
         print(f"   - Run accuracies: {[f'{s:.4f}' for s in run_scores]}")
+        if any(unavailable_per_run):
+            print(
+                f"   - ⚠ judge unavailable per run: {unavailable_per_run} "
+                f"(excluded from denominator)"
+            )
 
         if category_accuracies:
             print(f"\n📊 Category statistics:")
@@ -200,6 +225,7 @@ class LLMJudge(BaseEvaluator):
                 "std_accuracy": std_accuracy,
                 "run_scores": run_scores,
                 "category_accuracies": category_accuracies,
+                "unavailable_per_run": unavailable_per_run,
             },
         )
 
@@ -238,13 +264,18 @@ class LLMJudge(BaseEvaluator):
     async def _evaluate_single_answer(self, answer_result: AnswerResult) -> dict:
         """
         Evaluate single answer, keep independent judgment for each run.
+
+        Each judgment is True/False/None where None means the judge call
+        could not produce a verdict (transient retries exhausted, empty
+        content, parse failure, etc.). Aggregation excludes None values
+        from the accuracy denominator.
         """
         question = answer_result.question
         golden_answer = answer_result.golden_answer
         generated_answer = answer_result.answer
 
-        # Multiple evaluations, keep independent judgments
-        judgments = []
+        # Multiple evaluations, keep independent judgments (Optional[bool])
+        judgments: List[Optional[bool]] = []
         for _ in range(self.num_runs):
             is_correct = await self._judge_answer(
                 question, golden_answer, generated_answer
@@ -267,21 +298,33 @@ class LLMJudge(BaseEvaluator):
 
     async def _judge_answer(
         self, question: str, golden_answer: str, generated_answer: str
-    ) -> bool:
+    ) -> Optional[bool]:
         """
         Use LLM to judge if answer is correct.
 
         Bounded retry on transient upstream errors (connection / 5xx / 429
-        / timeout / rate-limit phrasing). Permanent errors (JSON parse,
-        empty content, missing label) return False immediately so we don't
-        re-burn LLM tokens on cases the upstream already gave up on.
+        / timeout / rate-limit phrasing). When retries exhaust, OR the
+        model returns empty/unparseable content, OR a permanent
+        non-judgment error occurs, this method returns ``None`` rather
+        than ``False``.
 
-        After max_retries on transient errors, the failure is logged and
-        False is returned — *but* the log is loud (Stage 2 R-S2-3) so
-        callers/operators can tell "judge crashed" apart from "judged wrong".
+        ``None`` signals "judge unavailable" — distinct from "judge said
+        wrong". The aggregation in ``evaluate()`` excludes None judgments
+        from the accuracy denominator, so a Sophnet rate-limit storm
+        cannot silently collapse the score to 0 the way a False fallback
+        would. The log line at the failure site is still loud so operators
+        can see how many calls fell through.
+
+        Historical behavior (returning False on every failure) was the
+        Stage 2 R-S2-3 silent-zero bug, observed in production when
+        evaluate's 4×4×concurrent judge calls exceeded Sophnet's per-key
+        rate window — 86–97% of judgments came back as a coerced False
+        and the published accuracy was meaningless.
 
         Returns:
-            True if correct, False if wrong/error
+            True   if judge said CORRECT
+            False  if judge said WRONG
+            None   if judge unavailable (skip from denominator)
         """
         # Use configured prompts
         system_prompt = get_prompt("llm_judge", "system_prompt")
@@ -310,7 +353,7 @@ class LLMJudge(BaseEvaluator):
             except Exception as e:  # noqa: BLE001 — classify before re-raising
                 if not self._is_transient_error(e):
                     print(f"  ⚠️ LLM Judge failed (permanent): {type(e).__name__}: {e}")
-                    return False
+                    return None
                 last_transient = e
                 if attempt < max_retries - 1:
                     await asyncio.sleep(delay)
@@ -318,41 +361,43 @@ class LLMJudge(BaseEvaluator):
                 continue
 
             # Successful API call — parse content; parse failures are
-            # permanent (no retry, original behavior).
+            # treated as judge-unavailable (None) so a confused/refusing
+            # model doesn't silently get scored as WRONG.
             content = response.choices[0].message.content
 
             if not content:
                 print(f"  ⚠️ LLM Judge: Empty response from model {self.model}")
-                return False
+                return None
 
             json_str = self._extract_json(content)
             if not json_str:
                 print(f"  ⚠️ LLM Judge: No JSON found in response")
                 print(f"     Raw response: {content[:200]}...")
-                return False
+                return None
 
             try:
                 result = json.loads(json_str)
             except json.JSONDecodeError as e:
                 print(f"  ⚠️ LLM Judge JSON parse failed: {e}")
                 print(f"     Raw response: {content[:200] if content else 'None'}...")
-                return False
+                return None
 
             label = result.get("label", "")
             if not label:
                 print(f"  ⚠️ LLM Judge: No label found in response")
                 print(f"     Raw response: {content}...")
-                return False
+                return None
 
             return label.strip().upper() == "CORRECT"
 
-        # Out of retries on transient errors — log loudly (Stage 2 R-S2-3
-        # silent-False bug guard) and return False.
+        # Out of retries on transient errors — log loudly and return None
+        # (judge unavailable). Returning False here was the Stage 2 R-S2-3
+        # silent-zero bug.
         print(
             f"  ⚠️ LLM Judge transient error exhausted retries "
             f"({max_retries}): {type(last_transient).__name__}: {last_transient}"
         )
-        return False
+        return None
 
     def _extract_json(self, content: str) -> str:
         """
