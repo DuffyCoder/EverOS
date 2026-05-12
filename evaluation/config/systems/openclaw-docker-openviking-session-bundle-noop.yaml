@@ -1,0 +1,123 @@
+# OV-only on LoCoMo via per-session bundle ingest.
+#
+# B2 wiring (noop memory slot, OV owns retrieval):
+#   * memory_mode=noop disables OpenClaw memorySearch; agent has no
+#     memory_search/memory_get tools. All recall goes through the OV
+#     plugin's before_prompt_build hook.
+#   * context_engine_mode=openviking puts the OV plugin in the
+#     contextEngine slot. afterTurn captures every turn into the OV
+#     backend regardless of message content; before_reset triggers
+#     commitOVSession finalization between sessions.
+#
+# Ingest = per-session bundle replay through the bridge. Each session is
+# bundled into a single agent_run call; the OV plugin's afterTurn hook
+# fires and persists the turn in OV. Tail is empty because OV captures
+# unconditionally — no need to cue the agent to write anything.
+#
+# Prerequisites at run time:
+#   * OpenViking server running on the host at port 1933 (or wherever
+#     OPENVIKING_BASE_URL points). The plugin uses
+#     host.docker.internal:1933 inside the container; add_host_gateway
+#     bridges that to the host machine.
+#   * OPENVIKING_API_KEY exported in the host process env when running
+#     the eval CLI; passed through via the agent_llm.env_vars whitelist.
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  max_concurrent: 4
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "fts_only"            # OV owns retrieval; OpenClaw memorySearch off
+  flush_mode: "session_bundle"
+  answer_mode: "agent_local"
+  memory_mode: "noop"
+  context_engine_mode: "openviking"
+  agent_timeout_seconds: 90
+  # Empty tail: agent_run loop is skipped entirely for memory_mode=noop
+  # (see ov_ingest below — OV is populated via direct HTTP, not afterTurn).
+  ingest_session_tail: ""
+  # Direct OV SDK ingest (mirrors openclaw-eval/import_to_ov.py).
+  # Per LoCoMo session: create_session → add_message × N → commit_session
+  # (telemetry=true) → poll task until completed. Bypasses the OV plugin's
+  # afterTurn hook, which has a 20k-token commit threshold the smoke and
+  # often the full conversation never reach. Headers must match the plugin
+  # (OPENVIKING_ACCOUNT_ID + OPENVIKING_USER_ID env vars set on the host
+  # process and forwarded via agent_llm.env_vars) so ingest writes to the
+  # same tenant the plugin reads from at QA time.
+  ov_ingest:
+    base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
+    api_key_env: "OPENVIKING_API_KEY"
+    account_id: "default"
+    # Shared OV namespace (no user_id) — matches OV team's reference
+    # ``import_to_ov.py --no-user-agent-id`` flag, which writes the same
+    # default namespace the openclaw OV plugin reads from at QA time.
+    # Empty user_id_template returns "" from _resolve_ov_tenant_field,
+    # suppressing the X-OpenViking-User header in OVIngestClient and
+    # skipping the OPENVIKING_USER_ID env injection into the container.
+    # Cross-conv name collisions are resolved by the rerank stage at QA
+    # time, not by per-conv tenant isolation (reranker scoring beats
+    # tenant filtering when retrieval pool quality is high enough).
+    user_id_template: ""
+    # agent_id intentionally unset — both SDK ingest and plugin
+    # resolve to the OV server's "default" agent, keeping ingest +
+    # retrieval aligned without per-conv agent fragmentation.
+    task_timeout_sec: 600
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+      - "OPENVIKING_BASE_URL"
+      - "OPENVIKING_API_KEY"
+      - "OPENVIKING_ACCOUNT_ID"
+      - "OPENVIKING_USER_ID"
+      # OPENVIKING_AGENT_PREFIX intentionally NOT forwarded — leaving it
+      # unset makes the plugin's resolveAgentId fall through to "default",
+      # matching the SDK ingest's no-X-OpenViking-Agent header behavior.
+      # Setting a prefix here would shard storage by a synthesized agent
+      # id and break ingest/retrieval alignment.
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "session_bundle"
+    answer_mode: "shared"
+
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-openviking-b7e6bcb-slim"
+  max_concurrent_containers: 4
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 360
+  add_host_gateway: true              # OV plugin reaches host:1933

@@ -1,19 +1,18 @@
-# OV + memory-core on LoCoMo via per-message agent_run replay.
+# OV + memory-core on LoCoMo via per-session bundle ingest.
 #
-# Wiring (B1 — memory-core in memory slot, OV in context-engine slot,
-# memory-core flush OFF so the two systems don't write competing memory):
-#   * memory_mode=memory-core: agent gets memory_search/memory_get tools.
-#     memorySearch active over the OpenClaw FTS+vector store.
-#   * memoryFlush.enabled stays OFF (compaction_overrides.enabled=false)
-#     — memory-core's flush would write its own memory/*.md files in
-#     parallel with OV's afterTurn captures. We want a clean OV-only
-#     ingest semantic; memory-core acts as a passive read-side surface.
-#   * context_engine_mode=openviking: OV's afterTurn captures per turn,
-#     auto-recall via before_prompt_build injects OV memories.
+# B1 wiring (memory-core in memory slot, OV in context-engine slot,
+# both writing memory in parallel):
+#   * memory_mode=memory-core: agent gets memory_search/memory_get tools;
+#     memorySearch indexes memory/*.md via BM25 + sophnet embeddings.
+#   * context_engine_mode=openviking: OV's afterTurn captures per turn
+#     into the OV backend; before_prompt_build injects OV memories.
+#   * Both surfaces are populated during ingest:
+#       - memory-core: agent's tail-cued file_write writes memory/*.md
+#       - OV: afterTurn hook fires regardless and persists to OV
 #
 # At QA time the agent has BOTH:
 #   - OV's auto-recall content prepended via context-engine assemble
-#   - memory_search tool (over memory-core's index, empty since flush off)
+#   - memory_search tool over memory-core's index of memory/*.md
 #
 # This is the "stacked surfaces" eval: does OV alongside memory-core's
 # tool surface change agent behavior vs OV-only (B2)?
@@ -47,17 +46,32 @@ openclaw:
   visibility_mode: "settled"
   retrieval_route: "search_then_get"
   backend_mode: "hybrid"
-  flush_mode: "agent_replay"
+  flush_mode: "session_bundle"
   answer_mode: "agent_local"
   memory_mode: "memory-core"
   context_engine_mode: "openviking"
-  context_engine_ingest_mode: "all"
   agent_timeout_seconds: 90
-  # B1: memory-core's flush stays off. memorySearch is still active so
-  # the agent has the tool, but the index has no entries. Real recall
-  # comes from OV's before_prompt_build hook.
-  compaction_overrides:
-    enabled: false
+  # Aligned to OV team's B1 (OV+memcore) reference setup:
+  #   * ingest_session_tail = README weak prompt. autoCapture is
+  #     structurally unviable on LoCoMo (threshold formula yields 104k
+  #     tokens with gpt-4.1-mini); memcore writes come from the agent
+  #     responding to this prompt with file_write tool calls.
+  #   * ov_ingest channel: shared OV namespace (user_id_template="")
+  #     matching OV's ``import_to_ov.py --no-user-agent-id`` flag. Cross-
+  #     conv name collisions are resolved by the rerank stage at QA time.
+  ingest_session_tail: "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]"
+  ov_ingest:
+    base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
+    api_key_env: "OPENVIKING_API_KEY"
+    account_id: "default"
+    # Shared OV namespace (no user_id) — match OV team's --no-user-agent-id.
+    # Setting template to empty string returns "" from _resolve_ov_tenant_field,
+    # which suppresses the X-OpenViking-User header in OVIngestClient and
+    # also skips the OPENVIKING_USER_ID env injection into the docker
+    # container. Both SDK ingest and the in-container OV plugin then read
+    # from the OV default namespace.
+    user_id_template: ""
+    task_timeout_sec: 600
   agent_llm:
     provider_id: "sophnet"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
@@ -72,7 +86,9 @@ openclaw:
       - "SOPH_EMBED_EASYLLM_ID"
       - "OPENVIKING_BASE_URL"
       - "OPENVIKING_API_KEY"
-      - "OPENVIKING_AGENT_PREFIX"
+      - "OPENVIKING_ACCOUNT_ID"
+      - "OPENVIKING_USER_ID"
+      # OPENVIKING_AGENT_PREFIX intentionally NOT forwarded — see noop yaml.
     model:
       id: "gpt-4.1-mini"
       name: "GPT 4.1 Mini (sophnet)"
@@ -90,7 +106,7 @@ openclaw:
     output_dimensionality: 1024
   prompts:
     memory_mode: "native_compiled"
-    flush_mode: "agent_replay"
+    flush_mode: "session_bundle"
     answer_mode: "shared"
 
 openclaw_docker:
@@ -98,5 +114,5 @@ openclaw_docker:
   max_concurrent_containers: 4
   mem_limit: "2g"
   network: "bridge"
-  per_rpc_timeout_seconds: 150
+  per_rpc_timeout_seconds: 360
   add_host_gateway: true
