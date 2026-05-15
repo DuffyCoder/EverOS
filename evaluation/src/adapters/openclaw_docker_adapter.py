@@ -17,7 +17,9 @@ What this subclass changes:
     /eval/openclaw_eval_bridge.mjs` instead of host node, so it actually
     runs inside the configured docker image (with memory plugin baked in)
   - Workspace is mounted volume; resolved config is written to mounted path
-  - cleanup() stops + removes containers
+  - cleanup() stops containers (``--rm`` by default removes them after stop).
+    Optional: dump ``docker logs`` into each conversation workspace, and/or
+    keep the container without ``--rm`` for post-mortem ``docker logs``/exec.
 
 Key design decisions (v0.7 §4.4 sandbox lookup applies same way; sandboxes
 just gain a docker_container_id / volume_path field).
@@ -53,6 +55,10 @@ from evaluation.src.core.data_models import Conversation
 
 logger = logging.getLogger(__name__)
 
+# Written under each conversation workspace before ``docker stop`` so logs
+# survive ``docker run --rm`` (which deletes the container after stop).
+EVAL_DOCKER_CONTAINER_LOG = "eval_docker_container.log"
+
 
 @register_adapter("openclaw-docker")
 class DockerizedOpenclawAdapter(OpenClawAdapter):
@@ -85,6 +91,17 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # Limit concurrent docker run invocations during prepare/add.
         self._spawn_sem: Optional[asyncio.Semaphore] = None
 
+        # After the run: capture ``docker logs`` to the mounted workspace so
+        # operators can inspect stdout/stderr without attaching during the run.
+        self._capture_container_logs: bool = bool(
+            cfg.get("capture_container_logs", True)
+        )
+        # When False, omit ``docker run --rm`` so the container remains after
+        # ``docker stop`` until ``docker rm`` (useful with ``docker logs``).
+        self._remove_container_on_stop: bool = bool(
+            cfg.get("remove_container_on_stop", True)
+        )
+
         # Cached per-QA isolation mode. Resolved once from config; both
         # docker_cfg and openclaw_cfg are read-only post-init.
         self._isolation_mode_cache: str = resolve_isolation_mode(
@@ -110,22 +127,36 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         volume_dir = Path(sandbox["workspace_dir"]).resolve()
         volume_dir.mkdir(parents=True, exist_ok=True)
 
+        # OpenClaw resolves a fallback temp dir under /tmp (e.g. /tmp/openclaw-<uid>).
+        # Some slim images ship a root-owned or non-writable /tmp while we run with
+        # ``--user host_uid``; bind-mount a host-writable dir (under the eval workspace)
+        # onto /tmp so bootstrap and logger init can mkdir there.
+        tmp_cfg = self._docker_cfg.get("container_tmp_host_path")
+        if isinstance(tmp_cfg, str) and tmp_cfg.strip():
+            tmp_host = Path(tmp_cfg.strip()).expanduser().resolve()
+        else:
+            tmp_host = volume_dir / ".openclaw-container-tmp"
+        tmp_host.mkdir(parents=True, exist_ok=True)
+
         env_pairs = self._docker_env_for_container(conv_id=conv_id)
 
         # --user matches host UID so the mounted /workspace volume is
         # writable to the container. Without this, files created by host
         # (workspace dirs, openclaw.json after entrypoint render) cannot
         # be read/written by the container's `node` user (uid 1000).
-        cmd = [
-            "docker", "run",
-            "-d",
-            "--rm",
-            "--user", f"{os.getuid()}:{os.getgid()}",
-            "--network", self._docker_network,
-            "--label", f"eval.run_id={self._run_id or 'unknown'}",
-            "--label", f"eval.conv_id={conv_id}",
-            "-v", f"{volume_dir}:/workspace:rw",
-        ]
+        cmd: list[str] = ["docker", "run", "-d"]
+        if self._remove_container_on_stop:
+            cmd.append("--rm")
+        cmd.extend(
+            [
+                "--user", f"{os.getuid()}:{os.getgid()}",
+                "--network", self._docker_network,
+                "--label", f"eval.run_id={self._run_id or 'unknown'}",
+                "--label", f"eval.conv_id={conv_id}",
+                "-v", f"{volume_dir}:/workspace:rw",
+                "-v", f"{tmp_host}:/tmp:rw",
+            ]
+        )
         if self._mem_limit:
             cmd.extend(["--memory", self._mem_limit])
         # Plugins that talk to a host-side service (e.g. evermemos plugin
@@ -146,8 +177,14 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 cmd.extend(["-e", f"{name}={value}"])
         cmd.append(self._image)
 
-        logger.info("docker run for %s: image=%s volume=%s",
-                    conv_id, self._image, volume_dir)
+        logger.info(
+            "docker run for %s: image=%s volume=%s tmp_bind=%s rm_on_stop=%s",
+            conv_id,
+            self._image,
+            volume_dir,
+            tmp_host,
+            self._remove_container_on_stop,
+        )
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -354,9 +391,50 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
-            # --rm in run flag deletes after stop; no rm needed
+            # With ``docker run --rm``, the container filesystem is deleted
+            # after stop; capture logs before stop when ``capture_container_logs``.
+            # Without ``--rm``, the exited container remains until ``docker rm``.
         except Exception as err:  # noqa: BLE001
             logger.warning("docker stop failed for %s: %s", cid, err)
+
+    async def _dump_container_logs_to_workspace(
+        self, cid: str, workspace_dir: str, conv_id: str
+    ) -> None:
+        """Write merged stdout/stderr of the eval container to the host workspace."""
+        dest = Path(workspace_dir).resolve() / EVAL_DOCKER_CONTAINER_LOG
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "logs", "--timestamps", cid,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if stdout:
+                dest.write_bytes(stdout)
+            if proc.returncode != 0:
+                logger.warning(
+                    "docker logs exit=%s for conv=%s cid=%s; wrote %d bytes to %s",
+                    proc.returncode,
+                    conv_id,
+                    cid[:12],
+                    len(stdout or b""),
+                    dest,
+                )
+                return
+            logger.info(
+                "captured eval container logs for %s → %s (%d bytes)",
+                conv_id,
+                dest,
+                len(stdout or b""),
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "failed to capture docker logs for conv=%s cid=%s: %s",
+                conv_id,
+                cid[:12],
+                err,
+            )
 
     async def _stop_orphan_containers(self) -> None:
         """Stop containers labeled ``eval.run_id`` from prior eval runs.
@@ -553,9 +631,24 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
     # ------------------------------------------------------------- cleanup
 
     async def cleanup(self) -> None:
+        async def _stop_one(conv_id: str, handle: dict) -> None:
+            cid = handle["container_id"]
+            vol = handle.get("volume_dir")
+            if self._capture_container_logs and isinstance(vol, str) and vol:
+                await self._dump_container_logs_to_workspace(cid, vol, conv_id)
+            await self._docker_stop_container(cid)
+            if not self._remove_container_on_stop:
+                logger.info(
+                    "eval container kept after stop (remove_container_on_stop=false): "
+                    "cid=%s conv=%s — inspect: docker logs %s",
+                    cid[:12],
+                    conv_id,
+                    cid,
+                )
+
         await asyncio.gather(*[
-            self._docker_stop_container(h["container_id"])
-            for h in self._docker_handles.values()
+            _stop_one(conv_id, h)
+            for conv_id, h in list(self._docker_handles.items())
         ], return_exceptions=True)
         self._docker_handles.clear()
 

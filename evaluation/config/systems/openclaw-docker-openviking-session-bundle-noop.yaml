@@ -114,9 +114,11 @@ openclaw:
     answer_mode: "shared"
 
 openclaw_docker:
-  image: "openclaw-eval:7da23c3-openviking-b7e6bcb-slim"
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-slim"
   max_concurrent_containers: 4
-  mem_limit: "2g"
+  mem_limit: ""
   network: "bridge"
   per_rpc_timeout_seconds: 360
   add_host_gateway: true              # OV plugin reaches host:1933
+  # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
+  remove_container_on_stop: false   # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
