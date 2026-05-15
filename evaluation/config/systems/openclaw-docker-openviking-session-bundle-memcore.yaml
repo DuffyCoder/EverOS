@@ -116,3 +116,4 @@ openclaw_docker:
   network: "bridge"
   per_rpc_timeout_seconds: 360
   add_host_gateway: true
+  per_qa_isolation: "off"             # keep QA session jsonl under state/agents/main/sessions/
