@@ -110,7 +110,7 @@ openclaw:
     answer_mode: "shared"
 
 openclaw_docker:
-  image: "openclaw-eval:7da23c3-openviking-b7e6bcb-slim"
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins@sha256:d972aad0ccb3c1495f451b0cdb467a6b7bec782625ce3374e2fdb343793e45d2"
   max_concurrent_containers: 4
   mem_limit: "2g"
   network: "bridge"
