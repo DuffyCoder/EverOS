@@ -122,3 +122,4 @@ openclaw_docker:
   add_host_gateway: true              # OV plugin reaches host:1933
   # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
   remove_container_on_stop: false # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
+  per_qa_isolation: "off"             # keep QA session jsonl under state/agents/main/sessions/
