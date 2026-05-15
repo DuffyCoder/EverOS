@@ -24,8 +24,8 @@
 adapter: "openclaw-docker"
 
 llm:
-  provider: "openai"
-  model: "gpt-4o-mini"
+  provider: "sophnet"
+  model: "doubao-seed-2-0-pro-260215"
   api_key: "${LLM_API_KEY}"
   base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0.0
@@ -101,8 +101,8 @@ openclaw:
       # Setting a prefix here would shard storage by a synthesized agent
       # id and break ingest/retrieval alignment.
     model:
-      id: "gpt-4.1-mini"
-      name: "GPT 4.1 Mini (sophnet)"
+      id: "doubao-seed-2-0-code-preview-260215"
+      name: "doubao-seed-2-0-code-preview-260215"
       reasoning: false
       input: ["text"]
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
@@ -121,4 +121,4 @@ openclaw_docker:
   per_rpc_timeout_seconds: 360
   add_host_gateway: true              # OV plugin reaches host:1933
   # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
-  remove_container_on_stop: false   # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
+  remove_container_on_stop: false # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
