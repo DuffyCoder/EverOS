@@ -34,6 +34,7 @@ import shutil
 import time
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 from evaluation.src.adapters.openclaw.per_qa_isolation import (
@@ -381,7 +382,78 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         for name, value in ov_overrides.items():
             if name not in existing_names:
                 pairs.append((name, value))
+        self._normalize_openviking_env_for_container(pairs)
         return pairs
+
+    def _openviking_container_base_url(self, current: str) -> str:
+        """Host-side ``127.0.0.1:port`` is wrong inside Docker; use host gateway."""
+        default = "http://host.docker.internal:1933"
+        if not (current or "").strip():
+            return default
+        try:
+            parsed = urlparse(current.strip())
+            host = (parsed.hostname or "").lower()
+            if host in ("127.0.0.1", "localhost"):
+                port = parsed.port or 1933
+                netloc = f"host.docker.internal:{port}"
+                return urlunparse(
+                    (
+                        parsed.scheme or "http",
+                        netloc,
+                        parsed.path or "",
+                        parsed.params,
+                        parsed.query,
+                        parsed.fragment,
+                    ),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        return current.strip()
+
+    def _normalize_openviking_env_for_container(
+        self, pairs: list[tuple[str, Optional[str]]],
+    ) -> None:
+        """Make OV HTTP reachable from the eval container (bridge → host).
+
+        Common ``.env`` uses ``http://127.0.0.1:1933`` for host-side ingest
+        tools; the OpenClaw plugin inside the container must call
+        ``host.docker.internal`` when ``--add-host=host.docker.internal:host-gateway``
+        is in effect. Also inject a default base URL when unset.
+        """
+        ce_mode = self._openclaw_cfg.get("context_engine_mode")
+        if not (isinstance(ce_mode, str) and ce_mode.strip() == "openviking"):
+            return
+
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        add_host = bool(
+            self._docker_cfg.get("add_host_gateway", memory_mode == "evermemos")
+        )
+        if not add_host:
+            return
+
+        merged: dict[str, Optional[str]] = dict(pairs)
+        normalized = self._openviking_container_base_url(
+            (merged.get("OPENVIKING_BASE_URL") or "").strip(),
+        )
+        kept = [(n, v) for n, v in pairs if n != "OPENVIKING_BASE_URL"]
+        pairs.clear()
+        pairs.extend(kept)
+        pairs.append(("OPENVIKING_BASE_URL", normalized))
+        if merged.get("OPENVIKING_BASE_URL") != normalized:
+            logger.info(
+                "openviking docker: OPENVIKING_BASE_URL for container set to %r "
+                "(was %r)",
+                normalized,
+                merged.get("OPENVIKING_BASE_URL"),
+            )
+
+        api_key = (merged.get("OPENVIKING_API_KEY") or "").strip()
+        if not api_key:
+            logger.warning(
+                "openviking docker: OPENVIKING_API_KEY is missing or empty in the "
+                "eval process environment; set it to match server.root_api_key "
+                "in ov.conf (see EverOS/env.template)."
+            )
 
     async def _docker_stop_container(self, cid: str) -> None:
         try:
