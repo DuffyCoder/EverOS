@@ -103,13 +103,14 @@ class OpenClawAdapter(BaseAdapter):
         resp: dict,
         query: str,
         *,
+        session_id: Optional[str] = None,
         container_state_dir: Optional[str] = None,
     ) -> dict:
         conv_id = sandbox.get("conversation_id", "")
-        session_id = f"{conv_id}__{qid}"
+        sid = session_id or f"{conv_id}__{qid}"
         state_host = resolve_state_dir_host(sandbox, container_state_dir)
         metrics = extract_agent_run_token_metrics(
-            resp, state_host, session_id, query,
+            resp, state_host, sid, query,
         )
         self._answer_metrics_by_qid[qid] = metrics
         return metrics
@@ -122,10 +123,16 @@ class OpenClawAdapter(BaseAdapter):
         resp: dict,
         query: str,
         *,
+        session_id: Optional[str] = None,
         container_state_dir: Optional[str] = None,
     ) -> str:
         token_metrics = self._record_agent_run_token_metrics(
-            sandbox, qid, resp, query, container_state_dir=container_state_dir,
+            sandbox,
+            qid,
+            resp,
+            query,
+            session_id=session_id,
+            container_state_dir=container_state_dir,
         )
         self._append_events(sandbox, [{
             "event": "agent_run_complete",

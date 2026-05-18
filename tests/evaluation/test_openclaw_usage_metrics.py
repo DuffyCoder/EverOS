@@ -247,3 +247,40 @@ def test_pop_answer_metrics_on_adapter():
     metrics = adapter.pop_answer_metrics("qa0")
     assert metrics["final_context_tokens"] == 999
     assert adapter.pop_answer_metrics("qa0") == {}
+
+
+def test_record_token_metrics_uses_explicit_session_id(tmp_path: Path):
+    """Docker OV path passes ov_session_id — metrics must read the same jsonl."""
+    from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
+
+    state_dir = tmp_path / "state"
+    session_dir = state_dir / "agents" / "main" / "sessions"
+    session_dir.mkdir(parents=True)
+    ov_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    session_dir.joinpath(f"{ov_uuid}.jsonl").write_text(
+        json.dumps({
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input": 42, "output": 1},
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    adapter = OpenClawAdapter({"openclaw": {}}, output_dir=None)
+    sandbox = {
+        "conversation_id": "locomo_0",
+        "workspace_dir": str(tmp_path),
+    }
+    resp = {"last_call_usage": None}
+    metrics = adapter._record_agent_run_token_metrics(  # noqa: SLF001
+        sandbox,
+        "locomo_0_qa0",
+        resp,
+        "q?",
+        session_id=ov_uuid,
+        container_state_dir="/workspace/state",
+    )
+    assert metrics["final_context_tokens"] == 42
+    assert metrics["final_context_tokens_source"] == "session_jsonl_last"

@@ -790,7 +790,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 qid,
                 resp,
                 query,
-                container_state_dir=qa_container_state,
+                session_id=session_id_for_run,
+                container_state_dir="/workspace/state",
             )
         finally:
             # Mirror official openclaw-eval/eval.py reset_session: rename
@@ -802,22 +803,21 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             # session state across QAs. Without this, all QAs in the conv
             # would share one growing .jsonl and the LLM prompt would
             # blow up past the context window mid-conv.
-            if ov_sid:
-                try:
-                    await self._arun_bridge_via_docker(
-                        conv_id,
-                        {
-                            **self._bridge_base_payload(sandbox),
-                            "command": "archive_session",
-                            "session_id": session_id_for_run,
-                        },
-                        timeout=10.0,
-                    )
-                except Exception as err:  # noqa: BLE001
-                    logger.debug(
-                        "post-QA archive_session non-fatal failure for "
-                        "%s/%s: %s", conv_id, qid, err,
-                    )
+            try:
+                await self._arun_bridge_via_docker(
+                    conv_id,
+                    {
+                        **self._bridge_base_payload(sandbox),
+                        "command": "archive_session",
+                        "session_id": session_id_for_run,
+                    },
+                    timeout=10.0,
+                )
+            except Exception as err:  # noqa: BLE001
+                logger.debug(
+                    "post-QA archive_session non-fatal failure for "
+                    "%s/%s: %s", conv_id, qid, err,
+                )
 
     async def _invoke_bridge(
         self, sandbox: dict, payload: dict, timeout: float

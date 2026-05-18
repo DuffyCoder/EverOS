@@ -56,30 +56,22 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 - `openclaw-hybrid-noflush.yaml` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
 - `openclaw-hybrid.yaml` (`openclaw.yaml` main preset) ← full stack. Closest to production but with documented divergences above.
 
-## Cross-QA isolation for context-engine runs (PR4 plugin-cli-unify)
+## Cross-QA short-term isolation (OV / openclaw-eval alignment)
 
-Context-engine plugins under R2 routing (the current default) share a
-single `sessionId = conv_id` across all QAs in a conversation. The CE's
-`afterTurn` writes back into per-conversation state, so QA n+1's
-`assemble(conv_id)` sees QA n's question and answer.
+OV LoCoMo presets use **one OV `session_id` (UUID) per conversation** for
+SDK ingest and QA-time `before_prompt_build` / assemble. OpenClaw's
+on-disk transcript is still keyed by that same `--session-id` passed to
+`agent_run`.
 
-To restore the per-QA isolation that memory-plugin runs get for free,
-the docker adapter supports a workspace-snapshot mechanism:
+After each QA the docker adapter calls bridge `archive_session`, which
+renames `state/agents/main/sessions/<session_id>.jsonl` to
+`<session_id>.jsonl.<ts>`. The next QA reuses the same `session_id` but
+starts with an empty short-term buffer. OV server-side state keyed by the
+UUID is **not** cleared by the rename.
 
-- `--per-qa-isolation snapshot` (or `auto` when a context engine is
-  selected): freeze `/workspace/state/` at the end of `add()`, restore
-  a fresh copy per QA, discard after the answer
-- `--per-qa-isolation off`: current R2 leakage behavior; matches
-  pre-PR4 numbers
-
-Full mechanism + caveats: [`per_qa_isolation.md`](per_qa_isolation.md).
-
-The fix is **necessary for CE-vs-CE comparability** (different engines
-write different amounts in `afterTurn`; without isolation an aggressive
-writer wins on leak signal). Cross-paradigm comparison (memory plugin
-vs context engine) is still not directly comparable for the structural
-asymmetries listed under "Approximate, with documented divergence" and
-"Explicitly omitted" above.
+Without `archive_session`, later QAs in the same conv would accumulate
+prior Q/A turns in the jsonl and inflate `final_context_tokens` (Tier B
+transcript estimate) as well as the live LLM prompt.
 
 ## `final_context_tokens` diagnostics (`answer_mode: agent_local`)
 
