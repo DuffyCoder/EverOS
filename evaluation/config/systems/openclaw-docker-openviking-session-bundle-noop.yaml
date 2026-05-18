@@ -24,8 +24,10 @@
 adapter: "openclaw-docker"
 
 llm:
-  provider: "sophnet"
-  model: "doubao-seed-2-0-pro-260215"
+  # provider stays "openai" — LLMProvider class only supports "openai"
+  # type (sophnet is reached via base_url override, not a distinct provider).
+  provider: "openai"
+  model: "doubao-seed-2-0-code-preview-260215"
   api_key: "${LLM_API_KEY}"
   base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0.0
@@ -39,7 +41,12 @@ search:
 
 answer:
   max_retries: 3
-  max_concurrent: 4
+  # Within one conv all QAs share ov_session_id (so OV plugin's
+  # before_prompt_build/assemble see the accumulated session state).
+  # That makes them race for the openclaw .jsonl write lock — serialize
+  # to avoid "session file locked" errors. Cross-conv concurrency is
+  # still allowed via search.num_workers.
+  max_concurrent: 1
 
 openclaw:
   repo_path: "${OPENCLAW_REPO_PATH}"
@@ -66,18 +73,23 @@ openclaw:
     base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
     api_key_env: "OPENVIKING_API_KEY"
     account_id: "default"
-    # Shared OV namespace via fixed ``user_id`` — matches openclaw-eval's
-    # default ``--user eval-1`` behavior. All 10 LoCoMo conversations write
-    # to and read from the same ``viking://user/eval-1/...`` namespace.
-    # Empty user_id would have produced HTTP 400 from the OV server
-    # because its multi-tenant mode (root_api_key set in ov.conf) requires
-    # tenant-scoped requests to include X-OpenViking-Account and
-    # X-OpenViking-User headers. Cross-conv name collisions are resolved
-    # by the rerank stage at QA time.
-    user_id: "eval-1"
-    # agent_id intentionally unset — both SDK ingest and plugin
-    # resolve to the OV server's "default" agent, keeping ingest +
-    # retrieval aligned without per-conv agent fragmentation.
+    # Fix #4: per-conv user_id isolation. Each LoCoMo conv writes to
+    # and reads from ``viking://user/<conv_id>/memories/...``, matching
+    # the official OpenViking benchmark ``import_to_ov.py`` pattern of
+    # ``user_id=str(sample_id)``. Cross-conv name collisions (e.g. "John"
+    # appearing in conv-41/43/47) no longer surface wrong-conv facts at
+    # retrieval time. docker_adapter substitutes ``{conv_id}`` and pipes
+    # it into the container as ``OPENVIKING_USER_ID`` env, which the OV
+    # plugin reads as fallback for cfg.userId (see config.ts:209), so
+    # QA-time queries hit the same tenant we wrote.
+    user_id_template: "{conv_id}"
+    # Fix #4 完整版: agent_id 也 per-conv,对齐官方 import_to_ov.py
+    # (user_id=str(sample_id) AND agent_id=str(sample_id))。OV server
+    # 同时写 user/<conv_id>/memories + agent/<conv_id>/memories。plugin
+    # 端 agent_prefix 不读 env,仍然查 agent/default/memories(返 0 条),
+    # 等同禁用 agent 这一路 — 跟官方实际行为一致。好处:agent/default
+    # namespace 不再被 ingest 写入,跨 conv 的 agent 池彻底干净。
+    agent_id_template: "{conv_id}"
     task_timeout_sec: 600
   agent_llm:
     provider_id: "sophnet"
@@ -102,7 +114,7 @@ openclaw:
       # id and break ingest/retrieval alignment.
     model:
       id: "doubao-seed-2-0-code-preview-260215"
-      name: "doubao-seed-2-0-code-preview-260215"
+      name: "Doubao Seed 2.0 Code Preview (sophnet)"
       reasoning: false
       input: ["text"]
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
@@ -121,5 +133,6 @@ openclaw_docker:
   per_rpc_timeout_seconds: 360
   add_host_gateway: true              # OV plugin reaches host:1933
   # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
-  remove_container_on_stop: false # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
-  per_qa_isolation: "off"             # keep QA session jsonl under state/agents/main/sessions/
+  remove_container_on_stop: false     # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
+  # per_qa_isolation removed — see the parent commit's refactor note;
+  # the shared-OV-session ingest path made workspace freezing obsolete.
