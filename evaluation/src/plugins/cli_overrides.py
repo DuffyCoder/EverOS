@@ -58,7 +58,6 @@ def apply_plugin_overrides(
     memory_plugin: Optional[str],
     context_engine: Optional[str],
     image: Optional[str],
-    per_qa_isolation: Optional[str],
     build_missing: bool,
     registry_path: Optional[Path] = None,
     manifest_path: Optional[Path] = None,
@@ -70,9 +69,8 @@ def apply_plugin_overrides(
     intact should ``copy.deepcopy(system_config)`` before invoking this.
 
     See module docstring for precedence rules. None values for
-    ``memory_plugin`` / ``context_engine`` / ``image`` /
-    ``per_qa_isolation`` mean the CLI flag was not passed; the yaml
-    is preserved for that field.
+    ``memory_plugin`` / ``context_engine`` / ``image`` mean the CLI flag
+    was not passed; the yaml is preserved for that field.
     """
     if registry_path is None:
         registry_path = DEFAULT_REGISTRY_PATH
@@ -111,11 +109,6 @@ def apply_plugin_overrides(
         else:
             context_engine_mode_applied = ce_ref.id
             oc["context_engine_mode"] = ce_ref.id
-
-    if per_qa_isolation is not None:
-        system_config.setdefault("openclaw_docker", {})["per_qa_isolation"] = (
-            per_qa_isolation
-        )
 
     triggered_build = False
     image_resolved: Optional[str] = None

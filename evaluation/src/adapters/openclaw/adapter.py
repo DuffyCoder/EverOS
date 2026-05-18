@@ -1067,14 +1067,16 @@ class OpenClawAdapter(BaseAdapter):
         user_id = self._resolve_ov_tenant_field(
             cfg, "user_id", "user_id_template", "{conv_id}", conv_id,
         )
-        # agent_id is intentionally NOT auto-derived — the OV plugin's
-        # agent resolution (config.ts ``resolveAgentId``) reads
-        # ``OPENVIKING_AGENT_PREFIX``, not ``OPENVIKING_AGENT_ID``, so
-        # injecting a per-conv agent header here would not align with
-        # the QA-side query agent. Leaving the SDK request without
-        # X-OpenViking-Agent makes the server use the "default" agent,
-        # matching the plugin's fallback when prefix is unset.
-        agent_id = (cfg.get("agent_id") or "").strip() or None
+        # Fix #4 完整版: agent_id 也支持 per-conv template, matching
+        # official import_to_ov.py which sets both user_id=sample_id AND
+        # agent_id=sample_id. OV server mirrors fact-extract into both
+        # user/<uid> and agent/<aid> namespaces. plugin's agent_prefix is
+        # not env-readable so the QA-side find on viking://agent/memories
+        # still hits agent/default (empty under this scheme) — equivalent
+        # to disabling that recall channel, which matches official behavior.
+        agent_id = self._resolve_ov_tenant_field(
+            cfg, "agent_id", "agent_id_template", "", conv_id,
+        ) or None
         task_timeout = float(cfg.get("task_timeout_sec") or 600)
 
         client = OVIngestClient(
@@ -1087,31 +1089,63 @@ class OpenClawAdapter(BaseAdapter):
         completed = 0
         failed = 0
         timeout = aiohttp.ClientTimeout(total=task_timeout + 60.0)
+
+        # Single OV session per conversation — mirrors official openclaw-eval
+        # eval.py's same-user pattern. All LoCoMo sub-sessions accumulate
+        # pendingTokens on the same OV session_id; QA-side plugin uses the
+        # same session_id (set by docker adapter via --session-id), so
+        # Fix #3: per-LoCoMo-session commit on the same shared ov_session_id.
+        # Each LoCoMo sub-session is followed by an explicit commit_session
+        # call (telemetry=true, wait for task to complete). This mirrors the
+        # official import_to_ov.py granularity (one fact-extraction LLM call
+        # per LoCoMo session) while preserving openclaw-eval's shared sessionId
+        # pattern (single UUID across ingest+QA, used by plugin assemble).
+        # OV server archives the active segment on each commit but keeps the
+        # session alive for further add_message → next session continues on
+        # the same sid. End-of-conv state: N archives accumulated, active
+        # segment empty, fact-extract has run N times producing finer-grained
+        # entities / preferences / events in user/<conv_id>/memories.
+        # Why this matters: a single end-of-conv commit (the prior behavior)
+        # gave OV's fact-extract LLM N×~2k tokens of mixed conversation in
+        # one call; output was coarse (e.g. conv-0 only 48 events, 2 entities,
+        # 5 preferences). Per-session commit feeds smaller windows, yielding
+        # finer extraction (target: 100+ events, 50+ entities for conv-0).
         async with aiohttp.ClientSession(timeout=timeout) as http:
+            ov_session_id = await client.create_session(http)
+            sandbox["ov_session_id"] = ov_session_id
+            self._append_events(sandbox, [{
+                "event": "ov_session_opened",
+                "conversation_id": conv_id,
+                "ov_session_id": ov_session_id,
+            }])
+
             for session_key, msgs in sessions.items():
                 try:
                     result = await ingest_session_to_ov(
                         client, http,
                         session_key=session_key,
                         messages=msgs,
+                        ov_session_id=ov_session_id,
+                        commit_after=True,
                     )
                     self._append_events(sandbox, [{
-                        "event": "ov_session_ingested",
+                        "event": "ov_session_messages_added",
                         "conversation_id": conv_id,
                         **{k: v for k, v in result.items() if k != "_telemetry"},
                     }])
-                    if result.get("status") == "completed":
+                    status = result.get("status")
+                    if status in ("completed", "queued", "skipped_no_messages"):
                         completed += 1
                     else:
                         failed += 1
                 except OVIngestError as err:
                     failed += 1
                     logger.error(
-                        "OV SDK ingest failed for %s/%s: %s",
+                        "OV SDK ingest_session failed for %s/%s: %s",
                         conv_id, session_key, err,
                     )
                     self._append_events(sandbox, [{
-                        "event": "ov_session_ingest_failed",
+                        "event": "ov_session_add_failed",
                         "conversation_id": conv_id,
                         "session_key": session_key,
                         "error": str(err),
@@ -1124,6 +1158,7 @@ class OpenClawAdapter(BaseAdapter):
             "completed": completed,
             "failed": failed,
             "total_sessions": len(sessions),
+            "ov_session_id": ov_session_id,
         }])
 
     async def _ingest_one_session(

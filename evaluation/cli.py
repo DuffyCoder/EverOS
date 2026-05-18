@@ -196,19 +196,6 @@ async def main():
             "minute docker builds during eval."
         ),
     )
-    parser.add_argument(
-        "--per-qa-isolation",
-        type=str,
-        default=None,
-        choices=["snapshot", "auto", "off"],
-        help=(
-            "Cross-QA isolation mode for context-engine runs. "
-            "snapshot: freeze /workspace/state after add(), restore per QA. "
-            "auto: snapshot iff context_engine is non-empty. "
-            "off: share state across QAs (R2 leakage; documented baseline)."
-        ),
-    )
-
     args = parser.parse_args()
 
     console = get_console()
@@ -258,7 +245,7 @@ async def main():
         )
 
     # Apply CLI plugin overrides. When any of --memory-plugin /
-    # --context-engine / --image / --per-qa-isolation is passed, override
+    # --context-engine / --image is passed, override
     # the corresponding yaml fields. Image is auto-resolved from
     # image_manifest.yaml when plugin overrides are passed.
     plugin_override = apply_plugin_overrides(
@@ -266,7 +253,6 @@ async def main():
         memory_plugin=args.memory_plugin,
         context_engine=args.context_engine,
         image=args.image,
-        per_qa_isolation=args.per_qa_isolation,
         build_missing=args.build_missing,
     )
     if plugin_override.memory_mode_applied is not None:

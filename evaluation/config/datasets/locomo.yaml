@@ -17,14 +17,14 @@ evaluation:
   type: "llm_judge"  # llm_judge | exact_match
   
   # LLM Judge settings.
-  # NOTE: gpt-4o-mini is NOT supported on sophnet (returns 20004
-  # "Model gpt-4o-mini does not support apiType:openai.chat parameter").
-  # Stage 1 plugin matrix runs use sophnet for both agent and judge LLM,
-  # so judge model must be sophnet-compatible. gpt-4.1-mini works on
-  # both sophnet and openrouter.
+  # Judge LLM aligned with OpenViking official openclaw-eval/README which uses
+  # doubao-seed-2-0-pro-260215 on volces.com — we route the same model through
+  # sophnet so the judge stack matches OV's reference setup. Agent-side LLM
+  # (see system yamls) uses the same model so judge ↔ agent decisions stay
+  # on equal footing.
   llm:
     provider: "openai"
-    model: "gpt-4.1-mini"
+    model: "doubao-seed-2-0-pro-260215"
     api_key: "${LLM_API_KEY}"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   

@@ -240,6 +240,8 @@ async def ingest_session_to_ov(
     session_key: str,
     messages: Iterable[Any],
     speaker_format: str = "[{speaker}]: {text}",
+    ov_session_id: Optional[str] = None,
+    commit_after: bool = True,
 ) -> dict[str, Any]:
     """Push one LoCoMo session into OV: create + add × N + commit + wait task.
 
@@ -247,20 +249,30 @@ async def ingest_session_to_ov(
     ``speaker_name``, ``content``, ``timestamp``). The output dict carries
     ``ov_session_id``, ``task_id``, terminal task status, and counts so the
     caller can emit a single ``ov_session_ingested`` event line.
+
+    ``ov_session_id`` lets the caller reuse one OV session across multiple
+    LoCoMo sub-sessions (mirrors official openclaw-eval's same-user pattern
+    so pendingTokens accumulates and assemble can resolve archive segments
+    at QA time). When ``None``, a fresh OV session is created.
+
+    ``commit_after`` controls whether commit_session is invoked at the end.
+    When False, the caller is expected to commit later (or rely on
+    plugin-side afterTurn auto-commit once pendingTokens crosses threshold).
     """
     started = time.perf_counter()
     msg_list = [m for m in messages if (m.content or "").strip()]
     if not msg_list:
         return {
             "session_key": session_key,
-            "ov_session_id": None,
+            "ov_session_id": ov_session_id,
             "task_id": None,
             "status": "skipped_no_messages",
             "num_messages": 0,
             "duration_sec": 0.0,
         }
 
-    ov_session_id = await client.create_session(http)
+    if ov_session_id is None:
+        ov_session_id = await client.create_session(http)
 
     for msg in msg_list:
         speaker = (msg.speaker_name or "unknown").strip()
@@ -277,6 +289,16 @@ async def ingest_session_to_ov(
             text=line,
             created_at=created_at,
         )
+
+    if not commit_after:
+        return {
+            "session_key": session_key,
+            "ov_session_id": ov_session_id,
+            "task_id": None,
+            "status": "queued",
+            "num_messages": len(msg_list),
+            "duration_sec": round(time.perf_counter() - started, 3),
+        }
 
     commit_resp = await client.commit_session(http, ov_session_id, telemetry=True)
     task_id = commit_resp.get("task_id")
