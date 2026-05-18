@@ -24,7 +24,7 @@
 adapter: "openclaw-docker"
 
 llm:
-  provider: "sophnet"
+  provider: "openai"
   model: "doubao-seed-2-0-pro-260215"
   api_key: "${LLM_API_KEY}"
   base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
@@ -108,6 +108,11 @@ openclaw:
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
       context_window: 128000
       max_tokens: 4096
+      # Tier-A provider usage: yaml compat + docker _patch_streaming_usage_compat
+      # (see openclaw/config_patches.py). Without both, metrics fall back to
+      # session-transcript tiktoken (Tier B) in usage_metrics.py.
+      compat:
+        supportsUsageInStreaming: true
   prompts:
     memory_mode: "native_compiled"
     flush_mode: "session_bundle"
@@ -121,5 +126,5 @@ openclaw_docker:
   per_rpc_timeout_seconds: 360
   add_host_gateway: true              # OV plugin reaches host:1933
   # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
-  remove_container_on_stop: false # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
+  remove_container_on_stop: true # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
   per_qa_isolation: "off"             # keep QA session jsonl under state/agents/main/sessions/

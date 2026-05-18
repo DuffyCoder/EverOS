@@ -35,6 +35,10 @@ from evaluation.src.adapters.openclaw.runtime import (
     arun_bridge,
     build_sandbox_paths,
 )
+from evaluation.src.adapters.openclaw.usage_metrics import (
+    extract_agent_run_token_metrics,
+    resolve_state_dir_host,
+)
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, SearchResult
 
@@ -85,6 +89,58 @@ class OpenClawAdapter(BaseAdapter):
         # and build_lazy_index() so answer_mode=agent_local can find
         # the bridge payload via _sandbox_for(conversation_id).
         self._sandbox_by_conversation_id: dict[str, dict] = {}
+        # Per-QA metrics populated by agent_local runs; consumed by answer_stage.
+        self._answer_metrics_by_qid: dict[str, dict] = {}
+
+    def pop_answer_metrics(self, question_id: str) -> dict:
+        """Return and clear token metrics recorded for the last agent_run."""
+        return self._answer_metrics_by_qid.pop(question_id, {})
+
+    def _record_agent_run_token_metrics(
+        self,
+        sandbox: dict,
+        qid: str,
+        resp: dict,
+        query: str,
+        *,
+        container_state_dir: Optional[str] = None,
+    ) -> dict:
+        conv_id = sandbox.get("conversation_id", "")
+        session_id = f"{conv_id}__{qid}"
+        state_host = resolve_state_dir_host(sandbox, container_state_dir)
+        metrics = extract_agent_run_token_metrics(
+            resp, state_host, session_id, query,
+        )
+        self._answer_metrics_by_qid[qid] = metrics
+        return metrics
+
+    def _emit_agent_run_complete(
+        self,
+        sandbox: dict,
+        conv_id: str,
+        qid: str,
+        resp: dict,
+        query: str,
+        *,
+        container_state_dir: Optional[str] = None,
+    ) -> str:
+        token_metrics = self._record_agent_run_token_metrics(
+            sandbox, qid, resp, query, container_state_dir=container_state_dir,
+        )
+        self._append_events(sandbox, [{
+            "event": "agent_run_complete",
+            "conversation_id": conv_id,
+            "question_id": qid,
+            "duration_ms": resp.get("duration_ms"),
+            "stop_reason": resp.get("stop_reason"),
+            "aborted": resp.get("aborted"),
+            "tool_names": resp.get("tool_names"),
+            "system_prompt_chars": resp.get("system_prompt_chars"),
+            "reply_len": len(resp.get("reply") or ""),
+            "forced_terminate": bool(resp.get("forced_terminate", False)),
+            **token_metrics,
+        }])
+        return (resp.get("reply") or "").strip()
 
     # ----------------------------------------------------------------- prepare
     async def prepare(
@@ -471,23 +527,9 @@ class OpenClawAdapter(BaseAdapter):
             }])
             return ""
 
-        # Persist trace event so downstream metrics/diagnostics can
-        # observe agent behavior without a parallel trace channel.
-        # R-S3-4: forced_terminate flags whether the bridge SIGKILLed the
-        # subprocess group (hypermem/context-engine indexer keepalive).
-        # Latency stats include the bridge's grace period when this is true.
-        self._append_events(sandbox, [{
-            "event": "agent_run_complete",
-            "conversation_id": conv_id, "question_id": qid,
-            "duration_ms": resp.get("duration_ms"),
-            "stop_reason": resp.get("stop_reason"),
-            "aborted": resp.get("aborted"),
-            "tool_names": resp.get("tool_names"),
-            "system_prompt_chars": resp.get("system_prompt_chars"),
-            "reply_len": len(resp.get("reply", "")),
-            "forced_terminate": bool(resp.get("forced_terminate", False)),
-        }])
-        return (resp.get("reply") or "").strip()
+        return self._emit_agent_run_complete(
+            sandbox, conv_id, qid, resp, query,
+        )
 
     # v0.7: per-conv sandbox lookup, populated by add() and build_lazy_index()
     def _sandbox_for(self, conversation_id: str) -> dict:

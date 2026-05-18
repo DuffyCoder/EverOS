@@ -301,15 +301,24 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 failed += 1
 
             retrieval_meta = search_result.retrieval_metadata or {}
+            extra_metrics: dict = {}
+            if hasattr(adapter, "pop_answer_metrics"):
+                extra_metrics = adapter.pop_answer_metrics(qa.question_id) or {}
+            final_tokens = extra_metrics.get("final_context_tokens")
+            if final_tokens is None:
+                final_tokens = context_tokens
             metadata = {
                 **qa.metadata,
                 "answer_latency_ms": answer_latency_ms,
                 "final_context_chars": context_chars,
-                "final_context_tokens": context_tokens,
+                "final_context_tokens": final_tokens,
                 "retrieval_latency_ms": retrieval_meta.get("retrieval_latency_ms"),
                 "retrieval_route": retrieval_meta.get("retrieval_route"),
                 "backend_mode": retrieval_meta.get("backend_mode"),
             }
+            for key, value in extra_metrics.items():
+                if key != "final_context_tokens":
+                    metadata[key] = value
 
             result = AnswerResult(
                 question_id=qa.question_id,

@@ -126,3 +126,10 @@ class BaseAdapter(ABC):
         """
         return 120.0
 
+    def pop_answer_metrics(self, question_id: str) -> dict:
+        """Optional per-QA metrics (e.g. OpenClaw agent_local token usage).
+
+        Default empty; adapters that record metrics during ``answer()`` override.
+        """
+        return {}
+

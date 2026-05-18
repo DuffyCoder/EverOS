@@ -114,6 +114,16 @@ def test_resolved_config_preserves_non_secret_expanded_values():
     assert remote["easyllmId"] == "easy-id-123"
 
 
+def test_resolved_config_forwards_model_compat():
+    """agent_llm.model.compat is emitted on the provider model entry."""
+    agent_llm = _agent_llm_fixture()
+    agent_llm["model"]["compat"] = {"supportsUsageInStreaming": True}
+    cfg = build_openclaw_resolved_config(**_BASE, agent_llm=agent_llm)
+
+    model = cfg["models"]["providers"]["sophnet"]["models"][0]
+    assert model["compat"] == {"supportsUsageInStreaming": True}
+
+
 def test_resolved_config_legacy_embedding_api_key_field_warns(caplog):
     """Backward-compat: yaml with plain api_key still works but warns."""
     embedding = {

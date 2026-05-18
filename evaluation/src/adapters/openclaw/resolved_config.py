@@ -204,24 +204,29 @@ def _build_agent_provider(agent_llm: dict) -> tuple[str, dict[str, Any], str]:
             "agent_llm.api_key_env is required (bare env var name, e.g. 'LLM_API_KEY')"
         )
 
+    model_entry: dict[str, Any] = {
+        "id": md["id"],
+        "name": md["name"],
+        "reasoning": md.get("reasoning", False),
+        "input": md.get("input", ["text"]),
+        "cost": md.get("cost", {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+        }),
+        "contextWindow": md["context_window"],
+        "maxTokens": md["max_tokens"],
+    }
+    compat = md.get("compat")
+    if isinstance(compat, dict) and compat:
+        model_entry["compat"] = compat
+
     provider_cfg: dict[str, Any] = {
         "baseUrl": agent_llm["base_url"],
         "apiKey": "${" + str(agent_llm["api_key_env"]) + "}",
         "api": agent_llm.get("api", "openai-completions"),
-        "models": [{
-            "id": md["id"],
-            "name": md["name"],
-            "reasoning": md.get("reasoning", False),
-            "input": md.get("input", ["text"]),
-            "cost": md.get("cost", {
-                "input": 0,
-                "output": 0,
-                "cacheRead": 0,
-                "cacheWrite": 0,
-            }),
-            "contextWindow": md["context_window"],
-            "maxTokens": md["max_tokens"],
-        }],
+        "models": [model_entry],
     }
     model_ref = f"{pid}/{md['id']}"
     return pid, provider_cfg, model_ref

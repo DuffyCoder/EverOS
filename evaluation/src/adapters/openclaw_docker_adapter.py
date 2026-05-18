@@ -252,6 +252,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # OV team's autoCapture-driven memcore writes. No-op when the
         # config already has enabled=true.
         await self._patch_memory_flush_enabled(cid, conv_id)
+        await self._patch_streaming_usage_compat(cid, conv_id)
 
     async def _patch_memory_flush_enabled(self, cid: str, conv_id: str) -> None:
         """Edit both /workspace/openclaw.json and /workspace/openclaw.docker.json
@@ -284,6 +285,31 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         if proc.returncode != 0:
             logger.warning(
                 "memoryFlush patch failed for %s (cid=%s): %s",
+                conv_id, cid[:12], stderr.decode()[:200],
+            )
+
+    async def _patch_streaming_usage_compat(self, cid: str, conv_id: str) -> None:
+        """Enable Tier-A provider usage (``stream_options.include_usage``).
+
+        Mirrors yaml ``agent_llm.model.compat.supportsUsageInStreaming`` on
+        the config file the bridge actually reads. See
+        ``openclaw.config_patches.STREAMING_USAGE_COMPAT_JQ``.
+        """
+        from evaluation.src.adapters.openclaw.config_patches import (
+            STREAMING_USAGE_COMPAT_JQ,
+            shell_patch_openclaw_configs,
+        )
+
+        cmd = shell_patch_openclaw_configs(STREAMING_USAGE_COMPAT_JQ)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", cid, "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                "streaming usage compat patch failed for %s (cid=%s): %s",
                 conv_id, cid[:12], stderr.decode()[:200],
             )
 
@@ -870,17 +896,14 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 }])
                 return ""
 
-            self._append_events(sandbox, [{
-                "event": "agent_run_complete",
-                "conversation_id": conv_id, "question_id": qid,
-                "duration_ms": resp.get("duration_ms"),
-                "stop_reason": resp.get("stop_reason"),
-                "aborted": resp.get("aborted"),
-                "tool_names": resp.get("tool_names"),
-                "system_prompt_chars": resp.get("system_prompt_chars"),
-                "reply_len": len(resp.get("reply", "")),
-            }])
-            return (resp.get("reply") or "").strip()
+            return self._emit_agent_run_complete(
+                sandbox,
+                conv_id,
+                qid,
+                resp,
+                query,
+                container_state_dir=qa_container_state,
+            )
         finally:
             # Always discard the per-QA state copy so .qa_states/ does
             # not accumulate across runs.

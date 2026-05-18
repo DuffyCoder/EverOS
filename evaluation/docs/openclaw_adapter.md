@@ -81,6 +81,28 @@ vs context engine) is still not directly comparable for the structural
 asymmetries listed under "Approximate, with documented divergence" and
 "Explicitly omitted" above.
 
+## `final_context_tokens` diagnostics (`answer_mode: agent_local`)
+
+The harness reports `final_context_tokens_mean` / `final_context_tokens_stats`
+in `report.txt` Diagnostics. Semantics depend on the adapter answer path:
+
+| Adapter answer path | `final_context_tokens` meaning |
+|---------------------|--------------------------------|
+| **OpenClaw `agent_local`** (incl. `openclaw-docker`) | Last LLM hop **prompt-side** tokens (`lastCallUsage` / session assistant `usage`, including cache read/write when present). Fallback: provider usage → session jsonl usage → **session transcript tiktoken** (system/tool overhead + messages before the final assistant turn) → coarse estimate (system + schema + harness question only). |
+| **EverMemOS / search-then-answer** | tiktoken estimate of the **retrieved context string** passed to the shared answer LLM (not the full agent prompt). |
+
+Also recorded for OpenClaw agent runs:
+
+- `agent_run_total_input_tokens` — sum of prompt-side tokens across all LLM hops.
+- `final_context_tokens_source` / `agent_run_total_input_tokens_source` — provenance
+  (`last_call_usage`, `session_jsonl_*`, `session_transcript_*`, `prompt_estimate`).
+
+**Cross-system comparability:** OpenClaw agent_local counts are typically
+much larger (workspace bootstrap, tool schemas, context-engine assemble).
+Use them to compare OpenClaw plugin presets (OV vs memory-core vs noop).
+Do **not** treat them as directly comparable to EverMemOS
+`final_context_tokens` without reading both definitions.
+
 ## Bugs the benchmark is *not* designed to catch
 
 - **LLM judge leniency.** Cross-mode sweeps on LoCoMo conv 9 showed gpt-4o-mini accepting `"Sep 2023"` as matching the gold `"Mar 2023"`. Consider adding a stricter exact-match sanity rail before trusting accuracy deltas below ~5%.
