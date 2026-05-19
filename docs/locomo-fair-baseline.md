@@ -33,8 +33,10 @@ from the memory plugin:
 - num_runs: 3 (judge each Q three times, average)
 - Aggregation: per-run `correct / (total - None)`; rate-limit failures
   return `Optional[bool] None` and are excluded from the denominator.
-  Run a second `rejudge` pass with `--concurrency 1 --max-retries 8`
-  to recover most None values into real judgments.
+  The judge's built-in retry (`max_retries` in the system config under
+  `evaluator.llm_judge`) handles transient errors; if a run still leaves
+  many None verdicts, re-run only the `evaluate` stage with a higher
+  `max_retries`.
 
 ## Memory-plugin-specific knobs
 
@@ -87,17 +89,6 @@ uv run python -m evaluation.cli \
 Output lands in
 `evaluation/results/locomo-openclaw-docker-memcore-session-bundle-fair-A1-memcore/eval_results.json`.
 
-## Recover rate-limited None judgments
-
-```bash
-uv run python evaluation/scripts/rejudge.py \
-  --run-dir evaluation/results/locomo-openclaw-docker-memcore-session-bundle-fair-A1-memcore \
-  --dataset-config evaluation/config/datasets/locomo.yaml \
-  --concurrency 1 --max-retries 8
-```
-
-Output: `eval_results_rejudged.json` next to `eval_results.json`.
-
 ## Run all three sequentially
 
 Memory constraint: each system needs ~8 GB for its docker containers
@@ -111,15 +102,13 @@ for sys in \
   openclaw-docker-openviking-session-bundle-memcore; do
   uv run python -m evaluation.cli --dataset locomo \
     --system "$sys" --run-name "fair-${sys}"
-  uv run python evaluation/scripts/rejudge.py \
-    --run-dir "evaluation/results/locomo-${sys}-fair-${sys}" \
-    --dataset-config evaluation/config/datasets/locomo.yaml \
-    --concurrency 1 --max-retries 8
 done
 ```
 
-Estimated time per system on a single 16 GB node: 3-4 h first pass +
-2-3 h rejudge.
+Estimated time per system on a single 16 GB node: 3-4 h. The judge's
+built-in retry (`max_retries` in system yaml) absorbs transient Sophnet
+rate-limit hiccups; if a run still leaves many None judgments, re-run
+only the `evaluate` stage with a higher `max_retries`.
 
 ## What numbers to expect
 

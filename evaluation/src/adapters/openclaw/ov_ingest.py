@@ -242,8 +242,9 @@ async def ingest_session_to_ov(
     speaker_format: str = "[{speaker}]: {text}",
     ov_session_id: Optional[str] = None,
     commit_after: bool = True,
+    wait_task: bool = True,
 ) -> dict[str, Any]:
-    """Push one LoCoMo session into OV: create + add × N + commit + wait task.
+    """Push one LoCoMo session into OV: create + add × N + commit (+ wait task).
 
     ``messages`` is an iterable of ``Message``-like objects (must expose
     ``speaker_name``, ``content``, ``timestamp``). The output dict carries
@@ -258,6 +259,16 @@ async def ingest_session_to_ov(
     ``commit_after`` controls whether commit_session is invoked at the end.
     When False, the caller is expected to commit later (or rely on
     plugin-side afterTurn auto-commit once pendingTokens crosses threshold).
+
+    ``wait_task``: when ``True`` (default), block on the phase2
+    fact-extraction task before returning so memories_extracted /
+    token_usage are populated. When ``False``, fire-and-forget — return
+    immediately with the task_id and ``status="queued_phase2"``; the
+    caller is responsible for waiting (e.g. batched wait at end-of-conv)
+    so the next pipeline stage doesn't start before fact-extract
+    finishes. The fire-and-forget path lets multiple LoCoMo sub-sessions
+    queue phase2 work onto the OV server in parallel rather than
+    serializing one LLM call at a time.
     """
     started = time.perf_counter()
     msg_list = [m for m in messages if (m.content or "").strip()]
@@ -311,6 +322,15 @@ async def ingest_session_to_ov(
         "commit_status": commit_status,
         "num_messages": len(msg_list),
     }
+
+    if task_id and not wait_task:
+        # Fire-and-forget: caller will batch-wait this task_id later
+        # (e.g. at end-of-conv ingest). Keeps the per-session call cheap
+        # so multiple sessions can be added in parallel without
+        # serializing on each phase2 LLM call.
+        final["status"] = "queued_phase2"
+        final["duration_sec"] = round(time.perf_counter() - started, 3)
+        return final
 
     if task_id:
         try:

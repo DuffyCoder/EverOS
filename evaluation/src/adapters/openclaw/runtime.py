@@ -71,6 +71,7 @@ def build_sandbox_paths(
         "home_dir": str(base / "home"),
         "cwd_dir": str(base / "empty-cwd"),
         "metrics_dir": str(base / "metrics"),
+        "sessions_dir": str(base / "state" / "agents" / "main" / "sessions"),
         "events_path": str(base / "events.jsonl"),
         "config_path": str(base / "openclaw.json"),
     }

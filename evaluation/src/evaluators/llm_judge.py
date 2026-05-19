@@ -17,6 +17,8 @@ Three judgment outcomes per call:
 
 import asyncio
 import json
+import logging
+import os
 import numpy as np
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
@@ -29,6 +31,15 @@ from evaluation.src.core.data_models import AnswerResult, EvaluationResult
 from evaluation.src.utils.prompts import get_prompt, format_prompt
 
 
+logger = logging.getLogger(__name__)
+
+# Upper bound for scanning ``LLM_API_KEY_<n>`` env vars. n in [2, _ENV_KEY_SCAN_MAX].
+_ENV_KEY_SCAN_MAX = 32
+
+# Default concurrent in-flight judge calls per AsyncOpenAI client.
+_BASE_CONCURRENCY_PER_KEY = 4
+
+
 @register_evaluator("llm_judge")
 class LLMJudge(BaseEvaluator):
     """LLM judge evaluator."""
@@ -36,22 +47,69 @@ class LLMJudge(BaseEvaluator):
     def __init__(self, config: dict):
         super().__init__(config)
 
-        # Initialize OpenAI client
+        # Initialize OpenAI client(s). Multi-key support: when
+        # ``llm.api_keys`` is a list, build one AsyncOpenAI client per
+        # key and round-robin between them on each judge call. This
+        # spreads the per-key rate-limit window across N keys, giving
+        # near-N× throughput when the bottleneck is per-key RPM
+        # (typical with sophnet on full-LoCoMo judge runs of ~4620
+        # calls). ``llm.api_key`` (singular) is still accepted as a
+        # one-key fallback for backward compatibility.
         llm_config = config.get("llm", {})
-        self.client = AsyncOpenAI(
-            api_key=llm_config.get("api_key"),
-            base_url=llm_config.get("base_url", "https://api.openai.com/v1"),
-        )
+        api_keys = llm_config.get("api_keys")
+        if isinstance(api_keys, list):
+            api_keys = [k for k in api_keys if isinstance(k, str) and k.strip()]
+        else:
+            api_keys = []
+        if not api_keys:
+            single = llm_config.get("api_key")
+            if isinstance(single, str) and single.strip():
+                api_keys = [single]
+        # Env fallback: when caller passed nothing or only a single key,
+        # scan LLM_API_KEY / LLM_API_KEY_2 / ... numeric suffix vars.
+        # This lets the main eval pipeline (cli.py) pick up extra keys
+        # without changing dataset yaml. Scans the full range so a gap
+        # (e.g. _2 unset but _3 set) does not silently drop later keys.
+        if len(api_keys) <= 1:
+            env_keys: list[str] = []
+            primary = os.environ.get("LLM_API_KEY", "").strip()
+            if primary:
+                env_keys.append(primary)
+            for n in range(2, _ENV_KEY_SCAN_MAX + 1):
+                v = os.environ.get(f"LLM_API_KEY_{n}", "").strip()
+                if v:
+                    env_keys.append(v)
+            # Merge yaml-provided key with env extras, preserving order
+            # and dedup-ing.
+            api_keys = list(dict.fromkeys(api_keys + env_keys))
+        if not api_keys:
+            raise ValueError(
+                "LLMJudge: llm.api_key or llm.api_keys must be set "
+                "(got empty / missing); or set LLM_API_KEY env"
+            )
+        base_url = llm_config.get("base_url", "https://api.openai.com/v1")
+        self.clients = [
+            AsyncOpenAI(api_key=k, base_url=base_url) for k in api_keys
+        ]
+        # Index-based round-robin: asyncio is single-threaded and the
+        # increment+modulo is atomic between awaits, so no lock needed.
+        # An explicit counter (vs itertools.cycle) lets _next_client_with_index
+        # report which key is in use for diagnostic logs.
+        self._client_counter = 0
         self.model = llm_config.get("model", "gpt-4o-mini")
         self.num_runs = config.get("num_runs", 3)
 
-        # Stage 2 R-S2-3 hardening: concurrency cap + transient retry.
-        # Old hard-coded Semaphore(10) saturated sophnet during 50Q runs and
-        # the catch-all `return False` masked transient connection errors as
-        # silent wrong-answer judgments (evermemos r2 hit 0% via this path).
-        # Both are now configurable; defaults reflect rejudge.py's empirically
-        # validated values (concurrency=4, max_retries=4).
-        self._concurrency = int(config.get("judge_concurrency", 4))
+        # Concurrency cap + transient retry. Default scales with the
+        # number of api_keys: a single key keeps the original 4-concurrent
+        # budget, while N keys lift it to 4N. Adding a key to .env
+        # automatically buys parallelism instead of just spreading the
+        # same 4 in-flight across keys. Explicit ``judge_concurrency``
+        # overrides the default.
+        configured = config.get("judge_concurrency")
+        if configured is None:
+            self._concurrency = _BASE_CONCURRENCY_PER_KEY * len(self.clients)
+        else:
+            self._concurrency = int(configured)
         self._max_retries = int(config.get("judge_max_retries", 4))
 
     def _judge_concurrency(self) -> int:
@@ -60,11 +118,21 @@ class LLMJudge(BaseEvaluator):
     def _judge_max_retries(self) -> int:
         return self._max_retries
 
+    def _next_client_with_index(self) -> tuple[int, AsyncOpenAI]:
+        """Round-robin next AsyncOpenAI client + its position. Each
+        call advances by one, so consecutive judge calls (and retries
+        within one call) land on different keys. Returning the index
+        lets the caller include it in diagnostic logs so a 429 storm
+        can be traced to a specific key."""
+        idx = self._client_counter % len(self.clients)
+        self._client_counter += 1
+        return idx, self.clients[idx]
+
     @staticmethod
     def _is_transient_error(err: BaseException) -> bool:
         """Classify whether a judge call error should trigger retry.
 
-        Transient signals (mirror rejudge.py):
+        Transient signals:
           - APIConnectionError
           - 5xx HTTP status text
           - 429 / rate limit
@@ -104,8 +172,7 @@ class LLMJudge(BaseEvaluator):
         detailed_results = []
 
         # Evaluate all answers concurrently. Cap is configurable
-        # (default 4; was hard-coded 10 which saturated sophnet — see
-        # Stage 2 R-S2-3 / rejudge.py).
+        # (default 4; was hard-coded 10 which saturated sophnet).
         semaphore = asyncio.Semaphore(self._judge_concurrency())
 
         # Use tqdm progress bar
@@ -341,8 +408,12 @@ class LLMJudge(BaseEvaluator):
         last_transient: Exception | None = None
 
         for attempt in range(max_retries):
+            # Pick the next client on every attempt — both for spreading
+            # rate-limit pressure across keys on the happy path and so
+            # a retry after a 429/timeout lands on a fresh key window.
+            key_idx, client = self._next_client_with_index()
             try:
-                response = await self.client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -355,6 +426,10 @@ class LLMJudge(BaseEvaluator):
                     print(f"  ⚠️ LLM Judge failed (permanent): {type(e).__name__}: {e}")
                     return None
                 last_transient = e
+                logger.warning(
+                    "LLM judge transient error attempt=%d/%d key_idx=%d: %s: %s",
+                    attempt + 1, max_retries, key_idx, type(e).__name__, e,
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(delay)
                     delay *= 2
