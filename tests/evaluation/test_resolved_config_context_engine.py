@@ -86,7 +86,6 @@ class TestBuildOpenclawResolvedConfigCEMode:
             workspace_dir="/ws",
             native_store_dir="/ws/state",
             backend_mode="fts_only",
-            flush_mode="disabled",
             agent_llm=_STUB_AGENT_LLM,
         )
         defaults.update(kwargs)

@@ -6,7 +6,7 @@
 # The harness drives `docker exec` per RPC; this script just bootstraps
 # config and keeps the container alive.
 #
-# v0.7 secret hygiene: yaml/template uses ${LLM_API_KEY} / ${SOPH_API_KEY}
+# Secret hygiene: yaml/template uses ${LLM_API_KEY} / ${SOPH_API_KEY}
 # template strings; openclaw resolves them from this container's env at
 # CLI invocation time. This script does NOT substitute secret values into
 # the file written to disk.
@@ -35,18 +35,14 @@ else
   PLUGIN_ENTRIES='{"memory-core": {"enabled": false}, "'$PLUGIN'": {"enabled": true}}'
 fi
 
-# Stage 3 Phase 1: optionally splice in the context-engine plugin.
-# When CONTEXT_ENGINE_PLUGIN_ID is set, we (a) add it to plugins.allow,
-# (b) register an enabled entry, (c) emit slots.contextEngine via jq below.
-# When unset, no behavioral change vs bundled memory mode (Phase 0
-# re-audit confirmed openclaw resolves slots.contextEngine to "legacy"
-# default when the slot key is absent from the rendered config).
+# Optionally splice in the context-engine plugin. When CONTEXT_ENGINE_PLUGIN_ID
+# is set, we (a) add it to plugins.allow, (b) register an enabled entry,
+# (c) emit slots.contextEngine via jq below. When unset, openclaw resolves
+# slots.contextEngine to "legacy" default when the slot key is absent from
+# the rendered config.
 CONTEXT_ENGINE_PLUGIN="${CONTEXT_ENGINE_PLUGIN_ID:-}"
 if [ -n "$CONTEXT_ENGINE_PLUGIN" ]; then
-  # Splice ce plugin id into PLUGIN_ALLOW (jq makes the union safe).
   PLUGIN_ALLOW=$(echo "$PLUGIN_ALLOW" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" '. + [$ce] | unique')
-  # Add entry to PLUGIN_ENTRIES — enabled so the loader actually runs
-  # the plugin's register() and registerContextEngine() fires.
   PLUGIN_ENTRIES=$(echo "$PLUGIN_ENTRIES" | jq --arg ce "$CONTEXT_ENGINE_PLUGIN" \
     '.[$ce] = {"enabled": true}')
 fi
@@ -57,6 +53,12 @@ if [ "$MODE" = "noop" ]; then
 else
   MEMORY_SEARCH_ENABLED='true'
 fi
+
+# Vector store toggle. When set to "false", memorySearch.store.vector.enabled
+# is rendered false (FTS-only retrieval, no embedding calls). Default
+# preserves the legacy template value (true). Useful when the embedding
+# provider is unavailable, avoiding hard-fail at `openclaw memory index` time.
+MEMORY_VECTOR_ENABLED="${MEMORY_VECTOR_ENABLED:-true}"
 
 # Model id/name defaults (can be overridden via env).
 LLM_MODEL_ID="${LLM_MODEL:-gpt-4.1-mini}"
@@ -75,7 +77,6 @@ mkdir -p "$WS" "$WS/state/memory" "$WS/home" "$WS/memory"
 # Install-mode (build.py --install-spec): if INSTALL_PLUGIN_ID is set
 # and the install dir exists, register it via plugins.load.paths so the
 # runtime can find the installed plugin alongside any bundled ones.
-# Empty/missing -> jq emits no load section (default behavior).
 INSTALL_LOAD_PATHS='[]'
 OPENCLAW_HOME_DIR="${OPENCLAW_HOME:-/opt/openclaw}"
 if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
@@ -87,8 +88,8 @@ if [ -n "${INSTALL_PLUGIN_ID:-}" ]; then
     echo "[entrypoint] WARN: INSTALL_PLUGIN_ID=$INSTALL_PLUGIN_ID set but $INSTALL_DIR not found" >&2
   fi
 fi
-# Stage 3 Phase 5: append each EXTRA_INSTALL_PLUGIN_IDS dir (space-separated)
-# so paired plugins (e.g. context-engine + memory) both load.
+# Append each EXTRA_INSTALL_PLUGIN_IDS dir (space-separated) so paired
+# plugins (e.g. context-engine + memory) both load.
 if [ -n "${EXTRA_INSTALL_PLUGIN_IDS:-}" ]; then
   for extra_id in ${EXTRA_INSTALL_PLUGIN_IDS}; do
     EXTRA_DIR="${OPENCLAW_HOME_DIR}/extensions/${extra_id}"
@@ -101,6 +102,14 @@ if [ -n "${EXTRA_INSTALL_PLUGIN_IDS:-}" ]; then
   done
 fi
 
+# memoryFlush autoCapture toggle. openclaw memory-core's flush-plan.ts
+# default is enabled-when-undefined; only explicit ``enabled === false``
+# disables. Honor the MEMORY_FLUSH_ENABLED env var from the docker
+# adapter (default true) so memcore can be benchmarked under its
+# upstream autoCapture behavior (matches OV team's reference setup
+# that produced the 35.65% memcore / 51.23% OV+memcore numbers).
+MEMORY_FLUSH_ENABLED="${MEMORY_FLUSH_ENABLED:-true}"
+
 jq \
   --argjson allow "$PLUGIN_ALLOW" \
   --arg slot "$MEMORY_SLOT" \
@@ -108,11 +117,15 @@ jq \
   --argjson enabled "$MEMORY_SEARCH_ENABLED" \
   --argjson loadPaths "$INSTALL_LOAD_PATHS" \
   --arg ceSlot "$CONTEXT_ENGINE_PLUGIN" \
+  --argjson vectorEnabled "$MEMORY_VECTOR_ENABLED" \
+  --argjson flushEnabled "$MEMORY_FLUSH_ENABLED" \
   '
   .plugins.allow = $allow
   | .plugins.slots.memory = $slot
   | .plugins.entries = $entries
   | .agents.defaults.memorySearch.enabled = $enabled
+  | .agents.defaults.memorySearch.store.vector.enabled = $vectorEnabled
+  | .agents.defaults.compaction.memoryFlush.enabled = $flushEnabled
   | (if ($loadPaths | length) > 0 then .plugins.load.paths = $loadPaths else . end)
   | (if ($ceSlot | length) > 0 then .plugins.slots.contextEngine = $ceSlot else . end)
   ' "$TPL" \
@@ -125,7 +138,7 @@ jq \
 # Validate it parses as JSON.
 jq empty "$OUT" 2>&1 || { echo "ERROR: rendered $OUT is not valid JSON" >&2; cat "$OUT" >&2; exit 1; }
 
-echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED)" >&2
+echo "[entrypoint] rendered $OUT (plugin=$PLUGIN mode=$MODE memorySearch.enabled=$MEMORY_SEARCH_ENABLED vector=$MEMORY_VECTOR_ENABLED)" >&2
 
 # Optional plugin sidecar (e.g. mem0 FastAPI server). Started in
 # background so the container's main CMD (sleep infinity) keeps running

@@ -90,6 +90,9 @@ def aggregate_diagnostics(
 
     answer_latencies = [m.get("answer_latency_ms") for m in answer_results_metadata]
     context_tokens = [m.get("final_context_tokens") for m in answer_results_metadata]
+    agent_run_total_tokens = [
+        m.get("agent_run_total_input_tokens") for m in answer_results_metadata
+    ]
     context_chars = [m.get("final_context_chars") for m in answer_results_metadata]
 
     # Per-conversation add telemetry (optional; adapters opt-in by writing
@@ -137,6 +140,7 @@ def aggregate_diagnostics(
         "answer_latency_ms_mean": _safe_mean(answer_latencies),
         "empty_retrieval_rate": empty_rate,
         "final_context_tokens_mean": _safe_mean(context_tokens),
+        "agent_run_total_input_tokens_mean": _safe_mean(agent_run_total_tokens),
         "final_context_chars_mean": _safe_mean(context_chars),
         "retrieval_route_distribution": _distribution(routes),
         "backend_mode_distribution": _distribution(backends),
@@ -148,6 +152,7 @@ def aggregate_diagnostics(
         "retrieval_latency_ms_stats": _stats(retrieval_latencies),
         "answer_latency_ms_stats": _stats(answer_latencies),
         "final_context_tokens_stats": _stats(context_tokens),
+        "agent_run_total_input_tokens_stats": _stats(agent_run_total_tokens),
         # Reliability signals (None when no add telemetry was captured).
         "add_retry_rate": retry_rate,
         "add_fallback_rate": fallback_rate,

@@ -1,0 +1,94 @@
+# memory-core (OpenClaw default) on LoCoMo via per-session bundle ingest.
+#
+# Faithful to OpenClaw's chat-pattern: each LoCoMo session is rendered as
+# a single user message ("[group chat conversation]\n\n<speaker>: <text>...
+# [try to remember what's said in the group]") and sent through one
+# agent_run call. The agent's tail-cued file_write writes memory/<DATE>.md
+# in-turn; between sessions the transcript jsonl is archived so the next
+# session starts fresh while memory/*.md persists.
+#
+# Mirrors the reference openclaw-eval/eval.py ingest pattern documented in
+# /Data3/shutong.shan/memory/refs/openclaw-eval/eval.py:
+#   - One bundled message per session (NOT one message per turn)
+#   - Tail directive cues memory write
+#   - reset_session between sessions = transcript archive
+#   - All sessions in a sample share user_uuid (= conversation_id)
+#
+# A1 (memcore-only, no context-engine): memory-core writes memory/*.md;
+# OV is not in the picture. memorySearch indexes the markdown via BM25 +
+# sophnet 1024-dim embeddings.
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  max_concurrent: 4
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"               # BM25 + sophnet 1024-dim embeddings
+  flush_mode: "session_bundle"
+  answer_mode: "agent_local"
+  memory_mode: "memory-core"
+  agent_timeout_seconds: 90
+  # Leaving ingest_session_tail unset uses the adapter default — an
+  # explicit file_write directive that names the tool. The minimal
+  # reference wording ``[try to remember what's said in the group]``
+  # works under OpenClaw's gateway flow but under ``agent --local`` the
+  # agent often replies with a narrative summary rather than calling the
+  # file_write tool, leaving memory/*.md empty. Set ingest_session_tail
+  # explicitly in the yaml to A/B between the two phrasings.
+  ingest_session_tail: ""
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "session_bundle"
+    answer_mode: "shared"
+
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-memory-core-0000000-slim"
+  max_concurrent_containers: 4
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 360

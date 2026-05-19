@@ -84,10 +84,16 @@ def build_benchmark_summary(
             "retrieval_latency_ms_mean": _get(diagnostics, "retrieval_latency_ms_mean"),
             "answer_latency_ms_mean": _get(diagnostics, "answer_latency_ms_mean"),
             "final_context_tokens_mean": _get(diagnostics, "final_context_tokens_mean"),
+            "agent_run_total_input_tokens_mean": _get(
+                diagnostics, "agent_run_total_input_tokens_mean"
+            ),
             "add_latency_ms_stats": _get(diagnostics, "add_latency_ms_stats"),
             "retrieval_latency_ms_stats": _get(diagnostics, "retrieval_latency_ms_stats"),
             "answer_latency_ms_stats": _get(diagnostics, "answer_latency_ms_stats"),
             "final_context_tokens_stats": _get(diagnostics, "final_context_tokens_stats"),
+            "agent_run_total_input_tokens_stats": _get(
+                diagnostics, "agent_run_total_input_tokens_stats"
+            ),
             "add_retry_rate": _get(diagnostics, "add_retry_rate"),
             "add_fallback_rate": _get(diagnostics, "add_fallback_rate"),
             "add_failed_rate": _get(diagnostics, "add_failed_rate"),

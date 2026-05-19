@@ -196,19 +196,6 @@ async def main():
             "minute docker builds during eval."
         ),
     )
-    parser.add_argument(
-        "--per-qa-isolation",
-        type=str,
-        default=None,
-        choices=["snapshot", "auto", "off"],
-        help=(
-            "Cross-QA isolation mode for context-engine runs. "
-            "snapshot: freeze /workspace/state after add(), restore per QA. "
-            "auto: snapshot iff context_engine is non-empty. "
-            "off: share state across QAs (R2 leakage; documented baseline)."
-        ),
-    )
-
     args = parser.parse_args()
 
     console = get_console()
@@ -258,7 +245,7 @@ async def main():
         )
 
     # Apply CLI plugin overrides. When any of --memory-plugin /
-    # --context-engine / --image / --per-qa-isolation is passed, override
+    # --context-engine / --image is passed, override
     # the corresponding yaml fields. Image is auto-resolved from
     # image_manifest.yaml when plugin overrides are passed.
     plugin_override = apply_plugin_overrides(
@@ -266,7 +253,6 @@ async def main():
         memory_plugin=args.memory_plugin,
         context_engine=args.context_engine,
         image=args.image,
-        per_qa_isolation=args.per_qa_isolation,
         build_missing=args.build_missing,
     )
     if plugin_override.memory_mode_applied is not None:
@@ -411,6 +397,18 @@ async def main():
             except Exception as e:
                 # Cleanup failure doesn't affect main process
                 console.print(f"[dim]⚠️  Failed to cleanup adapter resources: {e}[/dim]")
+
+        # Stop any per-conversation containers spawned by docker-backed
+        # adapters (DockerizedOpenclawAdapter). Without this the smoke /
+        # full eval leaves N containers running per conv until the docker
+        # daemon's --rm reap fires (which only happens on stop), filling
+        # the volume cache and eventually exhausting disk space.
+        if hasattr(adapter, 'cleanup') and callable(getattr(adapter, 'cleanup')):
+            try:
+                await adapter.cleanup()
+                console.print("[dim]🧹 Stopped adapter containers[/dim]")
+            except Exception as e:
+                console.print(f"[dim]⚠️  Failed to stop containers: {e}[/dim]")
 
         # Only systems using rerank need cleanup
         systems_need_rerank = ["evermemos"]

@@ -26,6 +26,26 @@ def test_aggregate_diagnostics_emits_latency_stats():
     assert diag["add_samples"] == 0
 
 
+def test_aggregate_diagnostics_agent_run_total_input_tokens():
+    search_results = [
+        SearchResult("q", "c0", [{}], {}),
+    ]
+    answer_meta = [
+        {
+            "final_context_tokens": 5000,
+            "agent_run_total_input_tokens": 12000,
+        },
+        {
+            "final_context_tokens": 3000,
+            "agent_run_total_input_tokens": 8000,
+        },
+    ]
+    diag = aggregate_diagnostics(search_results, answer_meta)
+    assert diag["final_context_tokens_mean"] == 4000.0
+    assert diag["agent_run_total_input_tokens_mean"] == 10000.0
+    assert diag["agent_run_total_input_tokens_stats"]["n"] == 2
+
+
 def test_aggregate_diagnostics_reads_evermemos_add_summary(tmp_path):
     """Diagnostics picks up per-conv add_summary.json under a
     ``lazy_load`` index (EverMemOS adapter layout)."""

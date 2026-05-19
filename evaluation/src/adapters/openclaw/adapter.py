@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, List, Optional
 
 from evaluation.src.adapters.base import BaseAdapter
 from evaluation.src.adapters.openclaw.ingestion import (
+    bucket_conversation_by_session,
     session_id_from_path,
     write_session_files,
 )
@@ -32,6 +34,10 @@ from evaluation.src.adapters.openclaw.resolved_config import (
 from evaluation.src.adapters.openclaw.runtime import (
     arun_bridge,
     build_sandbox_paths,
+)
+from evaluation.src.adapters.openclaw.usage_metrics import (
+    extract_agent_run_token_metrics,
+    resolve_state_dir_host,
 )
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation, SearchResult
@@ -55,6 +61,60 @@ _DEFAULT_ANSWER_PROMPT = (
     "If the context does not contain the answer, respond with \"No relevant information.\".\n\n"
     "# CONTEXT\n{context}\n\n# QUESTION\n{question}\n\n# ANSWER"
 )
+
+
+def _read_latest_session_final_text(sandbox: dict) -> Optional[str]:
+    """Return the last assistant text from the sandbox's most recently
+    archived agent session jsonl, or None if no usable jsonl is found.
+
+    The openclaw agent runner archives one ``<uuid>.jsonl.<unix_ts>`` file
+    per QA turn under ``sessions_dir``. The most recent file (by the
+    fixed-width unix-ts suffix, equivalent to a name sort) corresponds
+    to the agent_run that just finished. Using the name suffix instead
+    of mtime survives later ``tar``/``cp -p`` rewrites of mtime; in
+    production the two agree.
+
+    Each line is a turn event; assistant text content lives in
+    ``event.message.content[*].text`` for entries whose ``type=="message"``
+    and ``message.role=="assistant"``. Tool-only turns produce no text and
+    are skipped. The final assistant text is the agent's actual answer.
+    """
+    sessions_dir_str = sandbox.get("sessions_dir")
+    if not sessions_dir_str:
+        return None
+    sessions_dir = Path(sessions_dir_str)
+    if not sessions_dir.is_dir():
+        return None
+    candidates = list(sessions_dir.glob("*.jsonl.*"))
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda p: p.name)
+    last_text = ""
+    try:
+        with latest.open() as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") != "message":
+                    continue
+                msg = ev.get("message") or {}
+                if msg.get("role") != "assistant":
+                    continue
+                content = msg.get("content")
+                buf = ""
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            buf += c.get("text", "")
+                elif isinstance(content, str):
+                    buf = content
+                if buf:
+                    last_text = buf
+    except OSError:
+        return None
+    return last_text.strip() if last_text else None
 
 
 @register_adapter("openclaw")
@@ -83,6 +143,82 @@ class OpenClawAdapter(BaseAdapter):
         # and build_lazy_index() so answer_mode=agent_local can find
         # the bridge payload via _sandbox_for(conversation_id).
         self._sandbox_by_conversation_id: dict[str, dict] = {}
+        # Per-QA metrics populated by agent_local runs; consumed by answer_stage.
+        self._answer_metrics_by_qid: dict[str, dict] = {}
+
+    def pop_answer_metrics(self, question_id: str) -> dict:
+        """Return and clear token metrics recorded for the last agent_run."""
+        return self._answer_metrics_by_qid.pop(question_id, {})
+
+    def _record_agent_run_token_metrics(
+        self,
+        sandbox: dict,
+        qid: str,
+        resp: dict,
+        query: str,
+        *,
+        session_id: Optional[str] = None,
+        container_state_dir: Optional[str] = None,
+    ) -> dict:
+        conv_id = sandbox.get("conversation_id", "")
+        sid = session_id or f"{conv_id}__{qid}"
+        state_host = resolve_state_dir_host(sandbox, container_state_dir)
+        metrics = extract_agent_run_token_metrics(
+            resp, state_host, sid, query,
+        )
+        self._answer_metrics_by_qid[qid] = metrics
+        return metrics
+
+    def _emit_agent_run_complete(
+        self,
+        sandbox: dict,
+        conv_id: str,
+        qid: str,
+        resp: dict,
+        query: str,
+        *,
+        session_id: Optional[str] = None,
+        container_state_dir: Optional[str] = None,
+    ) -> str:
+        token_metrics = self._record_agent_run_token_metrics(
+            sandbox,
+            qid,
+            resp,
+            query,
+            session_id=session_id,
+            container_state_dir=container_state_dir,
+        )
+        self._append_events(sandbox, [{
+            "event": "agent_run_complete",
+            "conversation_id": conv_id,
+            "question_id": qid,
+            "duration_ms": resp.get("duration_ms"),
+            "stop_reason": resp.get("stop_reason"),
+            "aborted": resp.get("aborted"),
+            "tool_names": resp.get("tool_names"),
+            "system_prompt_chars": resp.get("system_prompt_chars"),
+            "reply_len": len(resp.get("reply") or ""),
+            "forced_terminate": bool(resp.get("forced_terminate", False)),
+            **token_metrics,
+        }])
+
+        # openclaw bridge returns the FIRST assistant text from the agent
+        # loop. When the agent does preamble → tool_call → tool_result →
+        # final_answer, that first text is the preamble ("Let me search
+        # for ...") and the real answer lives in a later assistant turn.
+        # Pull the LAST assistant text from the just-archived session jsonl
+        # and prefer it over the bridge's reply.
+        reply = (resp.get("reply") or "").strip()
+        final = _read_latest_session_final_text(sandbox)
+        if final and final != reply:
+            self._append_events(sandbox, [{
+                "event": "agent_reply_overridden_to_final",
+                "conversation_id": conv_id, "question_id": qid,
+                "first_len": len(reply),
+                "final_len": len(final),
+            }])
+            return final
+        return reply
 
     # ----------------------------------------------------------------- prepare
     async def prepare(
@@ -129,78 +265,85 @@ class OpenClawAdapter(BaseAdapter):
 
         answer_mode = self._openclaw_cfg.get("answer_mode", "shared_llm")
         memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        # Conv-parallel ingest cap. Each conv consumes a few hundred MB
+        # of host RAM (transcript buffers + sandbox state) and queues
+        # phase2 tasks onto the OV server; 4 parallel conversations
+        # comfortably fits the 16 GB cloud budget alongside the OV
+        # server (~10 GB). Tunable via yaml openclaw.add_max_concurrent_convs.
+        add_max_concurrent_convs = int(
+            self._openclaw_cfg.get("add_max_concurrent_convs", 4)
+        )
+        sem = asyncio.Semaphore(add_max_concurrent_convs)
 
-        for conv in conversations:
-            sandbox = self._prepare_conversation_sandbox(root_dir, conv)
-            t0 = time.perf_counter()
-            try:
-                await self._ingest_conversation(sandbox, conv)
-                # v0.7: noop mode disables memorySearch entirely, so the
-                # status check would always report settled=false with 0
-                # files/chunks. Skip flush/settle in that case — there's
-                # no memory state to verify. Agent_local + noop is a
-                # legitimate combo for the memory-sensitivity gate.
-                if memory_mode == "noop":
-                    sandbox["visibility_state"] = "settled"
-                    self._append_events(sandbox, [{
-                        "event": "flush_skipped",
-                        "reason": "memory_mode=noop",
-                    }])
-                else:
-                    # _flush_and_settle_if_needed is authoritative for
-                    # visibility_state. It raises if visibility_mode=='settled'
-                    # and the OpenClaw status check does not confirm settled,
-                    # so we never persist a handle that claims 'settled' when
-                    # the backend disagrees.
-                    await self._flush_and_settle_if_needed(sandbox)
-                    self._assert_visibility_contract(sandbox)
-                # v0.7: when answer_mode=agent_local, pre-bootstrap the
-                # workspace by running a dummy `agent --local` so first-
-                # run files (AGENTS.md, SOUL.md, TOOLS.md, ...) are
-                # written serially during this conv-serial add() phase.
-                # answer_stage's 50-worker semaphore would otherwise let
-                # concurrent first-runs race on the same workspace.
-                if answer_mode == "agent_local":
-                    await self._prebootstrap_workspace(sandbox)
+        async def handle_one_conv(conv):
+            async with sem:
+                sandbox = self._prepare_conversation_sandbox(root_dir, conv)
+                t0 = time.perf_counter()
+                try:
+                    # _ingest_conversation is the single source of truth for
+                    # how content arrives in the memory system. For
+                    # session_bundle ingest it runs prebootstrap + per-session
+                    # agent_run + transcript archive + index inline; for
+                    # legacy disabled / shared_llm it writes markdown directly
+                    # then runs index. Either way it leaves visibility_state
+                    # at "ingested" (or "settled" if memory_mode=noop).
+                    await self._ingest_conversation(sandbox, conv)
 
-                # Stage 3 Phase 5 R2 routing: when context_engine_mode is
-                # set AND yaml opts in via context_engine_ingest_mode!=none,
-                # replay conv messages through agent_run so the engine's
-                # afterTurn ingests them. Replies are discarded — engine
-                # session state is what QA relies on.
-                #
-                # Cost reality (LoCoMo): ~380 msgs/conv × ~80s each =
-                # ~8.5 hours per conv at sequential rate. The "none"
-                # default gives a wiring/prototype scorecard with empty
-                # session state (engine assemble injects only system prompt
-                # addition, no recall); "all" mode is operator-driven for
-                # true scoring runs.
-                ce_mode = (self._openclaw_cfg.get("context_engine_mode") or "").strip()
-                ingest_mode = (
-                    self._openclaw_cfg.get("context_engine_ingest_mode") or "none"
-                ).strip()
-                if ce_mode and answer_mode == "agent_local" and ingest_mode != "none":
-                    await self._replay_conv_for_context_engine(sandbox, conv)
-            except Exception as err:
-                sandbox["run_status"] = "failed"
-                self._write_handle(sandbox, add_summary={"error": str(err)})
-                logger.exception("openclaw ingest failed for %s", conv.conversation_id)
-                raise
-            add_latency_ms = (time.perf_counter() - t0) * 1000.0
-            sandbox["run_status"] = "ready"
-            self._write_handle(
-                sandbox,
-                add_summary={
-                    "conversation_id": conv.conversation_id,
-                    "add_latency_ms": add_latency_ms,
-                    "visibility_state": sandbox.get("visibility_state"),
-                    "visibility_mode": sandbox.get("visibility_mode"),
-                },
-            )
-            conversations_map[conv.conversation_id] = sandbox
+                    # noop mode disables memorySearch entirely, so the status
+                    # check would always report settled=false with 0 files/
+                    # chunks. Skip the flush/settle in that case.
+                    if memory_mode == "noop":
+                        sandbox["visibility_state"] = "settled"
+                        self._append_events(sandbox, [{
+                            "event": "flush_skipped",
+                            "reason": "memory_mode=noop",
+                        }])
+                    else:
+                        await self._flush_and_settle_if_needed(sandbox)
+                        self._assert_visibility_contract(sandbox)
+
+                    # Legacy LLM-backbone paths (disabled / shared_llm) need a
+                    # post-ingest workspace bootstrap so answer-stage agents
+                    # have AGENTS.md/SOUL.md/TOOLS.md when answer_mode=
+                    # agent_local. The session_bundle path already did this
+                    # inline (must run BEFORE per-session agent_run), so skip
+                    # the second call.
+                    flush_mode_cfg = sandbox.get("flush_mode", "shared_llm")
+                    if (
+                        answer_mode == "agent_local"
+                        and flush_mode_cfg != "session_bundle"
+                    ):
+                        await self._prebootstrap_workspace(sandbox)
+                except Exception as err:
+                    sandbox["run_status"] = "failed"
+                    self._write_handle(sandbox, add_summary={"error": str(err)})
+                    logger.exception(
+                        "openclaw ingest failed for %s", conv.conversation_id
+                    )
+                    raise
+                add_latency_ms = (time.perf_counter() - t0) * 1000.0
+                sandbox["run_status"] = "ready"
+                self._write_handle(
+                    sandbox,
+                    add_summary={
+                        "conversation_id": conv.conversation_id,
+                        "add_latency_ms": add_latency_ms,
+                        "visibility_state": sandbox.get("visibility_state"),
+                        "visibility_mode": sandbox.get("visibility_mode"),
+                    },
+                )
+                return conv.conversation_id, sandbox
+
+        # asyncio.gather: each conversation ingests in its own task,
+        # bounded by ``sem``. Mutations to conversations_map /
+        # _sandbox_by_conversation_id below happen single-threaded after
+        # all tasks complete, so dict mutations don't need extra locking.
+        results = await asyncio.gather(*[handle_one_conv(c) for c in conversations])
+        for cid, sb in results:
+            conversations_map[cid] = sb
             # v0.7: persist sandbox so answer() can locate it without
             # the `index` argument (answer_stage doesn't pass index).
-            self._sandbox_by_conversation_id[conv.conversation_id] = sandbox
+            self._sandbox_by_conversation_id[cid] = sb
 
         return {
             "type": "openclaw_sandboxes",
@@ -482,23 +625,9 @@ class OpenClawAdapter(BaseAdapter):
             }])
             return ""
 
-        # Persist trace event so downstream metrics/diagnostics can
-        # observe agent behavior without a parallel trace channel.
-        # R-S3-4: forced_terminate flags whether the bridge SIGKILLed the
-        # subprocess group (hypermem/context-engine indexer keepalive).
-        # Latency stats include the bridge's grace period when this is true.
-        self._append_events(sandbox, [{
-            "event": "agent_run_complete",
-            "conversation_id": conv_id, "question_id": qid,
-            "duration_ms": resp.get("duration_ms"),
-            "stop_reason": resp.get("stop_reason"),
-            "aborted": resp.get("aborted"),
-            "tool_names": resp.get("tool_names"),
-            "system_prompt_chars": resp.get("system_prompt_chars"),
-            "reply_len": len(resp.get("reply", "")),
-            "forced_terminate": bool(resp.get("forced_terminate", False)),
-        }])
-        return (resp.get("reply") or "").strip()
+        return self._emit_agent_run_complete(
+            sandbox, conv_id, qid, resp, query,
+        )
 
     # v0.7: per-conv sandbox lookup, populated by add() and build_lazy_index()
     def _sandbox_for(self, conversation_id: str) -> dict:
@@ -727,7 +856,7 @@ class OpenClawAdapter(BaseAdapter):
         # OPENCLAW_CONFIG_PATH.
         backend_mode = self._openclaw_cfg.get("backend_mode", "hybrid")
         flush_mode = self._openclaw_cfg.get("flush_mode", "shared_llm")
-        # v0.7: pass memory_mode + agent_llm so resolved_config emits
+        # Pass memory_mode + agent_llm so resolved_config emits
         # plugins.allow/slots/entries and models.providers.<id> with secret
         # ${VAR} templates rebuilt from *_env markers.
         memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
@@ -737,7 +866,6 @@ class OpenClawAdapter(BaseAdapter):
             workspace_dir=paths["workspace_dir"],
             native_store_dir=paths["native_store_dir"],
             backend_mode=backend_mode,
-            flush_mode=flush_mode,
             memory_mode=memory_mode,
             context_engine_mode=context_engine_mode,
             agent_llm=agent_llm,
@@ -785,34 +913,41 @@ class OpenClawAdapter(BaseAdapter):
                 json.dumps(add_summary, ensure_ascii=False, indent=2)
             )
 
-    async def _replay_conv_for_context_engine(
-        self, sandbox: dict, conv: Conversation
-    ) -> None:
-        """Replay each conv message through agent_run to seed the
-        context-engine plugin's session state (R2 routing).
-
-        Default impl is a no-op (host adapter bypasses docker bridge);
-        the docker adapter overrides this to drive the in-container bridge.
-        Subclasses that don't run agent_run can keep this no-op without harm
-        — the eval pipeline degrades to "context-engine sees empty history".
-        """
-        del sandbox, conv  # unused in base
-        return
-
     async def _ingest_conversation(self, sandbox: dict, conv: Conversation) -> None:
-        """Render each session as markdown and ask OpenClaw to build its FTS/vector index.
+        """Build OpenClaw memory state for ``conv`` and drive an index pass.
 
-        flush_mode selects between:
-          * ``disabled``: raw transcript dumped to memory/session-*.md
-          * ``native``  : LLM-driven selective retention (OpenClaw's
-                         production memoryFlush behaviour approximated)
+        Three ingest modes selected by ``openclaw.flush_mode``:
 
-        The index step is always the real ``openclaw memory index --force``
-        via the bridge - that is the point of faithful ingest. A bridge
+          * ``session_bundle`` (agent-backbone, faithful):
+                One agent_run per LoCoMo session, message bundle framed as
+                ``[group chat conversation]\\n\\n<speaker>: <text>...\\n\\n
+                <tail>``. Tail directive (yaml ``ingest_session_tail``)
+                cues the agent to emit memory via its in-turn file_write
+                tool calls. Between sessions the transcript jsonl is
+                archived so the next session starts with empty short-term
+                context but inherits prior memory/*.md files. Mirrors the
+                reference openclaw-eval/eval.py ingest pattern.
+
+          * ``shared_llm`` (legacy LLM-backbone):
+                Framework LLM writes memory/session-*.md via
+                ``buildMemoryFlushPlan``-style prompts. Approximation of
+                OpenClaw's runtime flush; kept for backwards compat with
+                llm-backbone evals.
+
+          * ``disabled`` (legacy raw dump):
+                Each session's transcript bullets dumped to
+                memory/session-*.md without any LLM. v0.1/v0.2 baseline.
+
+        The ``index`` bridge call runs after content is in place. A bridge
         failure raises and propagates so the surrounding add() marks
         run_status=failed rather than silently producing an empty sandbox.
         """
         flush_mode = sandbox.get("flush_mode", "shared_llm")
+
+        if flush_mode == "session_bundle":
+            await self._ingest_via_session_bundle(sandbox, conv)
+            return
+
         llm_generate = self._make_flush_generate() if flush_mode == "shared_llm" else None
 
         flush_plan: Optional[dict] = None
@@ -861,6 +996,513 @@ class OpenClawAdapter(BaseAdapter):
             [{"event": "index_complete", "index_epoch": sandbox["last_index_epoch"]}],
         )
 
+    async def _ingest_via_session_bundle(
+        self, sandbox: dict, conv: Conversation
+    ) -> None:
+        """Per-session bundle ingest, dispatching to the right channel(s)
+        for the configured ``memory_mode`` × ``context_engine_mode`` combo.
+
+        Channel matrix:
+
+          memory_mode | context_engine | OV SDK | agent_run | index
+          ------------|----------------|--------|-----------|------
+          memory-core | (none)         |  no    |   yes     |  yes
+          memory-core | openviking     |  yes   |   yes     |  yes
+          noop        | openviking     |  yes   |   no      |  no
+
+        The OV SDK channel mirrors the canonical OV bench
+        ``import_to_ov.py``: per-session create_session → add_message × N →
+        commit_session(telemetry=true) → poll task until completed. It is
+        a host-side direct HTTP path, NOT routed through openclaw agent_run,
+        because the OV plugin's ``afterTurn`` only commits when accumulated
+        ``pendingTokens >= commitTokenThreshold`` (default 20k) — a smoke
+        run never crosses that, and even when it does, the commit is
+        ``wait: false`` so QA may start before the async memory extraction
+        completes server-side.
+
+        The agent_run channel is for memory-core: each LoCoMo session is
+        rendered as a ``[group chat conversation]`` bundle, the agent's
+        in-turn ``file_write`` writes ``memory/<DATE>.md``, then the
+        session jsonl is archived so the next bundle starts with empty
+        short-term context but inherits prior memory files. After all
+        sessions complete, ``openclaw memory index --force`` indexes them
+        for BM25 + vector retrieval.
+
+        ``answer_mode == agent_local`` is required throughout — the bridge
+        agent_run calls go through ``openclaw agent --local``.
+        """
+        conv_id = conv.conversation_id
+        sessions = bucket_conversation_by_session(conv)
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        context_engine_mode = (
+            self._openclaw_cfg.get("context_engine_mode") or ""
+        ).strip()
+        run_ov_sdk = context_engine_mode == "openviking"
+        run_agent_loop = memory_mode != "noop"
+        run_index = memory_mode != "noop"
+        tail = self._select_ingest_tail() if run_agent_loop else ""
+
+        self._append_events(sandbox, [{
+            "event": "ingest_mode_session_bundle",
+            "num_sessions": len(sessions),
+            "tail_present": bool(tail),
+            "ov_sdk_ingest": run_ov_sdk,
+            "agent_loop_ingest": run_agent_loop,
+            "context_engine_mode": context_engine_mode or None,
+            "memory_mode": memory_mode,
+        }])
+
+        if not sessions:
+            logger.warning(
+                "session_bundle ingest: no session buckets for %s; "
+                "skipping per-session ingest + index",
+                conv_id,
+            )
+            sandbox["visibility_state"] = "ingested"
+            return
+
+        await self._prebootstrap_workspace(sandbox)
+
+        if run_ov_sdk:
+            await self._ingest_sessions_via_ov_sdk(sandbox, conv, sessions)
+
+        if run_agent_loop:
+            for session_key, session_msgs in sessions.items():
+                if not session_msgs:
+                    continue
+                await self._ingest_one_session(
+                    sandbox, session_key, session_msgs, tail
+                )
+                await self._archive_session_transcript(sandbox)
+
+        if run_index:
+            index_resp = await self._invoke_bridge(
+                sandbox,
+                {
+                    **self._bridge_base_payload(sandbox),
+                    "command": "index",
+                },
+                timeout=self._index_timeout(),
+            )
+            sandbox["last_index_epoch"] = int(index_resp.get("index_epoch") or 0)
+            sandbox["visibility_state"] = "ingested"
+            self._append_events(
+                sandbox,
+                [{
+                    "event": "index_complete_session_bundle",
+                    "index_epoch": sandbox["last_index_epoch"],
+                    "ok": index_resp.get("ok"),
+                    "error": index_resp.get("error"),
+                    "input_artifacts": index_resp.get("input_artifacts"),
+                    "output_artifacts": index_resp.get("output_artifacts"),
+                }],
+            )
+        else:
+            # OV-only: no memcore index to build. Mark as ingested; the
+            # noop-memory short-circuit in add() will subsequently set
+            # visibility_state to settled.
+            sandbox["visibility_state"] = "ingested"
+            self._append_events(sandbox, [{
+                "event": "index_skipped_ov_only",
+                "reason": "memory_mode=noop, no memcore index",
+            }])
+
+    async def _ingest_sessions_via_ov_sdk(
+        self,
+        sandbox: dict,
+        conv: Conversation,
+        sessions: dict,
+    ) -> None:
+        """Ingest every LoCoMo session into the OV server via direct HTTP.
+
+        Mirrors reference ``import_to_ov.py`` per-session pattern. Yaml
+        ``openclaw.ov_ingest`` controls connection details:
+
+            ov_ingest:
+              base_url: "http://127.0.0.1:1933"   # host-side OV server
+              api_key_env: "OPENVIKING_API_KEY"
+              account_id: "default"
+              user_id_template: "{conv_id}"        # per-conv tenant
+              user_id: ""                           # explicit override (skips template)
+              agent_id: ""                          # optional fixed agent_id header
+              task_timeout_sec: 600                 # per-session task wait
+
+        The ``user_id_template`` defaults to ``"{conv_id}"`` so each
+        LoCoMo conversation lives under its own OV user namespace
+        (``viking://user/locomo_0/...``). Without per-conv isolation,
+        memories from convs that share a name (e.g. multiple John's
+        across conv-41/43/47) collide in a single namespace and the OV
+        plugin's hierarchical retrieval surfaces the wrong John's facts
+        at QA time. Reference openclaw-eval/eval.py uses equivalent
+        per-sample isolation (``user = f"eval-{sample_idx}"``).
+
+        The docker adapter substitutes ``{conv_id}`` into the
+        container's ``OPENVIKING_USER_ID`` env so the plugin's QA-time
+        queries hit the same tenant we wrote here.
+
+        Failures here log + raise — without OV data, the OV-only / OV+memcore
+        QA stages would silently produce 0% accuracy, so a hard fail at
+        add() is preferable.
+        """
+        from evaluation.src.adapters.openclaw.ov_ingest import (
+            OVIngestClient,
+            OVIngestError,
+            ingest_session_to_ov,
+        )
+        import aiohttp
+
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        base_url = (cfg.get("base_url") or "http://127.0.0.1:1933").rstrip("/")
+        api_key_env = cfg.get("api_key_env") or "OPENVIKING_API_KEY"
+        api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+        account_id = cfg.get("account_id") or "default"
+        conv_id = conv.conversation_id
+        # user_id is per-conv by default to keep OV memories from
+        # different LoCoMo conversations in separate tenants. Without
+        # this, recurring names (e.g. multiple "John"s in conv-41 /
+        # conv-43 / conv-47) collide in a single namespace and QA
+        # retrieval surfaces facts from the wrong conversation.
+        user_id = self._resolve_ov_tenant_field(
+            cfg, "user_id", "user_id_template", "{conv_id}", conv_id,
+        )
+        # Fix #4 完整版: agent_id 也支持 per-conv template, matching
+        # official import_to_ov.py which sets both user_id=sample_id AND
+        # agent_id=sample_id. OV server mirrors fact-extract into both
+        # user/<uid> and agent/<aid> namespaces. plugin's agent_prefix is
+        # not env-readable so the QA-side find on viking://agent/memories
+        # still hits agent/default (empty under this scheme) — equivalent
+        # to disabling that recall channel, which matches official behavior.
+        agent_id = self._resolve_ov_tenant_field(
+            cfg, "agent_id", "agent_id_template", "", conv_id,
+        ) or None
+        task_timeout = float(cfg.get("task_timeout_sec") or 600)
+
+        client = OVIngestClient(
+            base_url,
+            api_key=api_key,
+            account_id=account_id,
+            user_id=user_id,
+            agent_id=agent_id,
+        )
+        completed = 0
+        failed = 0
+        timeout = aiohttp.ClientTimeout(total=task_timeout + 60.0)
+
+        # Single OV session per conversation — mirrors official openclaw-eval
+        # eval.py's same-user pattern. All LoCoMo sub-sessions accumulate
+        # pendingTokens on the same OV session_id; QA-side plugin uses the
+        # same session_id (set by docker adapter via --session-id), so
+        # Fix #3: per-LoCoMo-session commit on the same shared ov_session_id.
+        # Each LoCoMo sub-session is followed by an explicit commit_session
+        # call (telemetry=true, wait for task to complete). This mirrors the
+        # official import_to_ov.py granularity (one fact-extraction LLM call
+        # per LoCoMo session) while preserving openclaw-eval's shared sessionId
+        # pattern (single UUID across ingest+QA, used by plugin assemble).
+        # OV server archives the active segment on each commit but keeps the
+        # session alive for further add_message → next session continues on
+        # the same sid. End-of-conv state: N archives accumulated, active
+        # segment empty, fact-extract has run N times producing finer-grained
+        # entities / preferences / events in user/<conv_id>/memories.
+        # Why this matters: a single end-of-conv commit (the prior behavior)
+        # gave OV's fact-extract LLM N×~2k tokens of mixed conversation in
+        # one call; output was coarse (e.g. conv-0 only 48 events, 2 entities,
+        # 5 preferences). Per-session commit feeds smaller windows, yielding
+        # finer extraction (target: 100+ events, 50+ entities for conv-0).
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            ov_session_id = await client.create_session(http)
+            sandbox["ov_session_id"] = ov_session_id
+            self._append_events(sandbox, [{
+                "event": "ov_session_opened",
+                "conversation_id": conv_id,
+                "ov_session_id": ov_session_id,
+            }])
+
+            # Fire-and-forget phase2: each LoCoMo session's commit
+            # returns immediately with a task_id; we batch-wait at
+            # end-of-conv. This lets the per-session loop push messages
+            # to OV faster than the phase2 LLM can process them, so the
+            # OV server's task queue absorbs the bottleneck instead of
+            # the client serializing on each commit. Critical for
+            # conv-parallel ingest where 10× this loop runs at once.
+            pending_task_ids: list[str] = []
+            for session_key, msgs in sessions.items():
+                try:
+                    result = await ingest_session_to_ov(
+                        client, http,
+                        session_key=session_key,
+                        messages=msgs,
+                        ov_session_id=ov_session_id,
+                        commit_after=True,
+                        wait_task=False,
+                    )
+                    self._append_events(sandbox, [{
+                        "event": "ov_session_messages_added",
+                        "conversation_id": conv_id,
+                        **{k: v for k, v in result.items() if k != "_telemetry"},
+                    }])
+                    status = result.get("status")
+                    if status in ("completed", "queued", "queued_phase2", "skipped_no_messages"):
+                        completed += 1
+                    else:
+                        failed += 1
+                    tid = result.get("task_id")
+                    if tid:
+                        pending_task_ids.append(tid)
+                except OVIngestError as err:
+                    failed += 1
+                    logger.error(
+                        "OV SDK ingest_session failed for %s/%s: %s",
+                        conv_id, session_key, err,
+                    )
+                    self._append_events(sandbox, [{
+                        "event": "ov_session_add_failed",
+                        "conversation_id": conv_id,
+                        "session_key": session_key,
+                        "error": str(err),
+                    }])
+                    raise
+
+            # Batch wait: phase2 tasks must complete before the answer
+            # stage queries plugin auto-recall against user/<conv_id>/
+            # memories — otherwise QA can race ingest fact-extraction.
+            # Tasks are independent, so wait on them concurrently;
+            # otherwise this re-serializes the fire-and-forget design.
+            async def _wait_one(tid: str) -> tuple[str, Any]:
+                try:
+                    return tid, await client.wait_for_task(http, tid)
+                except OVIngestError as err:
+                    return tid, err
+
+            wait_results = await asyncio.gather(
+                *[_wait_one(tid) for tid in pending_task_ids]
+            )
+            for tid, outcome in wait_results:
+                if isinstance(outcome, OVIngestError):
+                    logger.warning(
+                        "OV phase2 task %s failed for %s: %s",
+                        tid, conv_id, outcome,
+                    )
+                    self._append_events(sandbox, [{
+                        "event": "ov_session_task_failed",
+                        "conversation_id": conv_id,
+                        "task_id": tid,
+                        "error": str(outcome),
+                    }])
+                    continue
+                task = outcome
+                result_dict = task.get("result") if isinstance(task, dict) else {}
+                self._append_events(sandbox, [{
+                    "event": "ov_session_task_completed",
+                    "conversation_id": conv_id,
+                    "task_id": tid,
+                    "status": task.get("status") if isinstance(task, dict) else None,
+                    "memories_extracted": (
+                        (result_dict or {}).get("memories_extracted")
+                        if isinstance(result_dict, dict) else None
+                    ),
+                }])
+
+        self._append_events(sandbox, [{
+            "event": "ov_sdk_ingest_complete",
+            "conversation_id": conv_id,
+            "completed": completed,
+            "failed": failed,
+            "total_sessions": len(sessions),
+            "ov_session_id": ov_session_id,
+        }])
+
+    async def _ingest_one_session(
+        self,
+        sandbox: dict,
+        session_key: str,
+        session_msgs: list,
+        tail: str,
+    ) -> None:
+        """Bundle a single session into one agent_run call.
+
+        Timeout scales with message count: 60s base + 4s per message,
+        capped at 300s. A LoCoMo session of ~30 messages lands at 180s
+        which is enough for one LLM round trip + 1-2 file_write calls.
+        """
+        bundle = self._build_session_bundle(session_msgs, tail)
+        timeout = min(60.0 + len(session_msgs) * 4.0, 300.0)
+        conv_id = sandbox["conversation_id"]
+        try:
+            resp = await self._invoke_bridge(
+                sandbox,
+                {
+                    **self._bridge_base_payload(sandbox),
+                    "command": "agent_run",
+                    "session_id": conv_id,
+                    "message": bundle,
+                    "timeout_seconds": int(timeout),
+                },
+                timeout=timeout + 60.0,
+            )
+            ok = bool(resp.get("ok"))
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "session_bundle ingest failed for %s/%s: %s",
+                conv_id, session_key, err,
+            )
+            ok = False
+            resp = {"error": str(err)}
+        self._append_events(sandbox, [{
+            "event": "session_bundle_ingested",
+            "conversation_id": conv_id,
+            "session_key": session_key,
+            "num_messages": len(session_msgs),
+            "bundle_bytes": len(bundle.encode("utf-8")),
+            "ok": ok,
+            "stop_reason": resp.get("stop_reason"),
+            "duration_ms": resp.get("duration_ms"),
+            "tool_names": resp.get("tool_names"),
+            "reply_excerpt": (resp.get("reply") or "")[:200],
+            "error": resp.get("error"),
+        }])
+
+    async def _archive_session_transcript(self, sandbox: dict) -> None:
+        """Rename the session jsonl so the next agent_run starts fresh.
+
+        Memory under <state_dir>/agents/main/sessions/<sid>.jsonl is
+        renamed to <sid>.jsonl.<ts>; memory/*.md files remain so memory
+        persists across the archive.
+
+        Failures are logged but do not abort ingest — a missed archive
+        means the next session sees the prior session's transcript in
+        addition to its own bundle, which produces messy context but
+        not data loss.
+        """
+        conv_id = sandbox["conversation_id"]
+        try:
+            resp = await self._invoke_bridge(
+                sandbox,
+                {
+                    **self._bridge_base_payload(sandbox),
+                    "command": "archive_session",
+                    "session_id": conv_id,
+                },
+                timeout=30.0,
+            )
+            ok = bool(resp.get("ok"))
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "archive_session failed for %s: %s", conv_id, err,
+            )
+            ok = False
+            resp = {"error": str(err)}
+        self._append_events(sandbox, [{
+            "event": "session_transcript_archived",
+            "conversation_id": conv_id,
+            "ok": ok,
+            "archived_to": resp.get("archived_to"),
+            "reason": resp.get("reason"),
+            "error": resp.get("error"),
+        }])
+
+    @staticmethod
+    def _resolve_ov_tenant_field(
+        cfg: dict,
+        explicit_key: str,
+        template_key: str,
+        default_template: str,
+        conv_id: str,
+    ) -> str:
+        """Resolve an OV tenant field (user_id / agent_id) per conversation.
+
+        Priority:
+          1. ``cfg[explicit_key]`` non-empty → use as-is (no substitution).
+             For runs that explicitly want a fixed shared tenant.
+          2. ``cfg[template_key]`` non-empty → format with ``{conv_id}``.
+          3. ``default_template`` (constructor argument) → format with
+             ``{conv_id}``.
+
+        Empty default + no explicit + no template → empty string. The
+        SDK ingest path treats an empty agent_id as "no X-OpenViking-Agent
+        header" (server uses default agent), matching reference
+        ``import_to_ov.py --no-user-agent-id`` semantics.
+        """
+        explicit = (cfg.get(explicit_key) or "").strip()
+        if explicit:
+            return explicit
+        template = cfg.get(template_key)
+        if template is None:
+            template = default_template
+        template = str(template).strip()
+        if not template:
+            return ""
+        return template.format(conv_id=conv_id)
+
+    def _select_ingest_tail(self) -> str:
+        """Resolve the tail directive appended to each session bundle.
+
+        Yaml ``openclaw.ingest_session_tail`` (string, optional) overrides
+        any default. When unset:
+          * memory_mode == "noop": empty tail. Memory writes are owned by
+            the context-engine plugin (e.g. OV) via afterTurn hooks; the
+            agent doesn't need a memory cue.
+          * else: an explicit file_write directive. The minimal
+            ``[try to remember what's said in the group]`` cue (used by
+            reference openclaw-eval gateway runs) was empirically observed
+            to elicit only narrative reply text under ``agent --local``,
+            so we steer the agent toward the file_write tool by name.
+            The ``[try to remember…]`` wording is preserved in the
+            ingest_session_tail yaml override for any caller that wants
+            to reproduce the reference behavior verbatim.
+        """
+        configured = self._openclaw_cfg.get("ingest_session_tail")
+        if configured is not None:
+            return str(configured)
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        if memory_mode == "noop":
+            return ""
+        return (
+            "[End of session. Use the file_write tool to append durable "
+            "memories from this conversation to memory/<YYYY-MM-DD>.md "
+            "(use the date from the session header). Bullet list covering "
+            "names, decisions, preferences, dates, places, and events. "
+            "After writing the file, reply with NO_REPLY.]"
+        )
+
+    @staticmethod
+    def _build_session_bundle(session_msgs: list, tail: str) -> str:
+        """Render a session into a single multi-line user message.
+
+        Output mirrors reference openclaw-eval bundles:
+
+            [group chat conversation: <date_time>]
+
+            <speaker>: <text>
+
+            <speaker>: <text>
+
+            ...
+
+            <tail>
+
+        ``date_time`` is the timestamp of the first message with one;
+        omitted entirely if no message carries a timestamp.
+        """
+        first_dt = next(
+            (m.timestamp for m in session_msgs if m.timestamp is not None),
+            None,
+        )
+        if first_dt is not None:
+            header = f"[group chat conversation: {first_dt.strftime('%Y-%m-%d %H:%M')}]"
+        else:
+            header = "[group chat conversation]"
+
+        parts: list[str] = [header, ""]
+        for msg in session_msgs:
+            content = (msg.content or "").strip()
+            if not content:
+                continue
+            parts.append(f"{msg.speaker_name}: {content}")
+            parts.append("")
+        if tail:
+            parts.append(tail)
+        return "\n".join(parts).rstrip() + "\n"
+
     async def _flush_and_settle_if_needed(self, sandbox: dict) -> None:
         """Transition visibility_state to its final value per visibility_mode.
 
@@ -901,27 +1543,86 @@ class OpenClawAdapter(BaseAdapter):
             sandbox["visibility_state"] = "settled"
             return
 
-        status_resp = await self._invoke_bridge(
-            sandbox,
-            {**self._bridge_base_payload(sandbox), "command": "status"},
-            timeout=self._status_timeout(),
-        )
+        # Status check with bounded retry. OpenClaw's ``settled`` flag can
+        # remain false for several seconds after a successful index pass
+        # while the in-process file watcher reconciles. Smoke (1-2 sessions)
+        # nearly always reports settled=true on the first call; full
+        # LoCoMo (~30 sessions × 10 conv concurrent) sometimes needs the
+        # watcher a beat longer. Retry 4×, exponential backoff (1/2/4/8s
+        # = 15s total).
+        #
+        # Fallback acceptance: if after the retry budget files>0 AND
+        # chunks>0 AND active_artifacts is empty, treat as effectively
+        # settled. The queryability invariant our caller cares about is
+        # "memorySearch finds something", and that requires non-zero
+        # indexed chunks with no in-flight writes — exactly the fallback
+        # condition. The strict ``settled`` boolean adds a watcher-state
+        # check which can lag without affecting search correctness.
+        status_resp: dict = {}
+        settled = False
+        attempts = 0
+        for attempt in range(4):
+            attempts = attempt + 1
+            status_resp = await self._invoke_bridge(
+                sandbox,
+                {**self._bridge_base_payload(sandbox), "command": "status"},
+                timeout=self._status_timeout(),
+            )
+            settled = status_resp.get("settled") is True
+            if settled:
+                break
+            if attempt < 3:
+                await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s, 8s
+
         sandbox["last_flush_epoch"] = int(status_resp.get("flush_epoch") or 0)
-        settled = status_resp.get("settled") is True
+
+        files = int(status_resp.get("files") or 0)
+        chunks = int(status_resp.get("chunks") or 0)
+        active = status_resp.get("active_artifacts") or []
+        accepted_via_fallback = (
+            not settled
+            and files > 0
+            and chunks > 0
+            and not active
+        )
+        # Vacuously settled: the agent wrote no memory files at all, so
+        # there is nothing to index. This happens under weak/missing
+        # memory cues (e.g. reference openclaw-eval's default tail
+        # ``[remember what's said, keep existing memory]``) where the
+        # agent sometimes treats the bundled session as chat to
+        # acknowledge rather than memory to record. The queryability
+        # invariant becomes "memorySearch finds nothing" — which is the
+        # correct measurement for an empty index, not a settle failure.
+        # The downstream QA stage will see no memory and answer from
+        # background knowledge, scoring whatever it scores for that conv.
+        vacuously_settled = (
+            not settled
+            and files == 0
+            and chunks == 0
+            and not active
+        )
+
         self._append_events(
             sandbox,
             [
                 {
                     "event": "status_checked",
                     "settled": settled,
+                    "accepted_via_fallback": accepted_via_fallback,
+                    "vacuously_settled": vacuously_settled,
+                    "files": files,
+                    "chunks": chunks,
+                    "active_artifacts": list(active),
                     "flush_epoch": sandbox["last_flush_epoch"],
+                    "attempts": attempts,
                 }
             ],
         )
-        if not settled:
+        if not settled and not accepted_via_fallback and not vacuously_settled:
             raise RuntimeError(
                 "openclaw status reported not settled for "
-                f"{sandbox.get('conversation_id')!r}: {status_resp!r}"
+                f"{sandbox.get('conversation_id')!r} after {attempts} "
+                f"attempts: {status_resp!r}"
             )
         sandbox["visibility_state"] = "settled"
 

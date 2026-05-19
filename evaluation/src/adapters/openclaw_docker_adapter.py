@@ -17,7 +17,9 @@ What this subclass changes:
     /eval/openclaw_eval_bridge.mjs` instead of host node, so it actually
     runs inside the configured docker image (with memory plugin baked in)
   - Workspace is mounted volume; resolved config is written to mounted path
-  - cleanup() stops + removes containers
+  - cleanup() stops containers (``--rm`` by default removes them after stop).
+    Optional: dump ``docker logs`` into each conversation workspace, and/or
+    keep the container without ``--rm`` for post-mortem ``docker logs``/exec.
 
 Key design decisions (v0.7 §4.4 sandbox lookup applies same way; sandboxes
 just gain a docker_container_id / volume_path field).
@@ -28,21 +30,12 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import time
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
-from evaluation.src.adapters.openclaw.per_qa_isolation import (
-    QA_STATES_DIRNAME,
-    SNAPSHOT_DIRNAME,
-    container_state_dir,
-    discard_qa_state,
-    freeze_state,
-    resolve_isolation_mode,
-    restore_state_for_qa,
-)
 from evaluation.src.adapters.openclaw.runtime import (
     BridgeError,
     BridgeTimeout,
@@ -52,6 +45,10 @@ from evaluation.src.core.data_models import Conversation
 
 
 logger = logging.getLogger(__name__)
+
+# Written under each conversation workspace before ``docker stop`` so logs
+# survive ``docker run --rm`` (which deletes the container after stop).
+EVAL_DOCKER_CONTAINER_LOG = "eval_docker_container.log"
 
 
 @register_adapter("openclaw-docker")
@@ -70,7 +67,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._docker_cfg: dict = cfg
         self._image: str = cfg["image"]
         self._max_concurrent: int = int(cfg.get("max_concurrent_containers", 4))
-        self._mem_limit: str = cfg.get("mem_limit", "2g")
+        raw_mem_limit = cfg.get("mem_limit", "2g")
+        self._mem_limit: str = str(raw_mem_limit).strip() if raw_mem_limit is not None else ""
         self._docker_network: str = cfg.get("network", "bridge")
         self._exec_timeout: int = int(
             cfg.get("per_rpc_timeout_seconds",
@@ -84,16 +82,17 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # Limit concurrent docker run invocations during prepare/add.
         self._spawn_sem: Optional[asyncio.Semaphore] = None
 
-        # Cached per-QA isolation mode. Resolved once from config; both
-        # docker_cfg and openclaw_cfg are read-only post-init.
-        self._isolation_mode_cache: str = resolve_isolation_mode(
-            self._docker_cfg.get("per_qa_isolation"),
-            self._openclaw_cfg.get("context_engine_mode"),
+        # After the run: capture ``docker logs`` to the mounted workspace so
+        # operators can inspect stdout/stderr without attaching during the run.
+        self._capture_container_logs: bool = bool(
+            cfg.get("capture_container_logs", True)
+        )
+        # When False, omit ``docker run --rm`` so the container remains after
+        # ``docker stop`` until ``docker rm`` (useful with ``docker logs``).
+        self._remove_container_on_stop: bool = bool(
+            cfg.get("remove_container_on_stop", True)
         )
 
-        # Per-conversation freeze locks for the snapshot critical section.
-        # Keyed by conv_id; created lazily in _ensure_state_frozen.
-        self._freeze_locks: dict[str, asyncio.Lock] = {}
 
     # ---------------------------------------------------- container lifecycle
 
@@ -109,23 +108,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         volume_dir = Path(sandbox["workspace_dir"]).resolve()
         volume_dir.mkdir(parents=True, exist_ok=True)
 
+        # OpenClaw resolves a fallback temp dir under /tmp (e.g. /tmp/openclaw-<uid>).
+        # Some slim images ship a root-owned or non-writable /tmp while we run with
+        # ``--user host_uid``; bind-mount a host-writable dir (under the eval workspace)
+        # onto /tmp so bootstrap and logger init can mkdir there.
+        tmp_cfg = self._docker_cfg.get("container_tmp_host_path")
+        if isinstance(tmp_cfg, str) and tmp_cfg.strip():
+            tmp_host = Path(tmp_cfg.strip()).expanduser().resolve()
+        else:
+            tmp_host = volume_dir / ".openclaw-container-tmp"
+        tmp_host.mkdir(parents=True, exist_ok=True)
+
         env_pairs = self._docker_env_for_container(conv_id=conv_id)
 
         # --user matches host UID so the mounted /workspace volume is
         # writable to the container. Without this, files created by host
         # (workspace dirs, openclaw.json after entrypoint render) cannot
         # be read/written by the container's `node` user (uid 1000).
-        cmd = [
-            "docker", "run",
-            "-d",
-            "--rm",
-            "--user", f"{os.getuid()}:{os.getgid()}",
-            "--network", self._docker_network,
-            "--memory", self._mem_limit,
-            "--label", f"eval.run_id={self._run_id or 'unknown'}",
-            "--label", f"eval.conv_id={conv_id}",
-            "-v", f"{volume_dir}:/workspace:rw",
-        ]
+        cmd: list[str] = ["docker", "run", "-d"]
+        if self._remove_container_on_stop:
+            cmd.append("--rm")
+        cmd.extend(
+            [
+                "--user", f"{os.getuid()}:{os.getgid()}",
+                "--network", self._docker_network,
+                "--label", f"eval.run_id={self._run_id or 'unknown'}",
+                "--label", f"eval.conv_id={conv_id}",
+                "-v", f"{volume_dir}:/workspace:rw",
+                "-v", f"{tmp_host}:/tmp:rw",
+            ]
+        )
+        if self._mem_limit:
+            cmd.extend(["--memory", self._mem_limit])
         # Plugins that talk to a host-side service (e.g. evermemos plugin
         # fetching the EverMemOS HTTP API at host's :1995) need
         # host.docker.internal to resolve to the host machine. Docker
@@ -144,8 +158,14 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 cmd.extend(["-e", f"{name}={value}"])
         cmd.append(self._image)
 
-        logger.info("docker run for %s: image=%s volume=%s",
-                    conv_id, self._image, volume_dir)
+        logger.info(
+            "docker run for %s: image=%s volume=%s tmp_bind=%s rm_on_stop=%s",
+            conv_id,
+            self._image,
+            volume_dir,
+            tmp_host,
+            self._remove_container_on_stop,
+        )
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -159,7 +179,119 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             )
         cid = stdout.decode().strip()
         logger.info("container %s started for %s", cid[:12], conv_id)
+        await self._verify_container_alive(cid, conv_id)
         return cid
+
+    async def _verify_container_alive(self, cid: str, conv_id: str) -> None:
+        """Confirm the container is still running shortly after ``docker run``.
+
+        ``docker run -d --rm`` returns as soon as the entrypoint starts,
+        not when it has been alive long enough to be useful. If the
+        entrypoint crashes (config error, OOM at startup, missing env
+        var, plugin install failure) the container exits and ``--rm``
+        garbage-collects it; the caller is left with a cid that points
+        at nothing. The first ``docker exec`` then fails with
+        ``Error response from daemon: No such container: <cid>``, and
+        all retries inherit the same dead id.
+
+        Settle the race by waiting 2.5s, then asking dockerd whether
+        the container is still ``Running``. Failed startups raise
+        BridgeError so ``_spawn_one`` can surface a real error instead
+        of caching a corpse.
+        """
+        await asyncio.sleep(2.5)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "inspect", "-f",
+            "{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}",
+            cid,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise BridgeError(
+                f"container {cid[:12]} for {conv_id!r} vanished "
+                f"within 2.5s of docker run: {stderr.decode()[:200]}"
+            )
+        status_line = stdout.decode().strip()
+        status, exit_code, err = (status_line.split("|", 2) + ["", ""])[:3]
+        if status != "running":
+            raise BridgeError(
+                f"container {cid[:12]} for {conv_id!r} not running 2.5s "
+                f"after start: status={status} exit_code={exit_code} "
+                f"error={err}"
+            )
+
+        # Patch the rendered openclaw.json to enable memoryFlush autoCapture.
+        # The shipped docker image's /eval/entrypoint.sh hardcodes
+        # ``compaction.memoryFlush.enabled = false`` in its jq render
+        # (we fixed openclaw-eval/container/entrypoint.sh on disk to
+        # honor MEMORY_FLUSH_ENABLED env var, but the docker image is
+        # pre-built from an older version). Do the substitution in the
+        # running container so a rebuild is not required to reproduce
+        # OV team's autoCapture-driven memcore writes. No-op when the
+        # config already has enabled=true.
+        await self._patch_memory_flush_enabled(cid, conv_id)
+        await self._patch_streaming_usage_compat(cid, conv_id)
+
+    async def _patch_memory_flush_enabled(self, cid: str, conv_id: str) -> None:
+        """Edit both /workspace/openclaw.json and /workspace/openclaw.docker.json
+        in place to set compaction.memoryFlush.enabled=true.
+
+        Why both: ``entrypoint.sh`` renders ``openclaw.docker.json`` (the
+        file the in-container agent_run actually reads, per
+        ``_arun_bridge_via_docker.config_path``), while ``openclaw.json``
+        is the parent template harness writes earlier. We patch both so
+        whichever path is picked up at QA time sees autoCapture=true.
+
+        Uses ``jq`` (present in the openclaw-eval image).
+        """
+        # Patch both candidate config paths. ``|| true`` per file so a
+        # missing file doesn't fail the whole patch.
+        cmd = (
+            "for f in /workspace/openclaw.docker.json /workspace/openclaw.json; do "
+            "  if [ -f \"$f\" ]; then "
+            "    jq '.agents.defaults.compaction.memoryFlush.enabled = true' \"$f\" "
+            "      > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; "
+            "  fi; "
+            "done"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", cid, "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                "memoryFlush patch failed for %s (cid=%s): %s",
+                conv_id, cid[:12], stderr.decode()[:200],
+            )
+
+    async def _patch_streaming_usage_compat(self, cid: str, conv_id: str) -> None:
+        """Enable Tier-A provider usage (``stream_options.include_usage``).
+
+        Mirrors yaml ``agent_llm.model.compat.supportsUsageInStreaming`` on
+        the config file the bridge actually reads. See
+        ``openclaw.config_patches.STREAMING_USAGE_COMPAT_JQ``.
+        """
+        from evaluation.src.adapters.openclaw.config_patches import (
+            STREAMING_USAGE_COMPAT_JQ,
+            shell_patch_openclaw_configs,
+        )
+
+        cmd = shell_patch_openclaw_configs(STREAMING_USAGE_COMPAT_JQ)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", cid, "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                "streaming usage compat patch failed for %s (cid=%s): %s",
+                conv_id, cid[:12], stderr.decode()[:200],
+            )
 
     def _docker_env_for_container(
         self, conv_id: Optional[str] = None
@@ -183,9 +315,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             memory_plugin_id = "memory-core"
 
         # Compose pairs: explicit ones first, then secret env passthrough.
+        # MEMORY_FLUSH_ENABLED=true matches openclaw's own default (see
+        # /Data3/shutong.shan/openclaw/repo/extensions/memory-core/src/
+        # flush-plan.ts:104 — only ``enabled === false`` disables; absent
+        # or undefined means enabled). Our container entrypoint.sh
+        # defaults to false to preserve legacy session-bundle behavior
+        # where the tail directive drove writes; we now switch to
+        # autoCapture to align with OV team's reference setup and
+        # reproduce the official 35.65% / 52.08% / 51.23% ordering.
         pairs: list[tuple[str, Optional[str]]] = [
             ("MEMORY_PLUGIN_ID", memory_plugin_id),
             ("MEMORY_MODE", memory_mode),
+            ("MEMORY_FLUSH_ENABLED", "true"),
             ("LLM_MODEL", agent_llm.get("model", {}).get("id")
                           or os.environ.get("LLM_MODEL")),
         ]
@@ -199,14 +340,126 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         ce_mode = self._openclaw_cfg.get("context_engine_mode")
         if isinstance(ce_mode, str) and ce_mode.strip():
             pairs.append(("CONTEXT_ENGINE_PLUGIN_ID", ce_mode.strip()))
+
+        # backend_mode -> vector toggle. fts_only disables vector store
+        # so the broken sophnet embedding endpoint isn't called during
+        # `openclaw memory index --force`. Default (no override) leaves
+        # vector enabled to preserve legacy behavior.
+        backend_mode = self._openclaw_cfg.get("backend_mode")
+        if backend_mode == "fts_only":
+            pairs.append(("MEMORY_VECTOR_ENABLED", "false"))
+
         # Pass-through secret + endpoint env vars from process env, only if
         # the yaml whitelist contains them (defense-in-depth: container only
         # ever receives env vars its config explicitly opted into).
+        #
+        # Per-conv OV tenant override: when ``ov_ingest`` is configured AND
+        # we have a conv_id, derive ``OPENVIKING_USER_ID`` /
+        # ``OPENVIKING_AGENT_ID`` from the per-conv template so the OV
+        # plugin inside the container queries the same tenant the host-
+        # side SDK ingest wrote to. Without this, OV memories from all 10
+        # convs collide in a single ``viking://user/eval-1/...`` namespace
+        # and questions about names that recur across convs (e.g. "John"
+        # in conv-41/43/47) hit the wrong conv's facts.
+        ov_ingest_cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        ov_overrides: dict[str, str] = {}
+        if ov_ingest_cfg and conv_id:
+            from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
+            user_id = OpenClawAdapter._resolve_ov_tenant_field(
+                ov_ingest_cfg, "user_id", "user_id_template",
+                "{conv_id}", conv_id,
+            )
+            if user_id:
+                ov_overrides["OPENVIKING_USER_ID"] = user_id
+
         for name in env_vars:
             value = os.environ.get(name)
+            if name in ov_overrides:
+                # Per-conv override wins over host shell env so each
+                # container's OV plugin queries its own tenant.
+                value = ov_overrides[name]
             if value is not None:
                 pairs.append((name, value))
+        # If yaml omitted ``OPENVIKING_USER_ID`` from the env_vars
+        # whitelist but we computed a per-conv override, still inject it
+        # — the override is required for OV tenant alignment even when
+        # the operator forgot to whitelist it explicitly.
+        existing_names = {n for n, _ in pairs}
+        for name, value in ov_overrides.items():
+            if name not in existing_names:
+                pairs.append((name, value))
+        self._normalize_openviking_env_for_container(pairs)
         return pairs
+
+    def _openviking_container_base_url(self, current: str) -> str:
+        """Host-side ``127.0.0.1:port`` is wrong inside Docker; use host gateway."""
+        default = "http://host.docker.internal:1933"
+        if not (current or "").strip():
+            return default
+        try:
+            parsed = urlparse(current.strip())
+            host = (parsed.hostname or "").lower()
+            if host in ("127.0.0.1", "localhost"):
+                port = parsed.port or 1933
+                netloc = f"host.docker.internal:{port}"
+                return urlunparse(
+                    (
+                        parsed.scheme or "http",
+                        netloc,
+                        parsed.path or "",
+                        parsed.params,
+                        parsed.query,
+                        parsed.fragment,
+                    ),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        return current.strip()
+
+    def _normalize_openviking_env_for_container(
+        self, pairs: list[tuple[str, Optional[str]]],
+    ) -> None:
+        """Make OV HTTP reachable from the eval container (bridge → host).
+
+        Common ``.env`` uses ``http://127.0.0.1:1933`` for host-side ingest
+        tools; the OpenClaw plugin inside the container must call
+        ``host.docker.internal`` when ``--add-host=host.docker.internal:host-gateway``
+        is in effect. Also inject a default base URL when unset.
+        """
+        ce_mode = self._openclaw_cfg.get("context_engine_mode")
+        if not (isinstance(ce_mode, str) and ce_mode.strip() == "openviking"):
+            return
+
+        memory_mode = self._openclaw_cfg.get("memory_mode", "memory-core")
+        add_host = bool(
+            self._docker_cfg.get("add_host_gateway", memory_mode == "evermemos")
+        )
+        if not add_host:
+            return
+
+        merged: dict[str, Optional[str]] = dict(pairs)
+        normalized = self._openviking_container_base_url(
+            (merged.get("OPENVIKING_BASE_URL") or "").strip(),
+        )
+        kept = [(n, v) for n, v in pairs if n != "OPENVIKING_BASE_URL"]
+        pairs.clear()
+        pairs.extend(kept)
+        pairs.append(("OPENVIKING_BASE_URL", normalized))
+        if merged.get("OPENVIKING_BASE_URL") != normalized:
+            logger.info(
+                "openviking docker: OPENVIKING_BASE_URL for container set to %r "
+                "(was %r)",
+                normalized,
+                merged.get("OPENVIKING_BASE_URL"),
+            )
+
+        api_key = (merged.get("OPENVIKING_API_KEY") or "").strip()
+        if not api_key:
+            logger.warning(
+                "openviking docker: OPENVIKING_API_KEY is missing or empty in the "
+                "eval process environment; set it to match server.root_api_key "
+                "in ov.conf (see EverOS/env.template)."
+            )
 
     async def _docker_stop_container(self, cid: str) -> None:
         try:
@@ -216,9 +469,84 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
-            # --rm in run flag deletes after stop; no rm needed
+            # With ``docker run --rm``, the container filesystem is deleted
+            # after stop; capture logs before stop when ``capture_container_logs``.
+            # Without ``--rm``, the exited container remains until ``docker rm``.
         except Exception as err:  # noqa: BLE001
             logger.warning("docker stop failed for %s: %s", cid, err)
+
+    async def _dump_container_logs_to_workspace(
+        self, cid: str, workspace_dir: str, conv_id: str
+    ) -> None:
+        """Write merged stdout/stderr of the eval container to the host workspace."""
+        dest = Path(workspace_dir).resolve() / EVAL_DOCKER_CONTAINER_LOG
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "logs", "--timestamps", cid,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if stdout:
+                dest.write_bytes(stdout)
+            if proc.returncode != 0:
+                logger.warning(
+                    "docker logs exit=%s for conv=%s cid=%s; wrote %d bytes to %s",
+                    proc.returncode,
+                    conv_id,
+                    cid[:12],
+                    len(stdout or b""),
+                    dest,
+                )
+                return
+            logger.info(
+                "captured eval container logs for %s → %s (%d bytes)",
+                conv_id,
+                dest,
+                len(stdout or b""),
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "failed to capture docker logs for conv=%s cid=%s: %s",
+                conv_id,
+                cid[:12],
+                err,
+            )
+
+    async def _stop_orphan_containers(self) -> None:
+        """Stop containers labeled ``eval.run_id`` from prior eval runs.
+
+        Defense-in-depth for the case where a previous run was SIGKILLed
+        before its finally-block ran cleanup(). Without this sweep, those
+        containers stay alive consuming RAM + workspace volume disk space
+        until docker daemon timeout. Same-process leftovers (this PID's
+        own containers) are skipped via ``self._docker_handles``.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "ps", "-q",
+                "--filter", "label=eval.run_id",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return
+            cids = [c for c in stdout.decode().splitlines() if c.strip()]
+            ours = {h["container_id"][:12] for h in self._docker_handles.values()}
+            orphans = [c for c in cids if c[:12] not in ours]
+            if not orphans:
+                return
+            logger.info(
+                "stopping %d orphan eval containers from prior runs",
+                len(orphans),
+            )
+            await asyncio.gather(*[
+                self._docker_stop_container(cid) for cid in orphans
+            ], return_exceptions=True)
+        except Exception as err:  # noqa: BLE001
+            logger.warning("orphan container sweep failed: %s", err)
 
     # --------------------------------------------------- subprocess routing
 
@@ -257,17 +585,14 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
         env_vars = list(agent_llm.get("env_vars") or [])
 
-        # Per-QA isolation may pass an alternate state_dir (a per-QA
-        # copy of the frozen baseline). Fall back to the shared default.
-        caller_state_dir = payload.get("state_dir")
-        container_state = caller_state_dir or "/workspace/state"
-
+        # Rewrite host paths from ``_bridge_base_payload`` to the in-container
+        # paths set up by the entrypoint. All QAs/ingest share /workspace/state.
         payload = {
             **payload,
             "repo_path": "/app",
             "config_path": "/workspace/openclaw.docker.json",
             "workspace_dir": "/workspace",
-            "state_dir": container_state,
+            "state_dir": "/workspace/state",
             "home_dir": "/workspace/home",
             "cwd_dir": "/workspace",
             "agent_llm_env_vars": payload.get("agent_llm_env_vars") or env_vars,
@@ -337,6 +662,14 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             run_root = self._resolve_run_root(output_dir or self.output_dir)
             self._run_id = run_root.name
 
+        # Sweep any orphan eval containers from a previous run that was
+        # killed before its cleanup() finally-block fired. Idempotent and
+        # cheap (one ``docker ps -q --filter`` call); safe to run on every
+        # prepare(). Same-process containers spawned later this prepare()
+        # are tracked in ``self._docker_handles`` and excluded from the
+        # sweep.
+        await self._stop_orphan_containers()
+
         sem = await self._ensure_spawn_sem()
 
         async def _spawn_one(conv: Conversation) -> None:
@@ -344,13 +677,6 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 # Pre-create sandbox so volume dir exists.
                 root_dir = self._resolve_run_root(output_dir or self.output_dir)
                 sandbox = self._prepare_conversation_sandbox(root_dir, conv)
-                # GC any stale per-QA state dirs left by a prior run that
-                # was killed before its discard finally-block fired. The
-                # baseline (.qa_state_baseline) is intentionally preserved
-                # so replay continues from post-add() state.
-                stale = Path(sandbox["workspace_dir"]) / QA_STATES_DIRNAME
-                if stale.exists():
-                    shutil.rmtree(stale, ignore_errors=True)
                 cid = await self._docker_run_container(
                     conv.conversation_id, sandbox
                 )
@@ -368,90 +694,26 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
     # ------------------------------------------------------------- cleanup
 
     async def cleanup(self) -> None:
+        async def _stop_one(conv_id: str, handle: dict) -> None:
+            cid = handle["container_id"]
+            vol = handle.get("volume_dir")
+            if self._capture_container_logs and isinstance(vol, str) and vol:
+                await self._dump_container_logs_to_workspace(cid, vol, conv_id)
+            await self._docker_stop_container(cid)
+            if not self._remove_container_on_stop:
+                logger.info(
+                    "eval container kept after stop (remove_container_on_stop=false): "
+                    "cid=%s conv=%s — inspect: docker logs %s",
+                    cid[:12],
+                    conv_id,
+                    cid,
+                )
+
         await asyncio.gather(*[
-            self._docker_stop_container(h["container_id"])
-            for h in self._docker_handles.values()
+            _stop_one(conv_id, h)
+            for conv_id, h in list(self._docker_handles.items())
         ], return_exceptions=True)
         self._docker_handles.clear()
-
-    # ------------------------------------------------ per-QA isolation v1
-    #
-    # ``answer.max_concurrent`` (yaml) is a global cap, not per-conversation,
-    # so two QAs from the same conv can race here. The freeze is guarded
-    # by an adapter-owned lock keyed by conv_id. Per-QA restore is
-    # race-free as long as qid is unique per call (the answer stage never
-    # re-asks the same qid in the same run).
-
-    def _isolation_mode(self) -> str:
-        """Cached ``openclaw_docker.per_qa_isolation`` resolution."""
-        return self._isolation_mode_cache
-
-    async def _ensure_state_frozen(self, sandbox: dict) -> None:
-        """Lazy-freeze /workspace/state on first answer call per conversation.
-
-        Lazy freeze (vs eager at end of add()) is robust to partial
-        pipelines (``--stages search answer evaluate`` skipping add).
-
-        On replay (workspace already has ``.qa_state_baseline`` from a
-        previous run) we **do not** re-freeze: the baseline must reflect
-        post-add() state, and re-freezing here would capture whatever
-        post-answer writes accumulated in ``/workspace/state`` during the
-        previous run. Operators wanting a fresh baseline should pass
-        ``--clean-groups`` or wipe the workspace.
-        """
-        if self._isolation_mode() != "snapshot":
-            return
-        if sandbox.get("_state_frozen"):
-            return  # fast path before we even take the lock
-
-        conv_id = sandbox.get("conversation_id") or id(sandbox)
-        lock = self._freeze_locks.setdefault(conv_id, asyncio.Lock())
-        async with lock:
-            if sandbox.get("_state_frozen"):
-                return
-            workspace = Path(sandbox["workspace_dir"])
-            baseline_existing = (workspace / SNAPSHOT_DIRNAME).exists()
-            if baseline_existing:
-                sandbox["_state_frozen"] = True
-                self._append_events(sandbox, [{
-                    "event": "per_qa_isolation_freeze_skipped_replay",
-                    "conversation_id": sandbox.get("conversation_id"),
-                    "reason": "baseline already exists from prior run",
-                }])
-                return
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None, freeze_state, workspace,
-            )
-            sandbox["_state_frozen"] = True
-            self._append_events(sandbox, [{
-                "event": "per_qa_isolation_freeze",
-                "conversation_id": sandbox.get("conversation_id"),
-                "mode": "snapshot",
-            }])
-
-    async def _restore_qa_state_dir(self, sandbox: dict, qid: str) -> str:
-        """Restore baseline -> per-QA dir; return container-side path.
-
-        Returns ``/workspace/state`` (the shared default) when isolation
-        is off so no extra disk I/O happens.
-        """
-        if self._isolation_mode() != "snapshot":
-            return "/workspace/state"
-        loop = asyncio.get_running_loop()
-        workspace = Path(sandbox["workspace_dir"])
-        qa_host = await loop.run_in_executor(
-            None, restore_state_for_qa, workspace, qid,
-        )
-        return container_state_dir(qa_host, workspace)
-
-    async def _discard_qa_state(self, sandbox: dict, qid: str) -> None:
-        if self._isolation_mode() != "snapshot":
-            return
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, discard_qa_state, Path(sandbox["workspace_dir"]), qid,
-        )
 
     # ---------------------------------------- override answer to use docker
 
@@ -460,23 +722,25 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
     ) -> str:
         """Override base impl to route bridge call through docker exec.
 
-        When per_qa_isolation=snapshot, wraps the agent_run call in a
-        freeze (lazy, once per conv) + restore (per QA) + discard cycle
-        so cross-QA state leakage in context-engine plugins is eliminated.
-        See evaluation/src/adapters/openclaw/per_qa_isolation.py.
+        All QAs share ``/workspace/state`` directly — no per-QA snapshot
+        isolation. When ingest opened a per-conv OV session (UUID), the
+        QA reuses it so plugin-side OVSessionId matches SDK-side and
+        before_prompt_build/assemble see the accumulated session state.
+        Post-QA we rename the in-container session jsonl so the next
+        question starts with empty short-term conversation context —
+        mirrors official openclaw-eval/eval.py reset_session.
         """
         sandbox = self._sandbox_for(conv_id)
-        await self._ensure_state_frozen(sandbox)
-        qa_container_state = await self._restore_qa_state_dir(sandbox, qid)
 
         agent_timeout = int(self._openclaw_cfg.get("agent_timeout_seconds", 180))
+        ov_sid = sandbox.get("ov_session_id")
+        session_id_for_run = ov_sid or f"{conv_id}__{qid}"
         payload = {
             **self._bridge_base_payload(sandbox),
             "command": "agent_run",
-            "session_id": f"{conv_id}__{qid}",
+            "session_id": session_id_for_run,
             "message": query,
             "timeout_seconds": agent_timeout,
-            "state_dir": qa_container_state,
         }
         try:
             try:
@@ -520,21 +784,40 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 }])
                 return ""
 
-            self._append_events(sandbox, [{
-                "event": "agent_run_complete",
-                "conversation_id": conv_id, "question_id": qid,
-                "duration_ms": resp.get("duration_ms"),
-                "stop_reason": resp.get("stop_reason"),
-                "aborted": resp.get("aborted"),
-                "tool_names": resp.get("tool_names"),
-                "system_prompt_chars": resp.get("system_prompt_chars"),
-                "reply_len": len(resp.get("reply", "")),
-            }])
-            return (resp.get("reply") or "").strip()
+            return self._emit_agent_run_complete(
+                sandbox,
+                conv_id,
+                qid,
+                resp,
+                query,
+                session_id=session_id_for_run,
+                container_state_dir="/workspace/state",
+            )
         finally:
-            # Always discard the per-QA state copy so .qa_states/ does
-            # not accumulate across runs.
-            await self._discard_qa_state(sandbox, qid)
+            # Mirror official openclaw-eval/eval.py reset_session: rename
+            # the .jsonl after each QA so the next question gets a fresh
+            # short-term conversation buffer. OV plugin's pendingTokens
+            # accumulator lives on the OV server keyed by ov_session_id
+            # (UUID) and is unaffected by file-system renames here, so
+            # assemble/before_prompt_build still see the accumulated OV
+            # session state across QAs. Without this, all QAs in the conv
+            # would share one growing .jsonl and the LLM prompt would
+            # blow up past the context window mid-conv.
+            try:
+                await self._arun_bridge_via_docker(
+                    conv_id,
+                    {
+                        **self._bridge_base_payload(sandbox),
+                        "command": "archive_session",
+                        "session_id": session_id_for_run,
+                    },
+                    timeout=10.0,
+                )
+            except Exception as err:  # noqa: BLE001
+                logger.debug(
+                    "post-QA archive_session non-fatal failure for "
+                    "%s/%s: %s", conv_id, qid, err,
+                )
 
     async def _invoke_bridge(
         self, sandbox: dict, payload: dict, timeout: float
@@ -747,65 +1030,6 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "conversation_id": conv_id,
             "bootstrap_files": expected,
             "via": "docker",
-        }])
-
-    async def _replay_conv_for_context_engine(
-        self, sandbox: dict, conv
-    ) -> None:
-        """Stage 3 Phase 5 R2 routing: feed each conv message through
-        agent_run so the context-engine plugin's afterTurn ingests it.
-
-        - session_id is the conv id (R2 conv-level scoping per design note)
-        - we discard replies; the goal is engine session state, not LLM output
-        - per-message timeout is short (60s inner / 90s outer) since each
-          turn does only one LLM call + ingest
-        - failures of individual messages do NOT abort the conv; we log and
-          continue, so a single LLM hiccup doesn't lose the whole replay
-        """
-        conv_id = sandbox["conversation_id"]
-        messages = conv.messages or []
-        ingested = 0
-        skipped = 0
-        for idx, msg in enumerate(messages):
-            speaker = (msg.speaker_name or "user").strip()
-            content = (msg.content or "").strip()
-            if not content:
-                skipped += 1
-                continue
-            # Frame as user-side dialog turn so the agent's view matches
-            # how the conversation actually arrived. Prefix with speaker
-            # for engines that want a hint at multi-party context.
-            framed = f"[{speaker}] {content}"
-            payload = {
-                "command": "agent_run",
-                "session_id": conv_id,
-                "message": framed,
-                "timeout_seconds": 60,
-            }
-            try:
-                resp = await self._arun_bridge_via_docker(
-                    conv_id, payload, timeout=90.0,
-                )
-                if resp.get("ok"):
-                    ingested += 1
-                else:
-                    skipped += 1
-                    logger.warning(
-                        "context-engine replay msg %d/%d skipped for %s: %s",
-                        idx, len(messages), conv_id, resp.get("error"),
-                    )
-            except Exception as err:
-                skipped += 1
-                logger.warning(
-                    "context-engine replay msg %d/%d errored for %s: %s",
-                    idx, len(messages), conv_id, err,
-                )
-        self._append_events(sandbox, [{
-            "event": "context_engine_replay_complete",
-            "conversation_id": conv_id,
-            "ingested": ingested,
-            "skipped": skipped,
-            "total_messages": len(messages),
         }])
 
     def get_system_info(self) -> dict:

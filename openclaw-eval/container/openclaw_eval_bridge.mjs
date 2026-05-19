@@ -13,7 +13,7 @@
 // docs/plans/2026-04-13-openclaw-benchmark-a.md Task 8 Step 4.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -697,6 +697,49 @@ async function handleEngineImportHistory(input, launcher) {
   };
 }
 
+async function handleArchiveSession(input) {
+  // Archive an openclaw session jsonl so the next agent_run with the same
+  // session_id starts with an empty transcript. Memory under
+  // <state_dir>/agents/main/sessions/<sid>.jsonl is renamed to
+  // <sid>.jsonl.<ts>; memory/*.md files are untouched, so memory persists
+  // across the archive. Mirrors reference openclaw-eval/eval.py reset_session.
+  const sessionId = input.session_id;
+  const stateDir = input.state_dir;
+  if (!sessionId || !stateDir) {
+    return {
+      ok: false,
+      command: "archive_session",
+      error: "session_id and state_dir are required",
+    };
+  }
+  const src = path.join(stateDir, "agents", "main", "sessions", `${sessionId}.jsonl`);
+  if (!existsSync(src)) {
+    return {
+      ok: false,
+      command: "archive_session",
+      reason: "no transcript",
+      session_id: sessionId,
+    };
+  }
+  const dst = `${src}.${epochSeconds()}`;
+  try {
+    await rename(src, dst);
+    return {
+      ok: true,
+      command: "archive_session",
+      session_id: sessionId,
+      archived_to: path.basename(dst),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      command: "archive_session",
+      session_id: sessionId,
+      error: err?.message || String(err),
+    };
+  }
+}
+
 async function handleGet(input) {
   // OpenClaw has no get command; read the markdown file range directly.
   const locator = input.artifact_locator || {};
@@ -759,6 +802,9 @@ const command = input.command;
         break;
       case "engine_import_history":
         resp = await handleEngineImportHistory(input, launcher);
+        break;
+      case "archive_session":
+        resp = await handleArchiveSession(input);
         break;
       default:
         return fail(`unknown command: ${command}`, command);

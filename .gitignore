@@ -200,6 +200,7 @@ simple_query_memcell.py
 evaluation/memory_evaluation/extract_room_data.py
 evaluation/memory_evaluation/test.py
 evaluation/results/
+evaluation/archives/
 
 # Large test files
 unit_test/memcell_outputs/
