@@ -42,6 +42,7 @@ def build_benchmark_summary(
     latency_views: Optional[dict] = None,
     retry_policy: str = "realistic",
     latency_invariants: Optional[dict] = None,
+    latency_semantics: Optional[dict] = None,
 ) -> dict:
     return {
         "system": system,
@@ -105,6 +106,8 @@ def build_benchmark_summary(
         # carries four views (realistic/clean/first_attempt/
         # successful_attempt) plus reliability signals.
         "latency": latency_views or {},
+        # Human-readable scope for each latency row (agent_local, docker add).
+        "latency_semantics": latency_semantics or {},
         # Phase 3 self-check on the Layer-1 data. count > 0 means one
         # of the alignment invariants (wall ≈ Σ attempts, N equals
         # work units, strict_no_retry respected, subphases within wall)

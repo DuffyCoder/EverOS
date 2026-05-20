@@ -1,1 +1,5 @@
 node_modules/
+
+# Ephemeral bind-mount workspace/state from openclaw eval containers
+tmp_container_workspace/
+tmp_container_state/

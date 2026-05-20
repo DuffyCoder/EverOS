@@ -41,6 +41,11 @@ from evaluation.src.metrics.forced_terminate_metrics import (
 )
 from evaluation.src.metrics.benchmark_summary import build_benchmark_summary
 from evaluation.src.metrics.latency_views import aggregate_all, records_to_jsonl
+from evaluation.src.metrics.latency_report import (
+    enrich_latency_views,
+    format_latency_report_lines,
+    resolve_latency_semantics,
+)
 from evaluation.src.metrics.latency_invariants import (
     check_all as check_latency_invariants,
     summarize_violations as summarize_latency_violations,
@@ -847,7 +852,12 @@ class Pipeline:
 
         # Phase 1: Layer-1 canonical latency views derived from the
         # harness-owned LatencyRecorder. See docs/latency-alignment.md.
-        latency_views = aggregate_all(self.latency_recorder.records)
+        latency_semantics = resolve_latency_semantics(self.adapter)
+        latency_views = enrich_latency_views(
+            aggregate_all(self.latency_recorder.records),
+            diagnostics,
+            latency_semantics,
+        )
         self.saver.save_json(latency_views, "latency_views.json")
         # Raw call-record log for post-hoc analysis / debugging. Cheap
         # to write (hundreds of rows per 1540-question run) and often
@@ -903,6 +913,7 @@ class Pipeline:
             latency_views=latency_views,
             retry_policy=self.latency_recorder.retry_policy,
             latency_invariants=violation_report,
+            latency_semantics=latency_semantics,
         )
         self.saver.save_json(summary, "benchmark_summary.json")
         return summary
@@ -963,43 +974,20 @@ class Pipeline:
                 report_lines.append("")
 
             latency = benchmark_summary.get("latency") or {}
+            semantics = benchmark_summary.get("latency_semantics") or {}
             if latency:
-                report_lines.append(
-                    f"Latency (canonical, retry_policy={benchmark_summary.get('retry_policy')}):"
+                # Strip internal annotation key before formatting stage rows.
+                latency_rows = {
+                    k: v for k, v in latency.items() if not k.startswith("_")
+                }
+                report_lines.extend(
+                    format_latency_report_lines(
+                        latency_rows,
+                        benchmark_summary.get("diagnostics"),
+                        semantics,
+                        str(benchmark_summary.get("retry_policy") or "realistic"),
+                    )
                 )
-                for op in ("add", "search", "answer", "e2e_query_ms"):
-                    stage = latency.get(op)
-                    if not stage:
-                        continue
-                    wall_views = stage.get("wall_ms") or {}
-                    n_calls = stage.get("n_calls")
-                    report_lines.append(f"  {op} (n={n_calls}):")
-                    for view_name, v in wall_views.items():
-                        if not v:
-                            report_lines.append(f"    {view_name}: n/a")
-                            continue
-                        parts = [
-                            f"n={v['n']}",
-                            f"mean={v['mean']:.2f}",
-                            f"p50={v['p50']:.2f}",
-                            f"p95={v['p95']:.2f}",
-                            f"max={v['max']:.2f}",
-                        ]
-                        report_lines.append(
-                            f"    {view_name}: {{{', '.join(parts)}}}"
-                        )
-                    rel = stage.get("reliability")
-                    if rel:
-                        parts = [
-                            f"retry={rel['retry_rate']:.3f}",
-                            f"fallback={rel['fallback_rate']:.3f}",
-                            f"failed={rel['failed_rate']:.3f}",
-                        ]
-                        if rel["retry_by_class"]:
-                            parts.append(f"by_class={rel['retry_by_class']}")
-                        report_lines.append(
-                            f"    reliability: {{{', '.join(parts)}}}"
-                        )
                 report_lines.append("")
 
             diag = benchmark_summary.get("diagnostics") or {}

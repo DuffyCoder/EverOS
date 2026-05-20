@@ -73,6 +73,23 @@ Without `archive_session`, later QAs in the same conv would accumulate
 prior Q/A turns in the jsonl and inflate `final_context_tokens` (Tier B
 transcript estimate) as well as the live LLM prompt.
 
+## Latency in `report.txt` (openclaw-docker + `agent_local`)
+
+Layer-1 harness timing is unchanged; the report adds semantics so numbers
+are not mis-read:
+
+| Report row | Meaning |
+|------------|---------|
+| **add / stage1 batch** | Whole `adapter.add()` wall clock. On docker this **includes** per-conversation container cold start, startup verify, in-container config patch, then parallel ingest. **Not** per-conv ingest. |
+| **ingest per conversation** | From `add_summary.json` (`add_latency_ms_stats` in Diagnostics). OV/SDK ingest inside the container only; **excludes** container boot. |
+| **search** | **N/A — integrated in answer** when `answer_mode=agent_local`. Harness `search` is a skipped placeholder (~0 ms); memory recall runs inside `agent_run`. |
+| **answer** | Primary per-QA metric for agent_local (full `agent_run` including recall + LLM). |
+| **e2e_query_ms** | `search + answer`; equals answer when search is integrated. |
+
+For cross-adapter latency comparison with separated search (e.g. EverMemOS),
+use an `answer_mode: shared` openclaw preset or compare ingest via
+**ingest per conversation** only.
+
 ## `final_context_tokens` diagnostics (`answer_mode: agent_local`)
 
 The harness reports `final_context_tokens_mean` / `final_context_tokens_stats`
