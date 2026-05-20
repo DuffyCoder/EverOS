@@ -41,12 +41,15 @@ search:
 
 answer:
   max_retries: 3
-  # Within one conv all QAs share ov_session_id (so OV plugin's
-  # before_prompt_build/assemble see the accumulated session state).
-  # That makes them race for the openclaw .jsonl write lock — serialize
-  # to avoid "session file locked" errors. Cross-conv concurrency is
-  # still allowed via search.num_workers.
-  max_concurrent: 1
+  # Within one conv all QAs share ov_session_id and the in-container session
+  # jsonl write lock. answer_stage guards this with a per-conv asyncio.Lock,
+  # so cross-conv work is free to run up to ``max_concurrent``.
+  #
+  # ``auto`` = scan host env for LLM_API_KEY[_<N>] and size concurrency to
+  # the pool, spreading load across independent per-key TPM/RPM limits.
+  # Override to a specific int on RAM-tight hosts (each conv container is
+  # ~1.5GB; OV server ~10GB; 16GB box safely runs 2-3 concurrent).
+  max_concurrent: auto
 
 openclaw:
   repo_path: "${OPENCLAW_REPO_PATH}"

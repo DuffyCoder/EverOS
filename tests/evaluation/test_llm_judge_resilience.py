@@ -21,11 +21,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from evaluation.src.evaluators.llm_judge import LLMJudge
+from evaluation.src.utils.llm_keys import (
+    _reset_pool_cache_for_testing,
+    is_alt_llm_key_var,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_key_pool(monkeypatch):
+    """Strip ``LLM_API_KEY[_<N>]`` env + invalidate the pool cache so each
+    judge under test sees only the yaml-provided key. Without isolation, an
+    operator's ``.env`` with N keys would auto-scale judge concurrency to
+    ``4*(N+1)`` and break tests that pin single-key default behavior.
+    """
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    for name in list(os.environ):
+        if is_alt_llm_key_var(name):
+            monkeypatch.delenv(name, raising=False)
+    _reset_pool_cache_for_testing()
+    yield
+    _reset_pool_cache_for_testing()
 
 
 def _make_judge(
@@ -49,10 +70,15 @@ def _make_judge(
         cfg["judge_max_retries"] = max_retries
 
     judge = LLMJudge(cfg)
-    judge.client = MagicMock()
-    judge.client.chat = MagicMock()
-    judge.client.chat.completions = MagicMock()
-    judge.client.chat.completions.create = AsyncMock()
+    # Judge routes via ``judge.clients[idx]``; ``judge.client`` is kept as a
+    # same-Mock alias so the legacy ``judge.client.chat...create = flaky``
+    # test pattern mutates the same instance the judge actually invokes.
+    mock_client = MagicMock()
+    mock_client.chat = MagicMock()
+    mock_client.chat.completions = MagicMock()
+    mock_client.chat.completions.create = AsyncMock()
+    judge.clients = [mock_client]
+    judge.client = mock_client
     return judge
 
 

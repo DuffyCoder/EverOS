@@ -42,6 +42,7 @@ from evaluation.src.adapters.openclaw.runtime import (
 )
 from evaluation.src.adapters.registry import register_adapter
 from evaluation.src.core.data_models import Conversation
+from evaluation.src.utils.llm_keys import is_alt_llm_key_var, pick_key_for_conv
 
 
 logger = logging.getLogger(__name__)
@@ -373,7 +374,13 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 ov_overrides["OPENVIKING_USER_ID"] = user_id
 
         for name in env_vars:
+            if is_alt_llm_key_var(name):
+                continue
             value = os.environ.get(name)
+            if name == "LLM_API_KEY" and conv_id:
+                per_conv = pick_key_for_conv(conv_id)
+                if per_conv:
+                    value = per_conv
             if name in ov_overrides:
                 # Per-conv override wins over host shell env so each
                 # container's OV plugin queries its own tenant.

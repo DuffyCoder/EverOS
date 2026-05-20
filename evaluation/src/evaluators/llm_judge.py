@@ -18,7 +18,6 @@ Three judgment outcomes per call:
 import asyncio
 import json
 import logging
-import os
 import numpy as np
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
@@ -28,13 +27,11 @@ from tqdm import tqdm
 from evaluation.src.evaluators.base import BaseEvaluator
 from evaluation.src.evaluators.registry import register_evaluator
 from evaluation.src.core.data_models import AnswerResult, EvaluationResult
+from evaluation.src.utils.llm_keys import collect_llm_key_pool
 from evaluation.src.utils.prompts import get_prompt, format_prompt
 
 
 logger = logging.getLogger(__name__)
-
-# Upper bound for scanning ``LLM_API_KEY_<n>`` env vars. n in [2, _ENV_KEY_SCAN_MAX].
-_ENV_KEY_SCAN_MAX = 32
 
 # Default concurrent in-flight judge calls per AsyncOpenAI client.
 _BASE_CONCURRENCY_PER_KEY = 4
@@ -66,19 +63,11 @@ class LLMJudge(BaseEvaluator):
             if isinstance(single, str) and single.strip():
                 api_keys = [single]
         # Env fallback: when caller passed nothing or only a single key,
-        # scan LLM_API_KEY / LLM_API_KEY_2 / ... numeric suffix vars.
-        # This lets the main eval pipeline (cli.py) pick up extra keys
-        # without changing dataset yaml. Scans the full range so a gap
-        # (e.g. _2 unset but _3 set) does not silently drop later keys.
+        # scan LLM_API_KEY / LLM_API_KEY_2 / ... numeric suffix vars via the
+        # shared helper. Adding keys to .env then auto-widens the pool here
+        # too — no separate config change required.
         if len(api_keys) <= 1:
-            env_keys: list[str] = []
-            primary = os.environ.get("LLM_API_KEY", "").strip()
-            if primary:
-                env_keys.append(primary)
-            for n in range(2, _ENV_KEY_SCAN_MAX + 1):
-                v = os.environ.get(f"LLM_API_KEY_{n}", "").strip()
-                if v:
-                    env_keys.append(v)
+            env_keys = collect_llm_key_pool()
             # Merge yaml-provided key with env extras, preserving order
             # and dedup-ing.
             api_keys = list(dict.fromkeys(api_keys + env_keys))
