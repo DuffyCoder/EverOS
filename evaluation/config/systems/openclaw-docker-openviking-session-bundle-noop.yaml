@@ -93,11 +93,14 @@ openclaw:
     # 等同禁用 agent 这一路 — 跟官方实际行为一致。好处:agent/default
     # namespace 不再被 ingest 写入,跨 conv 的 agent 池彻底干净。
     agent_id_template: "{conv_id}"
-    # 600s → 1800s: full10 数据显示每个容器内 OV server 600s 只能完成 ~4 个
-    # session 的记忆抽取(extract LLM 调用串行排队),剩余 S5+ 全 timeout,
-    # 记忆库覆盖率 ~15%,直接导致 54% 错答是 agent "no info" 拒答 + cat=2
-    # 多跳 19%。1800s 给抽取队列三倍时间窗口,期望 ingest 完成 ~12/conv。
-    task_timeout_sec: 1800
+    # Phase 2 / smoke3-global-settle-fix 数据: task_timeout=1800 让 21/32
+    # locomo_2 task 被 client cancel,OV server 上这些 task 在 Stage 2/3 期间
+    # 继续跑 (vectordb upsert/HNSW 仍在变化) → 脏读 retrieval。要真正
+    # "ingest complete then answer" 必须让 client 等到 OV server 真完成
+    # 所有 task。3 conv * ~23 task = 70 task @ ~55s/task = 64min wall clock,
+    # 7200s (2hr) 给充足 margin。代价: smoke3 总时长 ~2hr (vs 60min),full10
+    # 估 ~5-8hr。
+    task_timeout_sec: 7200
     # Phase 2 (ingest-first, retrieve-after): per-conv settle 移到 pipeline
     # 全局 barrier。POST /api/v1/system/wait 让 OV server 自己 active poll
     # 所有 queue (embedding/semantic) 直到 idle 再返回,比固定 sleep 精确,
@@ -111,7 +114,10 @@ openclaw:
     # 外层 timeout 的额外 margin,避免 client 比 server 早超时。
     post_add_settle:
       enabled: true
-      timeout_sec: 1800
+      # Settle hook 实测在 task=completed 之后 OV queue 已经 idle,instant
+      # return (9ms in smoke3-global-settle-fix run)。timeout 是 cap,与
+      # task_timeout 对齐避免 client-server timeout 不一致。
+      timeout_sec: 7200
       http_buffer_sec: 60
   agent_llm:
     provider_id: "sophnet"
