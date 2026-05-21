@@ -93,12 +93,42 @@ openclaw:
     # 等同禁用 agent 这一路 — 跟官方实际行为一致。好处:agent/default
     # namespace 不再被 ingest 写入,跨 conv 的 agent 池彻底干净。
     agent_id_template: "{conv_id}"
-    task_timeout_sec: 600
+    # 600s → 1800s: full10 数据显示每个容器内 OV server 600s 只能完成 ~4 个
+    # session 的记忆抽取(extract LLM 调用串行排队),剩余 S5+ 全 timeout,
+    # 记忆库覆盖率 ~15%,直接导致 54% 错答是 agent "no info" 拒答 + cat=2
+    # 多跳 19%。1800s 给抽取队列三倍时间窗口,期望 ingest 完成 ~12/conv。
+    task_timeout_sec: 1800
+    # Phase 2 (ingest-first, retrieve-after): per-conv settle 移到 pipeline
+    # 全局 barrier。POST /api/v1/system/wait 让 OV server 自己 active poll
+    # 所有 queue (embedding/semantic) 直到 idle 再返回,比固定 sleep 精确,
+    # 且发生在所有 conv.add() 完成之后,真正实现 "ingest 全部结束才 retrieval"。
+    # smoke3-t1800-settle1800 per-conv 实测: cat=1 单跳 acc -22pt (因 OV
+    # consolidation 抽象化具体 fact 在 conv A settle 期间被并发 conv 干扰)。
+    # 本配置走全局 barrier,期望 cat=1 恢复 + cat=2 多跳保持收益。
+    # OV server 端 wait_processed 每 500ms poll is_all_complete; timeout_sec
+    # 是 server 端 wait 的最大时长(超时 OV raise TimeoutError, client 端
+    # 我们视为非致命 warning 继续 Stage 2)。http_buffer_sec 是客户端 aiohttp
+    # 外层 timeout 的额外 margin,避免 client 比 server 早超时。
+    post_add_settle:
+      enabled: true
+      timeout_sec: 1800
+      http_buffer_sec: 60
   agent_llm:
     provider_id: "sophnet"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
     api: "openai-completions"
     api_key_env: "LLM_API_KEY"
+    # OpenClaw LLM-streaming idle timeout (seconds). Container default is
+    # 60s (pi-embedded-runner DEFAULT_LLM_IDLE_TIMEOUT_MS). Under cross-conv
+    # parallelism the provider chunk-gap regularly exceeds 60s → idle abort
+    # → runner falls back to lastAssistant in payloads.ts (which, because
+    # openclaw sessionStore aliases all per-QA session-ids to ONE UUID per
+    # conv container, is actually the PRIOR turn's archived assistant
+    # message), emitting prior QA's text as the current QA's reply and
+    # silently polluting accuracy. 180s gives streaming enough headroom
+    # while outer agent_timeout_seconds (90s) still caps per-turn wall
+    # clock — so this is effectively "trust the outer cap, disable inner".
+    idle_timeout_seconds: 180
     env_vars:
       - "LLM_API_KEY"
       - "LLM_BASE_URL"
