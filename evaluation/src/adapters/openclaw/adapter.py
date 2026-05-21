@@ -625,6 +625,43 @@ class OpenClawAdapter(BaseAdapter):
             }])
             return ""
 
+        # parallelism-bug guard: stop_reason ∉ {"stop","end_turn"} means
+        # the agent loop didn't terminate via a clean assistant final.
+        # In practice (LoCoMo full-locomo10 run @ 4c3945f) ~10% of QAs
+        # under cross-conv parallelism hit LLM streaming idle timeout
+        # (60s default in openclaw, sophnet chunk-gap > 60s under load) →
+        # stop_reason=null. The runner's payloads.ts then falls back to
+        # ``lastAssistant``, which (because openclaw sessionStore aliases
+        # all per-QA session-ids to ONE UUID per conv container) is the
+        # PRIOR turn's archived assistant message. Bridge happily ships
+        # that as ``reply``, ``stop_reason: null``. Without this guard the
+        # adapter commits the prior QA's answer under the current QA's
+        # question_id → 12% duplicate-answer rate, ~15pt accuracy drop.
+        # Reject these as failed; outer eval treats empty as wrong (real
+        # signal), beats pollution (fake signal that biases categories).
+        # End_turn is anthropic's natural stop; stop is openai/sophnet's.
+        # Length (max-tokens) and toolUse are rare here and indicate the
+        # final answer never landed — also reject.
+        stop_reason = resp.get("stop_reason")
+        if stop_reason not in ("stop", "end_turn"):
+            reply_excerpt = (resp.get("reply") or "")[:200]
+            logger.warning(
+                "agent_run incomplete for %s/%s: stop_reason=%r dur_ms=%s "
+                "reply_len=%d (likely stale fallback) — treating as failed; "
+                "excerpt: %s",
+                conv_id, qid, stop_reason, resp.get("duration_ms"),
+                len(resp.get("reply") or ""), reply_excerpt,
+            )
+            self._append_events(sandbox, [{
+                "event": "agent_run_incomplete",
+                "conversation_id": conv_id, "question_id": qid,
+                "stop_reason": stop_reason,
+                "duration_ms": resp.get("duration_ms"),
+                "reply_len": len(resp.get("reply") or ""),
+                "reply_excerpt": reply_excerpt,
+            }])
+            return ""
+
         return self._emit_agent_run_complete(
             sandbox, conv_id, qid, resp, query,
         )
@@ -650,6 +687,82 @@ class OpenClawAdapter(BaseAdapter):
         if self._openclaw_cfg.get("answer_mode") == "agent_local":
             return float(self._openclaw_cfg.get("agent_timeout_seconds", 180)) + 30.0
         return 120.0
+
+    async def wait_post_add_settle(self) -> Any:
+        """Post-add global barrier: ask OV server to wait until all internal
+        queues drain.
+
+        Why not per-conv settle (the old ``settle_sec`` inside
+        ``_ingest_via_session_bundle``): per-conv sleep starts when *that*
+        conv's tasks complete, but concurrent conv ingest keeps pushing new
+        work onto OV's embedding/semantic queues. Sleeping in conv A while
+        conv B's vectordb upserts are still flying does not let A's retrieval
+        see settled state — HNSW is rebuilding under A's feet.
+
+        OV server side: ``POST /api/v1/system/wait`` invokes
+        ``QueueManager.wait_complete()`` which polls ``is_all_complete`` every
+        500ms across all registered queues. Server-internal active poll, not
+        a fixed sleep. We block on this single HTTP call from the pipeline's
+        global barrier so the barrier semantic becomes: "all conv add()
+        returned + OV's own worker queues drained" before any conv runs
+        Stage 2 Search.
+        """
+        import aiohttp
+        import json as _json
+        import os
+
+        ov_cfg = (self.config or {}).get("ov_ingest") or {}
+        settle_cfg = ov_cfg.get("post_add_settle") or {}
+        if not settle_cfg.get("enabled"):
+            return None
+
+        base_url = (ov_cfg.get("base_url") or "").rstrip("/")
+        if not base_url:
+            return None
+
+        ov_timeout = float(settle_cfg.get("timeout_sec") or 1800.0)
+        # Outer HTTP timeout must exceed OV server's wait timeout — otherwise
+        # client aborts before OV finishes. http_buffer_sec gives the request
+        # margin (default 60s).
+        http_buffer = float(settle_cfg.get("http_buffer_sec") or 60.0)
+        http_timeout_sec = ov_timeout + http_buffer
+
+        api_key = ""
+        api_key_env = ov_cfg.get("api_key_env")
+        if api_key_env:
+            api_key = os.environ.get(api_key_env, "") or ""
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        account_id = ov_cfg.get("account_id") or "default"
+        headers["X-OpenViking-Account"] = account_id
+        # /system/wait touches QueueManager directly (not user-scoped). User
+        # header is just to pass resolve_identity.
+        headers["X-OpenViking-User"] = "default"
+
+        timeout = aiohttp.ClientTimeout(total=http_timeout_sec)
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            async with http.post(
+                f"{base_url}/api/v1/system/wait",
+                headers=headers,
+                json={"timeout": ov_timeout},
+            ) as resp:
+                body = await resp.text()
+                if resp.status >= 400:
+                    logger.warning(
+                        "OV /system/wait HTTP %d: %s",
+                        resp.status, body[:300],
+                    )
+                    return None
+                try:
+                    parsed = _json.loads(body)
+                except _json.JSONDecodeError:
+                    logger.warning("OV /system/wait non-JSON body: %s", body[:300])
+                    return None
+                if isinstance(parsed, dict) and "result" in parsed:
+                    return parsed.get("result")
+                return parsed
 
     # v0.7: pre-bootstrap workspace files via dummy agent run (retry + raise)
     async def _prebootstrap_workspace(self, sandbox: dict) -> None:
@@ -1269,7 +1382,9 @@ class OpenClawAdapter(BaseAdapter):
             # otherwise this re-serializes the fire-and-forget design.
             async def _wait_one(tid: str) -> tuple[str, Any]:
                 try:
-                    return tid, await client.wait_for_task(http, tid)
+                    return tid, await client.wait_for_task(
+                        http, tid, timeout_sec=task_timeout,
+                    )
                 except OVIngestError as err:
                     return tid, err
 
@@ -1310,6 +1425,30 @@ class OpenClawAdapter(BaseAdapter):
             "total_sessions": len(sessions),
             "ov_session_id": ov_session_id,
         }])
+
+        # Phase 1 实验: ingest task=completed 是 OV server 最早的事件,离
+        # "retrieval 真正能稳定 hit" 还差: 写 .md → vectordb embedding → HNSW
+        # upsert / entity dedup。client 没有 settle 完成信号,只能盲等。
+        # smoke3-t1800 实验显示 completed 数 12→31 但 final_context_tokens
+        # 反而 -4063 → acc 47% vs baseline 52.5%,根因就是 Stage 3 提前开始
+        # 时 OV server 还在 settle 中,HNSW 重建把老索引也搅乱。给一个固定
+        # settle window,跑完 sleep 再让 Stage 3 接手。
+        settle_sec = float(cfg.get("settle_sec") or 0)
+        if settle_sec > 0:
+            logger.info(
+                "OV ingest settle wait %.0fs for %s (completed=%d failed=%d)",
+                settle_sec, conv_id, completed, failed,
+            )
+            self._append_events(sandbox, [{
+                "event": "ov_ingest_settle_start",
+                "conversation_id": conv_id,
+                "settle_sec": settle_sec,
+            }])
+            await asyncio.sleep(settle_sec)
+            self._append_events(sandbox, [{
+                "event": "ov_ingest_settle_end",
+                "conversation_id": conv_id,
+            }])
 
     async def _ingest_one_session(
         self,
