@@ -1426,29 +1426,10 @@ class OpenClawAdapter(BaseAdapter):
             "ov_session_id": ov_session_id,
         }])
 
-        # Phase 1 实验: ingest task=completed 是 OV server 最早的事件,离
-        # "retrieval 真正能稳定 hit" 还差: 写 .md → vectordb embedding → HNSW
-        # upsert / entity dedup。client 没有 settle 完成信号,只能盲等。
-        # smoke3-t1800 实验显示 completed 数 12→31 但 final_context_tokens
-        # 反而 -4063 → acc 47% vs baseline 52.5%,根因就是 Stage 3 提前开始
-        # 时 OV server 还在 settle 中,HNSW 重建把老索引也搅乱。给一个固定
-        # settle window,跑完 sleep 再让 Stage 3 接手。
-        settle_sec = float(cfg.get("settle_sec") or 0)
-        if settle_sec > 0:
-            logger.info(
-                "OV ingest settle wait %.0fs for %s (completed=%d failed=%d)",
-                settle_sec, conv_id, completed, failed,
-            )
-            self._append_events(sandbox, [{
-                "event": "ov_ingest_settle_start",
-                "conversation_id": conv_id,
-                "settle_sec": settle_sec,
-            }])
-            await asyncio.sleep(settle_sec)
-            self._append_events(sandbox, [{
-                "event": "ov_ingest_settle_end",
-                "conversation_id": conv_id,
-            }])
+        # Per-conv settle moved out: see Pipeline.wait_post_add_settle (Phase 2
+        # global barrier). Per-conv sleep couldn't hold a barrier across
+        # concurrent conv — while conv A slept, conv B's parallel ingest kept
+        # mutating OV's embedding/HNSW state.
 
     async def _ingest_one_session(
         self,
