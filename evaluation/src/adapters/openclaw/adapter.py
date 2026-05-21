@@ -711,7 +711,11 @@ class OpenClawAdapter(BaseAdapter):
         import json as _json
         import os
 
-        ov_cfg = (self.config or {}).get("ov_ingest") or {}
+        # Resolve via self._openclaw_cfg (cfg['openclaw']), matching how
+        # _ingest_via_session_bundle reads ov_ingest (see adapter.py around
+        # line 1267). self.config holds the full top-level yaml dict; the
+        # ov_ingest block lives under config['openclaw']['ov_ingest'].
+        ov_cfg = (self._openclaw_cfg or {}).get("ov_ingest") or {}
         settle_cfg = ov_cfg.get("post_add_settle") or {}
         if not settle_cfg.get("enabled"):
             return None

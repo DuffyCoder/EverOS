@@ -15,10 +15,12 @@ def _make_adapter(post_add_settle_cfg):
 
     The full adapter __init__ does heavy work (repo introspection, manifest
     load). For this unit test we bypass __init__ via __new__ and only set
-    the attribute the hook reads (self.config).
+    the attributes the hook reads. Production layout: self.config is the
+    full top-level yaml dict and self._openclaw_cfg = config['openclaw'].
+    The hook reads ov_ingest via self._openclaw_cfg.
     """
     adapter = OpenClawAdapter.__new__(OpenClawAdapter)
-    adapter.config = {
+    adapter._openclaw_cfg = {
         "ov_ingest": {
             "base_url": "http://oviking.test:1933",
             "api_key_env": "TEST_OV_KEY",
@@ -27,6 +29,7 @@ def _make_adapter(post_add_settle_cfg):
             "post_add_settle": post_add_settle_cfg,
         }
     }
+    adapter.config = {"openclaw": adapter._openclaw_cfg}
     return adapter
 
 
@@ -57,7 +60,8 @@ async def test_wait_post_add_settle_disabled_returns_none():
 async def test_wait_post_add_settle_no_config_returns_none():
     """When post_add_settle key is missing entirely, hook is a no-op."""
     adapter = OpenClawAdapter.__new__(OpenClawAdapter)
-    adapter.config = {"ov_ingest": {"base_url": "http://x", "api_key_env": "K"}}
+    adapter._openclaw_cfg = {"ov_ingest": {"base_url": "http://x", "api_key_env": "K"}}
+    adapter.config = {"openclaw": adapter._openclaw_cfg}
     result = await adapter.wait_post_add_settle()
     assert result is None
 
@@ -85,3 +89,41 @@ async def test_wait_post_add_settle_posts_to_system_wait():
 
     assert result is not None
     assert "embedding" in result
+
+
+@pytest.mark.asyncio
+async def test_wait_post_add_settle_resolves_via_openclaw_cfg_not_top_level():
+    """Regression: production adapter has self.config = full top-level yaml
+    dict; ov_ingest is nested under config['openclaw']. Hook must read via
+    self._openclaw_cfg (mirroring _ingest_via_session_bundle), NOT
+    self.config.get('ov_ingest'). Earlier impl looked at top-level and
+    silently no-op'd."""
+    adapter = OpenClawAdapter.__new__(OpenClawAdapter)
+    adapter._openclaw_cfg = {
+        "ov_ingest": {
+            "base_url": "http://oviking.test:1933",
+            "api_key_env": "TEST_OV_KEY",
+            "post_add_settle": {"enabled": True, "timeout_sec": 1800},
+        }
+    }
+    # Top-level config has NO direct ov_ingest — only nested under openclaw.
+    # This mirrors what BaseAdapter(__init__) does when given parsed yaml.
+    adapter.config = {
+        "openclaw": adapter._openclaw_cfg,
+        "llm": {},
+        "search": {},
+    }
+    os.environ["TEST_OV_KEY"] = "k"
+
+    fake_session = MagicMock()
+    fake_session.post = MagicMock(return_value=_FakeResp())
+    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+    fake_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("aiohttp.ClientSession", return_value=fake_session):
+        result = await adapter.wait_post_add_settle()
+
+    # Must have made the POST — proves hook resolved ov_ingest via
+    # self._openclaw_cfg even though self.config has it nested
+    fake_session.post.assert_called_once()
+    assert result is not None
