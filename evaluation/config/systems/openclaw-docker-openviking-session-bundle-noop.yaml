@@ -47,9 +47,18 @@ answer:
   #
   # ``auto`` = scan host env for LLM_API_KEY[_<N>] and size concurrency to
   # the pool, spreading load across independent per-key TPM/RPM limits.
-  # Override to a specific int on RAM-tight hosts (each conv container is
-  # ~1.5GB; OV server ~10GB; 16GB box safely runs 2-3 concurrent).
-  max_concurrent: auto
+  #
+  # Explicit int wins over auto. 16 lets full10 (10 conv) run all conv in
+  # parallel — auto would cap at N_keys=4 leaving 6 conv waiting per batch
+  # (Stage 3 needs ceil(10/4)=3 batches × max-per-conv-time ≈ 3× the
+  # parallel-everywhere time). Each conv still serializes its own QAs via
+  # the per-conv asyncio.Lock (openclaw sessionStore constraint), so 16
+  # inflight = up to 16 distinct conv concurrent. Per-key load with 16
+  # spread over 4 keys = ~4 conv/key, ~0.08 RPS/key — well below sophnet
+  # per-key RPM ceilings (one agent_local QA call burns ~50s).
+  # On RAM-tight hosts (each conv container ~1.5GB; OV server ~0.5GB),
+  # set this to fit your box; 377GB host can run 16 easily.
+  max_concurrent: 16
 
 openclaw:
   repo_path: "${OPENCLAW_REPO_PATH}"
@@ -155,7 +164,15 @@ openclaw:
 
 openclaw_docker:
   image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-slim"
-  max_concurrent_containers: 4
+  # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
+  # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
+  # is the bottleneck (single sophnet key for fact-extract), so total
+  # Stage 1 wall time is unchanged from any container count >= N_conv, but
+  # too low (e.g. 4) batches the ingest into ceil(N_conv/max) waves which
+  # adds artificial barriers. Raising to 16 covers full10 (10 conv) plus
+  # headroom for larger datasets. RAM: each container ~1.5GB; OV server
+  # 0.5GB; 16 containers ≈ 24GB, well within the 377GB host budget.
+  max_concurrent_containers: 16
   mem_limit: ""
   network: "bridge"
   per_rpc_timeout_seconds: 360
