@@ -34,6 +34,12 @@ from evaluation.src.utils.prompts import get_prompt, format_prompt
 logger = logging.getLogger(__name__)
 
 # Default concurrent in-flight judge calls per AsyncOpenAI client.
+# Conservative value 4 historically chosen before multi-key support;
+# overridable per-yaml via ``judge_concurrency_per_key`` (see __init__).
+# Single judge call latency is ~25-30s wall (sophnet doubao-pro), so 16
+# in-flight gets ~0.55 call/s/key — fine within sophnet's per-key RPM
+# ceiling. Push higher (32/64) if user can verify their sophnet plan's
+# RPM allows it; watch for 429 storms in pipeline.log.
 _BASE_CONCURRENCY_PER_KEY = 4
 
 
@@ -89,17 +95,29 @@ class LLMJudge(BaseEvaluator):
         self.num_runs = config.get("num_runs", 3)
 
         # Concurrency cap + transient retry. Default scales with the
-        # number of api_keys: a single key keeps the original 4-concurrent
-        # budget, while N keys lift it to 4N. Adding a key to .env
-        # automatically buys parallelism instead of just spreading the
-        # same 4 in-flight across keys. Explicit ``judge_concurrency``
-        # overrides the default.
+        # number of api_keys: N keys × per-key in-flight budget. Adding a
+        # key to .env automatically buys parallelism instead of spreading
+        # the same total in-flight across keys. Two yaml knobs:
+        #   * judge_concurrency_per_key (int): per-AsyncOpenAI in-flight
+        #     budget. Default _BASE_CONCURRENCY_PER_KEY (4). Bump up to
+        #     saturate sophnet per-key RPM — e.g. 16 brings the 4-key
+        #     pool from 16→64 in-flight, observed ~4× speedup on Stage 4
+        #     in smoke3 (acc unchanged).
+        #   * judge_concurrency (int): hard override on the final number.
+        #     Wins over per-key calc if set.
+        per_key = int(
+            config.get("judge_concurrency_per_key") or _BASE_CONCURRENCY_PER_KEY
+        )
         configured = config.get("judge_concurrency")
         if configured is None:
-            self._concurrency = _BASE_CONCURRENCY_PER_KEY * len(self.clients)
+            self._concurrency = per_key * len(self.clients)
         else:
             self._concurrency = int(configured)
         self._max_retries = int(config.get("judge_max_retries", 4))
+        logger.info(
+            "LLMJudge initialized: keys=%d per_key=%d concurrency=%d retries=%d",
+            len(self.clients), per_key, self._concurrency, self._max_retries,
+        )
 
     def _judge_concurrency(self) -> int:
         return self._concurrency
