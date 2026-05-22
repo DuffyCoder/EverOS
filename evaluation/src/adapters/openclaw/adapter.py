@@ -1254,14 +1254,25 @@ class OpenClawAdapter(BaseAdapter):
                 "ov_session_id": ov_session_id,
             }])
 
-            # Fire-and-forget phase2: each LoCoMo session's commit
-            # returns immediately with a task_id; we batch-wait at
-            # end-of-conv. This lets the per-session loop push messages
-            # to OV faster than the phase2 LLM can process them, so the
-            # OV server's task queue absorbs the bottleneck instead of
-            # the client serializing on each commit. Critical for
-            # conv-parallel ingest where 10× this loop runs at once.
-            pending_task_ids: list[str] = []
+            # Phase 3 (官方 benchmark/locomo/openclaw/import_to_ov.py 风格):
+            # conv 内 sessions 串行 — 每 session push messages → commit →
+            # wait_for_task 到 status=completed 才进入下一个 session。
+            #
+            # Trade-off vs 之前的 fire-and-forget + batch_wait:
+            #   * 串行慢 (conv 内 wall time = N × per-task wait)
+            #   * 但 OV server 同一 conv 同一时刻只有 1 个 in-flight
+            #     fact-extract task,队列不堆积,单 task wait 时间可预期
+            #     (官方 import_to_ov.py max_attempts=3600s 对齐这个假设)
+            #   * Fail-fast on task failure: raise 让 outer asyncio.gather
+            #     把这个 conv 标 failed,不允许 partial ingest 进入 Stage 2
+            #     (smoke3-t1800 经验:warn-and-continue 让 dirty state 进
+            #     retrieval,acc 反而坏 —— eval 上下文里 partial ≠ degraded
+            #     gracefully,partial = dirty 数据)。
+            #
+            # task=completed 在 OV server 内部已包含 phase3 (vectordb
+            # embedding + HNSW write),所以串行 wait 完即 retrieval 安全,
+            # 不再需要 /api/v1/system/wait 全局 settle hook —— pipeline 的
+            # Stage 1 await Stage 2 天然就是 barrier。
             for session_key, msgs in sessions.items():
                 try:
                     result = await ingest_session_to_ov(
@@ -1270,76 +1281,54 @@ class OpenClawAdapter(BaseAdapter):
                         messages=msgs,
                         ov_session_id=ov_session_id,
                         commit_after=True,
-                        wait_task=False,
+                        wait_task=False,  # 拿 task_id 立即返回,下面我们 wait
                     )
                     self._append_events(sandbox, [{
                         "event": "ov_session_messages_added",
                         "conversation_id": conv_id,
                         **{k: v for k, v in result.items() if k != "_telemetry"},
                     }])
-                    status = result.get("status")
-                    if status in ("completed", "queued", "queued_phase2", "skipped_no_messages"):
-                        completed += 1
-                    else:
-                        failed += 1
                     tid = result.get("task_id")
-                    if tid:
-                        pending_task_ids.append(tid)
+                    if tid is None:
+                        # Empty session — ingest_session_to_ov skipped commit;
+                        # no task to wait. Count as completed (nothing failed).
+                        if result.get("status") == "skipped_no_messages":
+                            completed += 1
+                            continue
+                        raise OVIngestError(
+                            f"commit_session returned no task_id for "
+                            f"{session_key}: {result}"
+                        )
+                    # Per-session wait — wait_for_task raises OVIngestError on
+                    # task=failed/cancelled or on timeout (>task_timeout_sec).
+                    task = await client.wait_for_task(
+                        http, tid, timeout_sec=task_timeout,
+                    )
+                    result_dict = task.get("result") if isinstance(task, dict) else {}
+                    self._append_events(sandbox, [{
+                        "event": "ov_session_task_completed",
+                        "conversation_id": conv_id,
+                        "task_id": tid,
+                        "status": task.get("status") if isinstance(task, dict) else None,
+                        "memories_extracted": (
+                            (result_dict or {}).get("memories_extracted")
+                            if isinstance(result_dict, dict) else None
+                        ),
+                    }])
+                    completed += 1
                 except OVIngestError as err:
                     failed += 1
                     logger.error(
-                        "OV SDK ingest_session failed for %s/%s: %s",
+                        "OV ingest failed for %s/%s: %s",
                         conv_id, session_key, err,
-                    )
-                    self._append_events(sandbox, [{
-                        "event": "ov_session_add_failed",
-                        "conversation_id": conv_id,
-                        "session_key": session_key,
-                        "error": str(err),
-                    }])
-                    raise
-
-            # Batch wait: phase2 tasks must complete before the answer
-            # stage queries plugin auto-recall against user/<conv_id>/
-            # memories — otherwise QA can race ingest fact-extraction.
-            # Tasks are independent, so wait on them concurrently;
-            # otherwise this re-serializes the fire-and-forget design.
-            async def _wait_one(tid: str) -> tuple[str, Any]:
-                try:
-                    return tid, await client.wait_for_task(
-                        http, tid, timeout_sec=task_timeout,
-                    )
-                except OVIngestError as err:
-                    return tid, err
-
-            wait_results = await asyncio.gather(
-                *[_wait_one(tid) for tid in pending_task_ids]
-            )
-            for tid, outcome in wait_results:
-                if isinstance(outcome, OVIngestError):
-                    logger.warning(
-                        "OV phase2 task %s failed for %s: %s",
-                        tid, conv_id, outcome,
                     )
                     self._append_events(sandbox, [{
                         "event": "ov_session_task_failed",
                         "conversation_id": conv_id,
-                        "task_id": tid,
-                        "error": str(outcome),
+                        "session_key": session_key,
+                        "error": str(err),
                     }])
-                    continue
-                task = outcome
-                result_dict = task.get("result") if isinstance(task, dict) else {}
-                self._append_events(sandbox, [{
-                    "event": "ov_session_task_completed",
-                    "conversation_id": conv_id,
-                    "task_id": tid,
-                    "status": task.get("status") if isinstance(task, dict) else None,
-                    "memories_extracted": (
-                        (result_dict or {}).get("memories_extracted")
-                        if isinstance(result_dict, dict) else None
-                    ),
-                }])
+                    raise  # fail-fast: partial ingest == dirty retrieval state
 
         self._append_events(sandbox, [{
             "event": "ov_sdk_ingest_complete",
@@ -1349,11 +1338,6 @@ class OpenClawAdapter(BaseAdapter):
             "total_sessions": len(sessions),
             "ov_session_id": ov_session_id,
         }])
-
-        # Per-conv settle moved out: see Pipeline.wait_post_add_settle (Phase 2
-        # global barrier). Per-conv sleep couldn't hold a barrier across
-        # concurrent conv — while conv A slept, conv B's parallel ingest kept
-        # mutating OV's embedding/HNSW state.
 
     async def _ingest_one_session(
         self,
