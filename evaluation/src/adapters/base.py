@@ -133,19 +133,3 @@ class BaseAdapter(ABC):
         """
         return {}
 
-    async def wait_post_add_settle(self) -> Any:
-        """Optional hook: wait for backend to fully settle after all
-        conversations finish ``add()``.
-
-        Default no-op. Adapters that talk to an async backend (e.g. OpenViking
-        with phase2 fact-extract + phase3 vectordb/HNSW/dedup) should override
-        to issue a server-side "wait until idle" so Stage 2 Search doesn't
-        race ingest. Called once by Pipeline in the global barrier between
-        Stage 1 Add (batched over all conversations) and Stage 2 Search.
-
-        Returns:
-            None when no-op, otherwise an adapter-specific result dict
-            (e.g. final queue status) for diagnostics.
-        """
-        return None
-

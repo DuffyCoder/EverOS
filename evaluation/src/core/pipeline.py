@@ -298,36 +298,6 @@ class Pipeline:
             if index is not None:
                 self.logger.info("⏭️  Skipped Stage 1, using lazy loading")
 
-        # Global Post-Add Barrier (Phase 2: ingest-first, retrieve-after):
-        # Stage 1 Add is batched over ALL conversations; concurrent ingest
-        # finishes its task=completed handshake but the backend's embedding /
-        # semantic queues may still be draining. Per-conv settle inside
-        # adapter.add() can't hold a barrier across conv. The adapter hook
-        # below is called ONCE here, with all conv.add() already returned.
-        # Adapters that talk to async backends (OpenViking) implement it to
-        # block on a server-side "wait until queues idle" call; default no-op
-        # for backends that don't need it.
-        if add_just_completed and "search" in stages:
-            try:
-                settle_result = await self.adapter.wait_post_add_settle()
-            except Exception as err:  # noqa: BLE001
-                self.logger.warning(
-                    "wait_post_add_settle raised (non-fatal): %s", err
-                )
-                settle_result = None
-            if settle_result is not None:
-                queue_summary = ", ".join(
-                    f"{k}={v.get('processed', 0)}"
-                    for k, v in settle_result.items()
-                    if isinstance(v, dict)
-                )
-                self.console.print(
-                    f"[green]✅ Backend settle complete (queue status: {queue_summary})[/green]"
-                )
-                self.logger.info(
-                    "Backend settle returned: %s", settle_result
-                )
-
         # Post-Add Wait: for online API systems, wait for backend indexing to complete
         # Only wait if add just completed
         if add_just_completed:

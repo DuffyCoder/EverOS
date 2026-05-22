@@ -93,32 +93,16 @@ openclaw:
     # 等同禁用 agent 这一路 — 跟官方实际行为一致。好处:agent/default
     # namespace 不再被 ingest 写入,跨 conv 的 agent 池彻底干净。
     agent_id_template: "{conv_id}"
-    # Phase 2 / smoke3-global-settle-fix 数据: task_timeout=1800 让 21/32
-    # locomo_2 task 被 client cancel,OV server 上这些 task 在 Stage 2/3 期间
-    # 继续跑 (vectordb upsert/HNSW 仍在变化) → 脏读 retrieval。要真正
-    # "ingest complete then answer" 必须让 client 等到 OV server 真完成
-    # 所有 task。3 conv * ~23 task = 70 task @ ~55s/task = 64min wall clock,
-    # 7200s (2hr) 给充足 margin。代价: smoke3 总时长 ~2hr (vs 60min),full10
-    # 估 ~5-8hr。
-    task_timeout_sec: 7200
-    # Phase 2 (ingest-first, retrieve-after): per-conv settle 移到 pipeline
-    # 全局 barrier。POST /api/v1/system/wait 让 OV server 自己 active poll
-    # 所有 queue (embedding/semantic) 直到 idle 再返回,比固定 sleep 精确,
-    # 且发生在所有 conv.add() 完成之后,真正实现 "ingest 全部结束才 retrieval"。
-    # smoke3-t1800-settle1800 per-conv 实测: cat=1 单跳 acc -22pt (因 OV
-    # consolidation 抽象化具体 fact 在 conv A settle 期间被并发 conv 干扰)。
-    # 本配置走全局 barrier,期望 cat=1 恢复 + cat=2 多跳保持收益。
-    # OV server 端 wait_processed 每 500ms poll is_all_complete; timeout_sec
-    # 是 server 端 wait 的最大时长(超时 OV raise TimeoutError, client 端
-    # 我们视为非致命 warning 继续 Stage 2)。http_buffer_sec 是客户端 aiohttp
-    # 外层 timeout 的额外 margin,避免 client 比 server 早超时。
-    post_add_settle:
-      enabled: true
-      # Settle hook 实测在 task=completed 之后 OV queue 已经 idle,instant
-      # return (9ms in smoke3-global-settle-fix run)。timeout 是 cap,与
-      # task_timeout 对齐避免 client-server timeout 不一致。
-      timeout_sec: 7200
-      http_buffer_sec: 60
+    # Phase 3 (官方 benchmark/locomo/openclaw/import_to_ov.py 风格):
+    # adapter 改为 conv 内 session 串行 + 每 session wait_for_task 到
+    # status=completed 才进入下一个 session,失败立即 raise。
+    # task_timeout_sec 是 per-session task wait 上限,对齐官方
+    # max_attempts=3600 (1hr per task)。task=completed 在 OV server 内部
+    # 已经包含 phase3 (vectordb embedding + HNSW write),所以串行 wait
+    # 完成 == retrieval 安全,不再需要 /api/v1/system/wait hook。
+    # ingest 全部完成的 barrier 由 pipeline 内 Stage 1 await Stage 2 天然
+    # 提供 (对应官方 shell 里 import_to_ov.py 进程退出 → eval.py qa 启动)。
+    task_timeout_sec: 3600
   agent_llm:
     provider_id: "sophnet"
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
