@@ -243,7 +243,9 @@ def test_pop_answer_metrics_on_adapter():
         "duration_ms": 1,
         "stop_reason": "stop",
     }
-    adapter._emit_agent_run_complete(sandbox, "locomo_0", "qa0", resp, "q?")  # noqa: SLF001
+    adapter._emit_agent_run_complete(  # noqa: SLF001
+        sandbox, "locomo_0", "qa0", resp, "q?"
+    )
     metrics = adapter.pop_answer_metrics("qa0")
     assert metrics["final_context_tokens"] == 999
     assert adapter.pop_answer_metrics("qa0") == {}

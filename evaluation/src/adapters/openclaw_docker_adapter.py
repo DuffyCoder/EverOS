@@ -750,81 +750,76 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "timeout_seconds": agent_timeout,
         }
         try:
-            try:
-                resp = await self._arun_bridge_via_docker(
-                    conv_id, payload,
-                    timeout=float(self._exec_timeout),
-                )
-            except (BridgeError, BridgeTimeout) as err:
-                logger.warning("docker bridge failed for %s/%s: %s",
-                               conv_id, qid, err)
-                self._append_events(sandbox, [{
-                    "event": "agent_run_failed",
-                    "conversation_id": conv_id, "question_id": qid,
-                    "error": str(err),
-                }])
-                return ""
-
-            if not resp.get("ok"):
-                err = resp.get("error", "")
-                logger.warning("docker agent_run failed for %s/%s: %s",
-                               conv_id, qid, err)
-                self._append_events(sandbox, [{
-                    "event": "agent_run_failed",
-                    "conversation_id": conv_id, "question_id": qid,
-                    "error": err,
-                }])
-                return ""
-
-            # Inherit v0.7 D5 stop_reason=error guard from base behavior.
-            if resp.get("stop_reason") == "error":
-                reply_excerpt = (resp.get("reply") or "")[:200]
-                logger.warning(
-                    "docker agent_run completed but stop_reason=error for "
-                    "%s/%s; reply: %s", conv_id, qid, reply_excerpt,
-                )
-                self._append_events(sandbox, [{
-                    "event": "agent_run_internal_error",
-                    "conversation_id": conv_id, "question_id": qid,
-                    "reply_excerpt": reply_excerpt,
-                    "duration_ms": resp.get("duration_ms"),
-                }])
-                return ""
-
-            return self._emit_agent_run_complete(
-                sandbox,
-                conv_id,
-                qid,
-                resp,
-                query,
-                session_id=session_id_for_run,
-                container_state_dir="/workspace/state",
+            resp = await self._arun_bridge_via_docker(
+                conv_id, payload,
+                timeout=float(self._exec_timeout),
             )
-        finally:
-            # Mirror official openclaw-eval/eval.py reset_session: rename
-            # the .jsonl after each QA so the next question gets a fresh
-            # short-term conversation buffer. OV plugin's pendingTokens
-            # accumulator lives on the OV server keyed by ov_session_id
-            # (UUID) and is unaffected by file-system renames here, so
-            # assemble/before_prompt_build still see the accumulated OV
-            # session state across QAs. Without this, all QAs in the conv
-            # would share one growing .jsonl and the LLM prompt would
-            # blow up past the context window mid-conv.
-            try:
-                await self._arun_bridge_via_docker(
-                    conv_id,
-                    {
-                        **self._bridge_base_payload(sandbox),
-                        "command": "archive_session",
-                        "session_id": session_id_for_run,
-                    },
-                    timeout=10.0,
-                )
-            except Exception as err:  # noqa: BLE001
-                logger.debug(
-                    "post-QA archive_session non-fatal failure for "
-                    "%s/%s: %s", conv_id, qid, err,
-                )
+        except (BridgeError, BridgeTimeout) as err:
+            logger.warning("docker bridge failed for %s/%s: %s",
+                           conv_id, qid, err)
+            self._append_events(sandbox, [{
+                "event": "agent_run_failed",
+                "conversation_id": conv_id, "question_id": qid,
+                "error": str(err),
+            }])
+            return ""
+
+        if not resp.get("ok"):
+            err = resp.get("error", "")
+            logger.warning("docker agent_run failed for %s/%s: %s",
+                           conv_id, qid, err)
+            self._append_events(sandbox, [{
+                "event": "agent_run_failed",
+                "conversation_id": conv_id, "question_id": qid,
+                "error": err,
+            }])
+            return ""
+
+        # Inherit v0.7 D5 stop_reason=error guard from base behavior.
+        if resp.get("stop_reason") == "error":
+            reply_excerpt = (resp.get("reply") or "")[:200]
+            logger.warning(
+                "docker agent_run completed but stop_reason=error for "
+                "%s/%s; reply: %s", conv_id, qid, reply_excerpt,
+            )
+            self._append_events(sandbox, [{
+                "event": "agent_run_internal_error",
+                "conversation_id": conv_id, "question_id": qid,
+                "reply_excerpt": reply_excerpt,
+                "duration_ms": resp.get("duration_ms"),
+            }])
+            return ""
+
+        # Per-QA reset_session, mirroring official openclaw-eval/eval.py:
+        # rename the current .jsonl so the next QA starts with a fresh
+        # short-term conversation buffer. OV plugin's pendingTokens
+        # accumulator lives on the OV server keyed by ov_session_id (UUID)
+        # and is unaffected by file-system renames here.
+        try:
+            await self._arun_bridge_via_docker(
+                conv_id,
+                {
+                    **self._bridge_base_payload(sandbox),
+                    "command": "archive_session",
+                    "session_id": session_id_for_run,
+                },
+                timeout=10.0,
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.debug(
+                "archive_session non-fatal failure for %s/%s: %s",
+                conv_id, qid, err,
+            )
+
+        return self._emit_agent_run_complete(
+            sandbox,
+            conv_id,
+            qid,
+            resp,
+            query,
+            session_id=session_id_for_run,
+            container_state_dir="/workspace/state",
+        )
 
     async def _invoke_bridge(
         self, sandbox: dict, payload: dict, timeout: float

@@ -63,60 +63,6 @@ _DEFAULT_ANSWER_PROMPT = (
 )
 
 
-def _read_latest_session_final_text(sandbox: dict) -> Optional[str]:
-    """Return the last assistant text from the sandbox's most recently
-    archived agent session jsonl, or None if no usable jsonl is found.
-
-    The openclaw agent runner archives one ``<uuid>.jsonl.<unix_ts>`` file
-    per QA turn under ``sessions_dir``. The most recent file (by the
-    fixed-width unix-ts suffix, equivalent to a name sort) corresponds
-    to the agent_run that just finished. Using the name suffix instead
-    of mtime survives later ``tar``/``cp -p`` rewrites of mtime; in
-    production the two agree.
-
-    Each line is a turn event; assistant text content lives in
-    ``event.message.content[*].text`` for entries whose ``type=="message"``
-    and ``message.role=="assistant"``. Tool-only turns produce no text and
-    are skipped. The final assistant text is the agent's actual answer.
-    """
-    sessions_dir_str = sandbox.get("sessions_dir")
-    if not sessions_dir_str:
-        return None
-    sessions_dir = Path(sessions_dir_str)
-    if not sessions_dir.is_dir():
-        return None
-    candidates = list(sessions_dir.glob("*.jsonl.*"))
-    if not candidates:
-        return None
-    latest = max(candidates, key=lambda p: p.name)
-    last_text = ""
-    try:
-        with latest.open() as f:
-            for line in f:
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ev.get("type") != "message":
-                    continue
-                msg = ev.get("message") or {}
-                if msg.get("role") != "assistant":
-                    continue
-                content = msg.get("content")
-                buf = ""
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "text":
-                            buf += c.get("text", "")
-                elif isinstance(content, str):
-                    buf = content
-                if buf:
-                    last_text = buf
-    except OSError:
-        return None
-    return last_text.strip() if last_text else None
-
-
 @register_adapter("openclaw")
 class OpenClawAdapter(BaseAdapter):
     def __init__(self, config: dict, output_dir: Any = None):
@@ -201,24 +147,7 @@ class OpenClawAdapter(BaseAdapter):
             "forced_terminate": bool(resp.get("forced_terminate", False)),
             **token_metrics,
         }])
-
-        # openclaw bridge returns the FIRST assistant text from the agent
-        # loop. When the agent does preamble → tool_call → tool_result →
-        # final_answer, that first text is the preamble ("Let me search
-        # for ...") and the real answer lives in a later assistant turn.
-        # Pull the LAST assistant text from the just-archived session jsonl
-        # and prefer it over the bridge's reply.
-        reply = (resp.get("reply") or "").strip()
-        final = _read_latest_session_final_text(sandbox)
-        if final and final != reply:
-            self._append_events(sandbox, [{
-                "event": "agent_reply_overridden_to_final",
-                "conversation_id": conv_id, "question_id": qid,
-                "first_len": len(reply),
-                "final_len": len(final),
-            }])
-            return final
-        return reply
+        return (resp.get("reply") or "").strip()
 
     # ----------------------------------------------------------------- prepare
     async def prepare(
