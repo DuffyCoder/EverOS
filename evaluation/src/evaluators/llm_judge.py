@@ -43,6 +43,38 @@ logger = logging.getLogger(__name__)
 _BASE_CONCURRENCY_PER_KEY = 4
 
 
+def _is_sentinel_answer(answer: Optional[str]) -> bool:
+    """Detect Stage 3 sentinel / empty answers that should bypass the judge.
+
+    ``answer_stage.py:307/340/343`` writes literal ``"Error: ..."`` strings
+    into ``AnswerResult.answer`` on transient adapter failures. Feeding
+    these to the LLM just produces a near-deterministic WRONG. We treat
+    them as judge-unavailable (None judgments) so they drop out of the
+    accuracy denominator.
+    """
+    if not answer:
+        return True
+    stripped = answer.strip()
+    if not stripped:
+        return True
+    return stripped.startswith("Error:")
+
+
+def _majority_vote(judgments: List[Optional[bool]]) -> Optional[bool]:
+    """Per-result verdict for ``eval_results.json`` / hybrid category stats.
+
+    None when all judgments are unavailable. Strict majority of non-None
+    votes — a tie resolves to False (conservative; do not silently
+    inflate a borderline QA). Mirrors how
+    ``LLMJudge.evaluate`` already excludes None from the denominator.
+    """
+    non_none = [j for j in judgments if j is not None]
+    if not non_none:
+        return None
+    positives = sum(1 for j in non_none if j)
+    return positives * 2 > len(non_none)
+
+
 @register_evaluator("llm_judge")
 class LLMJudge(BaseEvaluator):
     """LLM judge evaluator."""
@@ -343,18 +375,34 @@ class LLMJudge(BaseEvaluator):
         could not produce a verdict (transient retries exhausted, empty
         content, parse failure, etc.). Aggregation excludes None values
         from the accuracy denominator.
+
+        Sentinel/empty answers (Audit #7 R1/R2/R3): when Stage 3 fails
+        internally it surfaces ``"Error: ..."`` (or ``""``) as the
+        answer. Feeding it to the judge would burn API quota only to
+        get a near-deterministic WRONG that silently pulls accuracy
+        down. Treat sentinel answers as judge-unavailable (all
+        judgments None) — same semantics as transient judge failures
+        so they drop out of the denominator. Stage 3 still emits a
+        loud ❌ log so operators see the underlying adapter failure.
         """
         question = answer_result.question
         golden_answer = answer_result.golden_answer
         generated_answer = answer_result.answer
 
-        # Multiple evaluations, keep independent judgments (Optional[bool])
         judgments: List[Optional[bool]] = []
-        for _ in range(self.num_runs):
-            is_correct = await self._judge_answer(
-                question, golden_answer, generated_answer
+        if _is_sentinel_answer(generated_answer):
+            print(
+                f"  ⚠️ LLMJudge: sentinel/empty answer for "
+                f"{answer_result.question_id} "
+                f"({(generated_answer or '')[:60]!r}) — judge skipped"
             )
-            judgments.append(is_correct)
+            judgments = [None] * self.num_runs
+        else:
+            for _ in range(self.num_runs):
+                judgment = await self._judge_answer(
+                    question, golden_answer, generated_answer
+                )
+                judgments.append(judgment)
 
         # Use judgment_1, judgment_2, ... format
         llm_judgments = {
@@ -367,6 +415,7 @@ class LLMJudge(BaseEvaluator):
             "golden_answer": golden_answer,
             "generated_answer": generated_answer,
             "llm_judgments": llm_judgments,
+            "is_correct": _majority_vote(judgments),
             "category": answer_result.category,
         }
 

@@ -185,13 +185,23 @@ class HybridEvaluator(BaseEvaluator):
         )
     
     def _calculate_category_stats(self, detailed_results: List[dict]) -> dict:
-        """Calculate per-category statistics."""
+        """Calculate per-category statistics.
+
+        ``is_correct is None`` means the judge was unavailable (transient
+        retries exhausted, sentinel/empty answer, etc.). Those QAs drop
+        out of both numerator and denominator — same semantics as
+        ``LLMJudge.evaluate`` so the hybrid breakdown agrees with the
+        top-level ``open_correct``.
+        """
         category_data = defaultdict(lambda: {"correct": 0, "total": 0})
-        
+
         for result in detailed_results:
             category = result.get("category", "unknown")
+            ic = result.get("is_correct")
+            if ic is None:
+                continue
             category_data[category]["total"] += 1
-            if result.get("is_correct", False):
+            if ic:
                 category_data[category]["correct"] += 1
         
         # Add accuracy
