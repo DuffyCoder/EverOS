@@ -282,6 +282,15 @@ class Pipeline:
             self.console.print(
                 "\n[yellow]⏭️  Skip Add stage (already completed)[/yellow]"
             )
+            # When Add is skipped, the pre-add init that add() normally triggers
+            # (e.g. spawning the docker runtime per conversation) never runs, so
+            # later stages have no runtime to talk to. prepare() is idempotent,
+            # so call it here to restore that init on the resume/replay path.
+            await self.adapter.prepare(
+                conversations=dataset.conversations,
+                output_dir=self.output_dir,
+                checkpoint_manager=self.checkpoint,
+            )
             # Rebuild index metadata (handled by adapter, only needed for local systems)
             # For online APIs, returns None but still need to set results["index"]
             index = self.adapter.build_lazy_index(
@@ -289,6 +298,13 @@ class Pipeline:
             )
             results["index"] = index  # Set even if None
         else:
+            # Replay path (Add not in stages): same rationale as above — prepare()
+            # the adapter runtime before later stages run against it.
+            await self.adapter.prepare(
+                conversations=dataset.conversations,
+                output_dir=self.output_dir,
+                checkpoint_manager=self.checkpoint,
+            )
             # Rebuild index metadata (handled by adapter, only needed for local systems)
             # For online APIs, returns None but still need to set results["index"]
             index = self.adapter.build_lazy_index(

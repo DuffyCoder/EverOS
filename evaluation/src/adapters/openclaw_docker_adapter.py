@@ -657,6 +657,12 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         We do this in prepare() so add()'s ingest step can issue bridge
         commands against an already-warm container.
         """
+        # Idempotent: if containers are already spawned (e.g. add() ran this
+        # process, or prepare() was called twice on the replay path), don't
+        # double-spawn. The pipeline now calls prepare() explicitly when Add is
+        # skipped, so this guard keeps that path safe.
+        if self._docker_handles:
+            return
         await super().prepare(
             conversations=conversations,
             output_dir=output_dir,
