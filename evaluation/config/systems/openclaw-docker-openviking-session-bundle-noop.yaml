@@ -163,7 +163,13 @@ openclaw:
     answer_mode: "shared"
 
 openclaw_docker:
-  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-slim"
+  # findlast bridge variant: same base image + the committed
+  # openclaw_eval_bridge.mjs that reads the LAST assistant payload (final
+  # answer) instead of payloads[0] (preamble). The plain -slim tag in the
+  # registry still bakes the old payloads[0] bridge, so pin -findlast-slim
+  # explicitly. Rebuild from source: docker build COPYs
+  # openclaw-eval/container/openclaw_eval_bridge.mjs into /eval/.
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim"
   # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
   # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
   # is the bottleneck (single sophnet key for fact-extract), so total
