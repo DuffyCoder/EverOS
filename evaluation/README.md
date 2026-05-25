@@ -362,6 +362,13 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 
 ### Plugin selection via CLI (openclaw-docker only)
 
+> For a full, copy-pasteable LoCoMo reproduction (OpenViking & memory-core
+> baselines via the `openclaw-docker` adapter — prerequisites, docker images,
+> required env vars, and the per-round `round_finish.sh` reset), see
+> [`docs/locomo-fair-baseline.md`](../docs/locomo-fair-baseline.md). The
+> OpenViking system config is
+> `evaluation/config/systems/openclaw-docker-openviking-session-bundle-noop.yaml`.
+
 The `openclaw-docker` adapter accepts CLI overrides for the memory and
 context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
 
