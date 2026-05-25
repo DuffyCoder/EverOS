@@ -112,6 +112,43 @@ def load_locomo_dataset(data_path: str, dataset_name: str = "locomo", max_conten
     )
 
 
+def format_locomo_message_content_for_ingest(msg: dict) -> str:
+    """Format LoCoMo message body for OpenViking text-part ingest.
+
+    When multimodal ``resources`` import is unavailable, preserve image signals in
+    plain text so Extract and vector search can use them in production and eval.
+
+    Layout (aligned with openclaw-openviking-eval, plus dataset ``query``):
+
+        {speaker text}
+        {img_url}: {blip_caption}
+        [image search query: {query}]
+
+    ``blip_caption`` without ``img_url`` is appended as ``({blip})``.
+    """
+    text = (msg.get("text") or "").strip()
+    lines: List[str] = [text] if text else []
+
+    img_urls = msg.get("img_url") or []
+    if isinstance(img_urls, str):
+        img_urls = [img_urls]
+
+    blip = (msg.get("blip_caption") or "").strip()
+    normalized_urls = [u.strip() for u in img_urls if isinstance(u, str) and u.strip()]
+
+    if normalized_urls:
+        for url in normalized_urls:
+            lines.append(f"{url}: {blip}" if blip else url)
+    elif blip:
+        lines.append(f"({blip})")
+
+    query = (msg.get("query") or "").strip()
+    if query:
+        lines.append(f"[image search query: {query}]")
+
+    return "\n".join(lines)
+
+
 def _convert_locomo_conversation(conversation_data: dict, conv_id: str, max_content_length: Optional[int] = None) -> Conversation:
     """
     Convert LoCoMo conversation.
@@ -218,12 +255,7 @@ def _convert_locomo_conversation(conversation_data: dict, conv_id: str, max_cont
                 msg_timestamp = current_session_time + timedelta(seconds=msg_idx * time_interval)
                 timestamp_source = "fake" if is_fake_timestamp else "session_level"
             
-            # Handle image information
-            content = msg['text']
-            if msg.get("img_url"):
-                blip_caption = msg.get("blip_caption", "an image")
-                speaker_name = msg['speaker']
-                content = f"[{speaker_name} shared an image: {blip_caption}] {content}"
+            content = format_locomo_message_content_for_ingest(msg)
             
             # Apply content length limit (if specified)
             if max_content_length and len(content) > max_content_length:

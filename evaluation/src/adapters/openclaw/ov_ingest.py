@@ -7,6 +7,8 @@ Mirrors the canonical OV bench ingest in
       ov_session_id = POST /api/v1/sessions
       for each msg:
           POST /api/v1/sessions/<sid>/messages   (role=user, parts=[{type:text,text:"[<speaker>]: <body>"}])
+          ``<body>`` includes url / blip / query lines when present (see
+          ``format_locomo_message_content_for_ingest`` in ``loaders.py``).
       commit_resp = POST /api/v1/sessions/<sid>/commit  (telemetry=True)
       poll GET /api/v1/tasks/<task_id> until status="completed"
 

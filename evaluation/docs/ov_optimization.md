@@ -1,5 +1,7 @@
 # ov测试分析
 
+> 实施优先级与生产约束见 **[ov-improvement-roadmap.md](./ov-improvement-roadmap.md)**（不含 eval-only 削弱 assemble 类改动）。
+
 # 问题1：时间等细节信息回答失败
 
 问题描述：目前链路中assemble链路失效，导致autorecall里面收集到的长期记忆内容无法涵盖会话中的细节，完全丢失了相关细节。
