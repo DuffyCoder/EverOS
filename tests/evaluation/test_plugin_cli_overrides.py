@@ -217,8 +217,6 @@ def test_image_override_skips_manifest(tmp_path: Path):
     assert not res.triggered_build
 
 
-# ---------- --per-qa-isolation ---------------------------------------------
-
 def test_kind_mismatch_exits(tmp_path: Path):
     cfg = _baseline_yaml()
     with pytest.raises(SystemExit):
