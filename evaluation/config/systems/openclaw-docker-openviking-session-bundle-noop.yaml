@@ -69,7 +69,12 @@ openclaw:
   answer_mode: "agent_local"
   memory_mode: "noop"
   context_engine_mode: "openviking"
-  agent_timeout_seconds: 90
+  # 90s was too tight: ~5/1540 QAs hit the cap and returned the openclaw
+  # timeout error string ("increase agents.defaults.timeoutSeconds") or a
+  # truncated mid-tool-use preamble as their "answer" — framework-induced
+  # wrong answers. 240s lets the iterative archive-search agent finish while
+  # still capping runaway loops (bridge hardTimeout=+15s, exec cap=360s).
+  agent_timeout_seconds: 240
   # Empty tail: agent_run loop is skipped entirely for memory_mode=noop
   # (see ov_ingest below — OV is populated via direct HTTP, not afterTurn).
   ingest_session_tail: ""
@@ -151,7 +156,10 @@ openclaw:
       input: ["text"]
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
       context_window: 128000
-      max_tokens: 4096
+      # 4096 was fully consumed by a reasoning/thinking block on 1 QA
+      # (locomo_4_qa119, stop=length, empty answer -> judge None). 8192 leaves
+      # room for thinking + the final answer text.
+      max_tokens: 8192
       # Tier-A provider usage: yaml compat + docker _patch_streaming_usage_compat
       # (see openclaw/config_patches.py). Without both, metrics fall back to
       # session-transcript tiktoken (Tier B) in usage_metrics.py.
