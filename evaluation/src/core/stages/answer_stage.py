@@ -11,7 +11,14 @@ from tqdm import tqdm
 
 from evaluation.src.utils.llm_keys import count_llm_key_pool
 
-from evaluation.src.core.data_models import QAPair, SearchResult, AnswerResult
+from evaluation.src.core.data_models import (
+    ANSWER_SENTINEL_DEADLINE,
+    ANSWER_SENTINEL_FAILED,
+    ANSWER_SENTINEL_TIMEOUT,
+    QAPair,
+    SearchResult,
+    AnswerResult,
+)
 from evaluation.src.adapters.base import BaseAdapter
 from evaluation.src.utils.checkpoint import CheckpointManager
 from evaluation.src.core.benchmark_context import (
@@ -43,7 +50,15 @@ def _resolve_max_concurrent(answer_cfg: dict) -> int:
         return max(raw, 1)
     s = str(raw).strip().lower()
     if s != MAX_CONCURRENT_AUTO:
-        return max(int(s), 1)
+        try:
+            return max(int(s), 1)
+        except ValueError:
+            # A typo'd value (e.g. "aut0", "sixteen") must not crash the whole
+            # answer stage with an opaque ValueError; fall back to auto sizing.
+            print(
+                f"  ⚠️  answer.max_concurrent={raw!r} is not an int or "
+                f"'auto'; falling back to auto (key-pool sizing)."
+            )
     pool = count_llm_key_pool()
     return pool if pool >= 1 else _LEGACY_DEFAULT_CONCURRENCY
 
@@ -248,12 +263,17 @@ async def run_answer_stage(
     async def answer_single_with_tracking(qa, search_result):
         nonlocal completed, failed
 
-        async with semaphore, conv_locks[search_result.conversation_id]:
+        # Acquire the per-conv lock BEFORE the global semaphore: otherwise a QA
+        # that holds a semaphore slot while blocked on its conv lock starves
+        # other conversations of slots, collapsing cross-conv concurrency toward
+        # 1. Grabbing the conv lock first means a slot is only held once the QA
+        # can actually run. (Single lock-acquire order everywhere → no cycle.)
+        async with conv_locks[search_result.conversation_id], semaphore:
             context = ""
             context_chars = 0
             context_tokens = 0
             answer_latency_ms = None
-            answer = "Error: Failed to generate answer"
+            answer = ANSWER_SENTINEL_FAILED
 
             try:
                 # Build context
@@ -304,7 +324,7 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                                 f"stopping retries for {qa.question_id}."
                             )
                             ctx.record_fallback()
-                            answer = "Error: deadline exceeded before retry"
+                            answer = ANSWER_SENTINEL_DEADLINE
                             failed += 1
                             break
                         t_start = time.perf_counter()
@@ -337,12 +357,12 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                             else:
                                 tqdm.write(f"  ❌ Timeout after {max_retries} attempts for {qa.question_id}: {qa.question[:50]}...")
                                 ctx.record_fallback()
-                                answer = "Error: Answer generation timeout after retries"
+                                answer = ANSWER_SENTINEL_TIMEOUT
                                 failed += 1
 
             except Exception as e:
                 tqdm.write(f"  ⚠️ Answer generation failed for {qa.question_id}: {e}")
-                answer = "Error: Failed to generate answer"
+                answer = ANSWER_SENTINEL_FAILED
                 failed += 1
 
             retrieval_meta = search_result.retrieval_metadata or {}

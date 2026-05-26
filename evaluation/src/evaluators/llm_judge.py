@@ -26,7 +26,11 @@ from tqdm import tqdm
 
 from evaluation.src.evaluators.base import BaseEvaluator
 from evaluation.src.evaluators.registry import register_evaluator
-from evaluation.src.core.data_models import AnswerResult, EvaluationResult
+from evaluation.src.core.data_models import (
+    ANSWER_ERROR_SENTINELS,
+    AnswerResult,
+    EvaluationResult,
+)
 from evaluation.src.utils.llm_keys import collect_llm_key_pool
 from evaluation.src.utils.prompts import get_prompt, format_prompt
 
@@ -46,18 +50,21 @@ _BASE_CONCURRENCY_PER_KEY = 4
 def _is_sentinel_answer(answer: Optional[str]) -> bool:
     """Detect Stage 3 sentinel / empty answers that should bypass the judge.
 
-    ``answer_stage.py:307/340/343`` writes literal ``"Error: ..."`` strings
-    into ``AnswerResult.answer`` on transient adapter failures. Feeding
-    these to the LLM just produces a near-deterministic WRONG. We treat
-    them as judge-unavailable (None judgments) so they drop out of the
-    accuracy denominator.
+    The answer stage writes one of ``ANSWER_ERROR_SENTINELS`` (data_models)
+    into ``AnswerResult.answer`` when generation fails (timeout / retries
+    exhausted). Feeding these to the LLM just produces a near-deterministic
+    WRONG, so we treat them as judge-unavailable (None judgments) and they
+    drop out of the accuracy denominator. We match the EXACT sentinel set
+    rather than ``startswith("Error:")`` so a legitimate model answer that
+    merely begins with "Error:" (e.g. quoting an error message from the
+    conversation) is still judged normally instead of silently excluded.
     """
     if not answer:
         return True
     stripped = answer.strip()
     if not stripped:
         return True
-    return stripped.startswith("Error:")
+    return stripped in ANSWER_ERROR_SENTINELS
 
 
 def _majority_vote(judgments: List[Optional[bool]]) -> Optional[bool]:

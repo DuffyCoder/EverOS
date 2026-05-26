@@ -174,6 +174,28 @@ class TestSentinelDetection:
         assert called["n"] == 2, "must run num_runs judge calls on a real answer"
         assert result["is_correct"] is True
 
+    async def test_legit_error_prefixed_answer_is_judged(self):
+        """A real answer that merely BEGINS with 'Error:' (not one of the exact
+        framework sentinels) must still be judged, not silently dropped. Guards
+        against the old broad ``startswith('Error:')`` false-positive."""
+        judge = _make_judge(num_runs=2)
+        called = {"n": 0}
+
+        async def fire(**_kwargs):
+            called["n"] += 1
+            return _label_response("CORRECT")
+
+        judge.client.chat.completions.create = fire
+
+        result = await judge._evaluate_single_answer(
+            _ar("Error: insufficient funds was the message Alice quoted")
+        )
+        assert called["n"] == 2, (
+            "an answer that only starts with 'Error:' but is not an exact "
+            "sentinel must be judged, not treated as judge-unavailable"
+        )
+        assert result["is_correct"] is True
+
 
 @pytest.mark.asyncio
 class TestIsCorrectMajority:

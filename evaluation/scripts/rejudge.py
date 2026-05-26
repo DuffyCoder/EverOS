@@ -54,7 +54,10 @@ import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
-from evaluation.src.evaluators.llm_judge import LLMJudge  # noqa: E402
+from evaluation.src.evaluators.llm_judge import (  # noqa: E402
+    LLMJudge,
+    _majority_vote,
+)
 
 
 def _resolve(val: str) -> str:
@@ -294,6 +297,16 @@ async def main_async() -> int:
                 ))
     await asyncio.gather(*tasks)
     pbar.close()
+
+    # Refresh each entry's per-question verdict from the now-patched judgments.
+    # _aggregate (below) recomputes the top-level accuracy, but the per-entry
+    # ``is_correct`` (read by hybrid category stats and external tooling) would
+    # otherwise keep its stale pre-rejudge majority and disagree with the
+    # recomputed top-level number. Use the same _majority_vote as LLMJudge.
+    for entry in entries:
+        lj = entry.get("llm_judgments") or {}
+        verdicts = [lj.get(f"judgment_{i + 1}") for i in range(num_runs)]
+        entry["is_correct"] = _majority_vote(verdicts)
 
     after = _count_none(entries, num_runs)
     recovered = [b - a for b, a in zip(before, after)]

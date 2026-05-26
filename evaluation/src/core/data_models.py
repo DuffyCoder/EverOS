@@ -9,6 +9,24 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
+# Canonical Stage-3 answer sentinels. The answer stage writes one of these
+# literal strings into ``AnswerResult.answer`` when answer generation fails
+# (timeout / retries exhausted), and the LLM judge treats an answer that is
+# EXACTLY one of these as judge-unavailable (excluded from the accuracy
+# denominator) rather than judging it. Matching the exact set — not a broad
+# ``startswith("Error:")`` — avoids dropping a legitimate model answer that
+# merely happens to begin with "Error:". Defined here (a leaf module) so both
+# the answer stage and the evaluator share one source of truth and can't drift.
+ANSWER_SENTINEL_FAILED = "Error: Failed to generate answer"
+ANSWER_SENTINEL_DEADLINE = "Error: deadline exceeded before retry"
+ANSWER_SENTINEL_TIMEOUT = "Error: Answer generation timeout after retries"
+ANSWER_ERROR_SENTINELS = frozenset({
+    ANSWER_SENTINEL_FAILED,
+    ANSWER_SENTINEL_DEADLINE,
+    ANSWER_SENTINEL_TIMEOUT,
+})
+
+
 @dataclass
 class Message:
     """Standard message format."""
