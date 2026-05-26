@@ -177,7 +177,11 @@ openclaw_docker:
   # registry still bakes the old payloads[0] bridge, so pin -findlast-slim
   # explicitly. Rebuild from source: docker build COPYs
   # openclaw-eval/container/openclaw_eval_bridge.mjs into /eval/.
-  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim"
+  # Pinned by digest (not just tag) for bit-level reproducibility: ghcr tags
+  # are mutable, so a re-push under the same tag could silently change what
+  # teammates pull. The tag is kept only for readability; docker resolves by
+  # the @sha256 digest. Re-pin the digest if the image is ever rebuilt.
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim@sha256:b73fe1cea8a1a2862fb48ba155bb09216728bb1404c4f9b4c2f1202b79698a87"
   # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
   # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
   # is the bottleneck (single sophnet key for fact-extract), so total

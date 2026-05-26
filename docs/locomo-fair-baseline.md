@@ -73,7 +73,10 @@ name collisions are resolved by the rerank stage at QA time.
    bridge silently grades the preamble instead of the answer.
    - `openclaw-eval:7da23c3-memory-core-0000000-slim` (A1)
    - `ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim`
-     (B1, B2) — the tag pinned in `openclaw-docker-openviking-session-bundle-noop.yaml`.
+     (B1, B2) — a public ghcr image. The yaml
+     (`openclaw-docker-openviking-session-bundle-noop.yaml`) pins it by digest
+     (`@sha256:b73fe1ce…`) so teammates pull the exact build regardless of any
+     later re-push under the same tag; the adapter `docker pull`s it on demand.
 2. **EverMemOS infra running** via `docker-compose up -d`.
 3. **OpenViking server running** on host port 1933 with `ov.conf`
    configured for Sophnet VLM/embedding and SiliconFlow rerank.
