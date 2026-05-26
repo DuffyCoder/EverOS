@@ -362,11 +362,18 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 
 ### Plugin selection via CLI (openclaw-docker only)
 
+> For a full, copy-pasteable LoCoMo reproduction (OpenViking & memory-core
+> baselines via the `openclaw-docker` adapter — prerequisites, docker images,
+> required env vars, and the per-round `round_finish.sh` reset), see
+> [`docs/locomo-fair-baseline.md`](../docs/locomo-fair-baseline.md). The
+> OpenViking system config is
+> `evaluation/config/systems/openclaw-docker-openviking-session-bundle-noop.yaml`.
+
 The `openclaw-docker` adapter accepts CLI overrides for the memory and
 context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
 
 > **Note**: the `--memory-plugin` / `--context-engine` / `--image` /
-> `--build-missing` / `--per-qa-isolation` flags are honored by the
+> `--build-missing` flags are honored by the
 > `openclaw-docker` adapter only. Other adapters (mem0, memos, zep,
 > evermemos online API, …) do not consume these flags; pass them and
 > the eval will run, but the flags will have no effect on those
@@ -380,14 +387,12 @@ uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
 # Context-engine plugin only (memory slot wired to noop)
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
     --memory-plugin none \
-    --context-engine hypercompositor@0.9.6 \
-    --per-qa-isolation snapshot
+    --context-engine hypercompositor@0.9.6
 
 # Both plugins, in one image
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
     --memory-plugin evermemos \
-    --context-engine hypercompositor@0.9.6 \
-    --per-qa-isolation auto
+    --context-engine hypercompositor@0.9.6
 
 # Explicit image override (skips manifest lookup)
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
@@ -402,12 +407,6 @@ Plugin ids and their kinds live in
 `evaluation/config/plugin_registry.yaml`. Image tags built by `build.py`
 are recorded in `evaluation/config/image_manifest.yaml` and used by the
 CLI's image resolver.
-
-`--per-qa-isolation snapshot` enables workspace state snapshot/restore so
-context-engine plugins under R2 routing don't leak QA n's question/answer
-into QA n+1's `assemble()`. See
-[`docs/per_qa_isolation.md`](docs/per_qa_isolation.md) for the
-mechanism. Default is `auto` — snapshot iff a context engine is selected.
 
 ## 📄 License
 

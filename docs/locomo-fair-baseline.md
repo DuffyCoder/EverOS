@@ -67,9 +67,16 @@ name collisions are resolved by the rerank stage at QA time.
 
 ## Prerequisites
 
-1. **Docker images built** with the openclaw-eval container code:
+1. **Docker images built** with the openclaw-eval container code. The image
+   must bake the current `openclaw_eval_bridge.mjs`, which reads the LAST
+   assistant payload via `findLast`; a stale image with the old `payloads[0]`
+   bridge silently grades the preamble instead of the answer.
    - `openclaw-eval:7da23c3-memory-core-0000000-slim` (A1)
-   - `openclaw-eval:7da23c3-openviking-b7e6bcb-slim` (B1, B2)
+   - `ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim`
+     (B1, B2) — a public ghcr image. The yaml
+     (`openclaw-docker-openviking-session-bundle-noop.yaml`) pins it by digest
+     (`@sha256:b73fe1ce…`) so teammates pull the exact build regardless of any
+     later re-push under the same tag; the adapter `docker pull`s it on demand.
 2. **EverMemOS infra running** via `docker-compose up -d`.
 3. **OpenViking server running** on host port 1933 with `ov.conf`
    configured for Sophnet VLM/embedding and SiliconFlow rerank.

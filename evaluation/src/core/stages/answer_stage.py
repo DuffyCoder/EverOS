@@ -3,11 +3,22 @@ Answer stage - generate answers.
 """
 import asyncio
 import time
+from collections import defaultdict
+from itertools import zip_longest
 from typing import List, Optional
 from logging import Logger
 from tqdm import tqdm
 
-from evaluation.src.core.data_models import QAPair, SearchResult, AnswerResult
+from evaluation.src.utils.llm_keys import count_llm_key_pool
+
+from evaluation.src.core.data_models import (
+    ANSWER_SENTINEL_DEADLINE,
+    ANSWER_SENTINEL_FAILED,
+    ANSWER_SENTINEL_TIMEOUT,
+    QAPair,
+    SearchResult,
+    AnswerResult,
+)
 from evaluation.src.adapters.base import BaseAdapter
 from evaluation.src.utils.checkpoint import CheckpointManager
 from evaluation.src.core.benchmark_context import (
@@ -24,6 +35,32 @@ from evaluation.src.core.benchmark_context import (
 # dependency on tiktoken is only paid when tests / pipelines actually call
 # estimate_tokens().
 _TOKEN_ENCODING = None
+
+# yaml sentinel for "size concurrency to the LLM key pool".
+MAX_CONCURRENT_AUTO = "auto"
+# Fallback when yaml says ``auto`` but no LLM_API_KEY[_<N>] is configured —
+# preserves the historical pre-multi-key default for non-sophnet pipelines.
+_LEGACY_DEFAULT_CONCURRENCY = 50
+
+
+def _resolve_max_concurrent(answer_cfg: dict) -> int:
+    """Resolve ``answer.max_concurrent`` yaml value (int or ``"auto"``)."""
+    raw = answer_cfg.get("max_concurrent", MAX_CONCURRENT_AUTO)
+    if isinstance(raw, int):
+        return max(raw, 1)
+    s = str(raw).strip().lower()
+    if s != MAX_CONCURRENT_AUTO:
+        try:
+            return max(int(s), 1)
+        except ValueError:
+            # A typo'd value (e.g. "aut0", "sixteen") must not crash the whole
+            # answer stage with an opaque ValueError; fall back to auto sizing.
+            print(
+                f"  ⚠️  answer.max_concurrent={raw!r} is not an int or "
+                f"'auto'; falling back to auto (key-pool sizing)."
+            )
+    pool = count_llm_key_pool()
+    return pool if pool >= 1 else _LEGACY_DEFAULT_CONCURRENCY
 
 
 def estimate_tokens(text: str) -> int:
@@ -116,12 +153,11 @@ async def run_answer_stage(
     print(f"{'='*60}")
     
     SAVE_INTERVAL = 400  # Save every 400 tasks
-    # v0.7 D5: configurable concurrency. Default 50 preserves historical
-    # behavior; sophnet/rate-limited backends should reduce to 4-10 to
-    # avoid 429 throttling pollution. Read from
-    # adapter.config['answer']['max_concurrent'] when present.
+    # v0.7 D5: configurable concurrency. ``max_concurrent`` may be an int or
+    # ``"auto"`` — auto scales to the host's LLM_API_KEY[_<N>] pool size so
+    # adding keys to .env automatically widens cross-conv parallelism.
     answer_cfg = (getattr(adapter, "config", None) or {}).get("answer") or {}
-    MAX_CONCURRENT = int(answer_cfg.get("max_concurrent", 50))
+    MAX_CONCURRENT = _resolve_max_concurrent(answer_cfg)
     
     # Load fine-grained checkpoint
     all_answer_results = {}
@@ -164,7 +200,22 @@ async def run_answer_stage(
                                     "error": "no search_result for question_id"},
             )
         pending_tasks.append((qa, sr))
-    
+
+    # Interleave pending tasks round-robin by conversation so the global
+    # semaphore's first MAX_CONCURRENT slots fan out to distinct conv ids
+    # instead of being monopolized by the first conv's QAs (which would
+    # all serialize behind the same per-conv lock and defeat parallelism).
+    if pending_tasks:
+        by_conv: dict[str, list] = defaultdict(list)
+        for qa, sr in pending_tasks:
+            by_conv[sr.conversation_id].append((qa, sr))
+        pending_tasks = [
+            task
+            for column in zip_longest(*by_conv.values())
+            for task in column
+            if task is not None
+        ]
+
     if not pending_tasks:
         print(f"✅ All questions already processed!")
         # Convert to AnswerResult object list (original order)
@@ -185,13 +236,22 @@ async def run_answer_stage(
         return results
     
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    # Per-conv serialization: adapters whose backing store mutates per-conv
+    # state at answer time (e.g. openclaw-docker bundles all QAs into one OV
+    # session_id + shared session jsonl) cannot tolerate concurrent QAs of
+    # the same conv. The global semaphore alone is not enough — if it admits
+    # two QAs of the same conv simultaneously they race the in-container
+    # write lock. ``conv_locks`` enforces strict within-conv serialization
+    # while leaving cross-conv work free to run up to MAX_CONCURRENT.
+    conv_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
     completed = processed_count
     failed = 0
     start_time = time.time()
+    print(f"Answer concurrency: {MAX_CONCURRENT} (per-conv serialized)")
 
     recorder = latency_recorder or NULL_RECORDER
     answer_max_retries = max_retries_for(recorder.retry_policy)
-    
+
     # Use tqdm progress bar
     pbar = tqdm(
         total=total_qa_count,
@@ -199,16 +259,21 @@ async def run_answer_stage(
         desc="💬 Answer Progress",
         unit="qa"
     )
-    
+
     async def answer_single_with_tracking(qa, search_result):
         nonlocal completed, failed
 
-        async with semaphore:
+        # Acquire the per-conv lock BEFORE the global semaphore: otherwise a QA
+        # that holds a semaphore slot while blocked on its conv lock starves
+        # other conversations of slots, collapsing cross-conv concurrency toward
+        # 1. Grabbing the conv lock first means a slot is only held once the QA
+        # can actually run. (Single lock-acquire order everywhere → no cycle.)
+        async with conv_locks[search_result.conversation_id], semaphore:
             context = ""
             context_chars = 0
             context_tokens = 0
             answer_latency_ms = None
-            answer = "Error: Failed to generate answer"
+            answer = ANSWER_SENTINEL_FAILED
 
             try:
                 # Build context
@@ -259,7 +324,7 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                                 f"stopping retries for {qa.question_id}."
                             )
                             ctx.record_fallback()
-                            answer = "Error: deadline exceeded before retry"
+                            answer = ANSWER_SENTINEL_DEADLINE
                             failed += 1
                             break
                         t_start = time.perf_counter()
@@ -292,12 +357,12 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                             else:
                                 tqdm.write(f"  ❌ Timeout after {max_retries} attempts for {qa.question_id}: {qa.question[:50]}...")
                                 ctx.record_fallback()
-                                answer = "Error: Answer generation timeout after retries"
+                                answer = ANSWER_SENTINEL_TIMEOUT
                                 failed += 1
 
             except Exception as e:
                 tqdm.write(f"  ⚠️ Answer generation failed for {qa.question_id}: {e}")
-                answer = "Error: Failed to generate answer"
+                answer = ANSWER_SENTINEL_FAILED
                 failed += 1
 
             retrieval_meta = search_result.retrieval_metadata or {}

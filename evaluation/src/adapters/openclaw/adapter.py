@@ -63,60 +63,6 @@ _DEFAULT_ANSWER_PROMPT = (
 )
 
 
-def _read_latest_session_final_text(sandbox: dict) -> Optional[str]:
-    """Return the last assistant text from the sandbox's most recently
-    archived agent session jsonl, or None if no usable jsonl is found.
-
-    The openclaw agent runner archives one ``<uuid>.jsonl.<unix_ts>`` file
-    per QA turn under ``sessions_dir``. The most recent file (by the
-    fixed-width unix-ts suffix, equivalent to a name sort) corresponds
-    to the agent_run that just finished. Using the name suffix instead
-    of mtime survives later ``tar``/``cp -p`` rewrites of mtime; in
-    production the two agree.
-
-    Each line is a turn event; assistant text content lives in
-    ``event.message.content[*].text`` for entries whose ``type=="message"``
-    and ``message.role=="assistant"``. Tool-only turns produce no text and
-    are skipped. The final assistant text is the agent's actual answer.
-    """
-    sessions_dir_str = sandbox.get("sessions_dir")
-    if not sessions_dir_str:
-        return None
-    sessions_dir = Path(sessions_dir_str)
-    if not sessions_dir.is_dir():
-        return None
-    candidates = list(sessions_dir.glob("*.jsonl.*"))
-    if not candidates:
-        return None
-    latest = max(candidates, key=lambda p: p.name)
-    last_text = ""
-    try:
-        with latest.open() as f:
-            for line in f:
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ev.get("type") != "message":
-                    continue
-                msg = ev.get("message") or {}
-                if msg.get("role") != "assistant":
-                    continue
-                content = msg.get("content")
-                buf = ""
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "text":
-                            buf += c.get("text", "")
-                elif isinstance(content, str):
-                    buf = content
-                if buf:
-                    last_text = buf
-    except OSError:
-        return None
-    return last_text.strip() if last_text else None
-
-
 @register_adapter("openclaw")
 class OpenClawAdapter(BaseAdapter):
     def __init__(self, config: dict, output_dir: Any = None):
@@ -201,24 +147,7 @@ class OpenClawAdapter(BaseAdapter):
             "forced_terminate": bool(resp.get("forced_terminate", False)),
             **token_metrics,
         }])
-
-        # openclaw bridge returns the FIRST assistant text from the agent
-        # loop. When the agent does preamble → tool_call → tool_result →
-        # final_answer, that first text is the preamble ("Let me search
-        # for ...") and the real answer lives in a later assistant turn.
-        # Pull the LAST assistant text from the just-archived session jsonl
-        # and prefer it over the bridge's reply.
-        reply = (resp.get("reply") or "").strip()
-        final = _read_latest_session_final_text(sandbox)
-        if final and final != reply:
-            self._append_events(sandbox, [{
-                "event": "agent_reply_overridden_to_final",
-                "conversation_id": conv_id, "question_id": qid,
-                "first_len": len(reply),
-                "final_len": len(final),
-            }])
-            return final
-        return reply
+        return (resp.get("reply") or "").strip()
 
     # ----------------------------------------------------------------- prepare
     async def prepare(
@@ -622,6 +551,43 @@ class OpenClawAdapter(BaseAdapter):
                 "conversation_id": conv_id, "question_id": qid,
                 "reply_excerpt": reply_excerpt,
                 "duration_ms": resp.get("duration_ms"),
+            }])
+            return ""
+
+        # parallelism-bug guard: stop_reason ∉ {"stop","end_turn"} means
+        # the agent loop didn't terminate via a clean assistant final.
+        # In practice (LoCoMo full-locomo10 run @ 4c3945f) ~10% of QAs
+        # under cross-conv parallelism hit LLM streaming idle timeout
+        # (60s default in openclaw, sophnet chunk-gap > 60s under load) →
+        # stop_reason=null. The runner's payloads.ts then falls back to
+        # ``lastAssistant``, which (because openclaw sessionStore aliases
+        # all per-QA session-ids to ONE UUID per conv container) is the
+        # PRIOR turn's archived assistant message. Bridge happily ships
+        # that as ``reply``, ``stop_reason: null``. Without this guard the
+        # adapter commits the prior QA's answer under the current QA's
+        # question_id → 12% duplicate-answer rate, ~15pt accuracy drop.
+        # Reject these as failed; outer eval treats empty as wrong (real
+        # signal), beats pollution (fake signal that biases categories).
+        # End_turn is anthropic's natural stop; stop is openai/sophnet's.
+        # Length (max-tokens) and toolUse are rare here and indicate the
+        # final answer never landed — also reject.
+        stop_reason = resp.get("stop_reason")
+        if stop_reason not in ("stop", "end_turn"):
+            reply_excerpt = (resp.get("reply") or "")[:200]
+            logger.warning(
+                "agent_run incomplete for %s/%s: stop_reason=%r dur_ms=%s "
+                "reply_len=%d (likely stale fallback) — treating as failed; "
+                "excerpt: %s",
+                conv_id, qid, stop_reason, resp.get("duration_ms"),
+                len(resp.get("reply") or ""), reply_excerpt,
+            )
+            self._append_events(sandbox, [{
+                "event": "agent_run_incomplete",
+                "conversation_id": conv_id, "question_id": qid,
+                "stop_reason": stop_reason,
+                "duration_ms": resp.get("duration_ms"),
+                "reply_len": len(resp.get("reply") or ""),
+                "reply_excerpt": reply_excerpt,
             }])
             return ""
 
@@ -1217,14 +1183,25 @@ class OpenClawAdapter(BaseAdapter):
                 "ov_session_id": ov_session_id,
             }])
 
-            # Fire-and-forget phase2: each LoCoMo session's commit
-            # returns immediately with a task_id; we batch-wait at
-            # end-of-conv. This lets the per-session loop push messages
-            # to OV faster than the phase2 LLM can process them, so the
-            # OV server's task queue absorbs the bottleneck instead of
-            # the client serializing on each commit. Critical for
-            # conv-parallel ingest where 10× this loop runs at once.
-            pending_task_ids: list[str] = []
+            # Phase 3 (官方 benchmark/locomo/openclaw/import_to_ov.py 风格):
+            # conv 内 sessions 串行 — 每 session push messages → commit →
+            # wait_for_task 到 status=completed 才进入下一个 session。
+            #
+            # Trade-off vs 之前的 fire-and-forget + batch_wait:
+            #   * 串行慢 (conv 内 wall time = N × per-task wait)
+            #   * 但 OV server 同一 conv 同一时刻只有 1 个 in-flight
+            #     fact-extract task,队列不堆积,单 task wait 时间可预期
+            #     (官方 import_to_ov.py max_attempts=3600s 对齐这个假设)
+            #   * Fail-fast on task failure: raise 让 outer asyncio.gather
+            #     把这个 conv 标 failed,不允许 partial ingest 进入 Stage 2
+            #     (smoke3-t1800 经验:warn-and-continue 让 dirty state 进
+            #     retrieval,acc 反而坏 —— eval 上下文里 partial ≠ degraded
+            #     gracefully,partial = dirty 数据)。
+            #
+            # task=completed 在 OV server 内部已包含 phase3 (vectordb
+            # embedding + HNSW write),所以串行 wait 完即 retrieval 安全,
+            # 不再需要 /api/v1/system/wait 全局 settle hook —— pipeline 的
+            # Stage 1 await Stage 2 天然就是 barrier。
             for session_key, msgs in sessions.items():
                 try:
                     result = await ingest_session_to_ov(
@@ -1233,74 +1210,54 @@ class OpenClawAdapter(BaseAdapter):
                         messages=msgs,
                         ov_session_id=ov_session_id,
                         commit_after=True,
-                        wait_task=False,
+                        wait_task=False,  # 拿 task_id 立即返回,下面我们 wait
                     )
                     self._append_events(sandbox, [{
                         "event": "ov_session_messages_added",
                         "conversation_id": conv_id,
                         **{k: v for k, v in result.items() if k != "_telemetry"},
                     }])
-                    status = result.get("status")
-                    if status in ("completed", "queued", "queued_phase2", "skipped_no_messages"):
-                        completed += 1
-                    else:
-                        failed += 1
                     tid = result.get("task_id")
-                    if tid:
-                        pending_task_ids.append(tid)
+                    if tid is None:
+                        # Empty session — ingest_session_to_ov skipped commit;
+                        # no task to wait. Count as completed (nothing failed).
+                        if result.get("status") == "skipped_no_messages":
+                            completed += 1
+                            continue
+                        raise OVIngestError(
+                            f"commit_session returned no task_id for "
+                            f"{session_key}: {result}"
+                        )
+                    # Per-session wait — wait_for_task raises OVIngestError on
+                    # task=failed/cancelled or on timeout (>task_timeout_sec).
+                    task = await client.wait_for_task(
+                        http, tid, timeout_sec=task_timeout,
+                    )
+                    result_dict = task.get("result") if isinstance(task, dict) else {}
+                    self._append_events(sandbox, [{
+                        "event": "ov_session_task_completed",
+                        "conversation_id": conv_id,
+                        "task_id": tid,
+                        "status": task.get("status") if isinstance(task, dict) else None,
+                        "memories_extracted": (
+                            (result_dict or {}).get("memories_extracted")
+                            if isinstance(result_dict, dict) else None
+                        ),
+                    }])
+                    completed += 1
                 except OVIngestError as err:
                     failed += 1
                     logger.error(
-                        "OV SDK ingest_session failed for %s/%s: %s",
+                        "OV ingest failed for %s/%s: %s",
                         conv_id, session_key, err,
-                    )
-                    self._append_events(sandbox, [{
-                        "event": "ov_session_add_failed",
-                        "conversation_id": conv_id,
-                        "session_key": session_key,
-                        "error": str(err),
-                    }])
-                    raise
-
-            # Batch wait: phase2 tasks must complete before the answer
-            # stage queries plugin auto-recall against user/<conv_id>/
-            # memories — otherwise QA can race ingest fact-extraction.
-            # Tasks are independent, so wait on them concurrently;
-            # otherwise this re-serializes the fire-and-forget design.
-            async def _wait_one(tid: str) -> tuple[str, Any]:
-                try:
-                    return tid, await client.wait_for_task(http, tid)
-                except OVIngestError as err:
-                    return tid, err
-
-            wait_results = await asyncio.gather(
-                *[_wait_one(tid) for tid in pending_task_ids]
-            )
-            for tid, outcome in wait_results:
-                if isinstance(outcome, OVIngestError):
-                    logger.warning(
-                        "OV phase2 task %s failed for %s: %s",
-                        tid, conv_id, outcome,
                     )
                     self._append_events(sandbox, [{
                         "event": "ov_session_task_failed",
                         "conversation_id": conv_id,
-                        "task_id": tid,
-                        "error": str(outcome),
+                        "session_key": session_key,
+                        "error": str(err),
                     }])
-                    continue
-                task = outcome
-                result_dict = task.get("result") if isinstance(task, dict) else {}
-                self._append_events(sandbox, [{
-                    "event": "ov_session_task_completed",
-                    "conversation_id": conv_id,
-                    "task_id": tid,
-                    "status": task.get("status") if isinstance(task, dict) else None,
-                    "memories_extracted": (
-                        (result_dict or {}).get("memories_extracted")
-                        if isinstance(result_dict, dict) else None
-                    ),
-                }])
+                    raise  # fail-fast: partial ingest == dirty retrieval state
 
         self._append_events(sandbox, [{
             "event": "ov_sdk_ingest_complete",

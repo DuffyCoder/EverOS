@@ -185,13 +185,28 @@ class HybridEvaluator(BaseEvaluator):
         )
     
     def _calculate_category_stats(self, detailed_results: List[dict]) -> dict:
-        """Calculate per-category statistics."""
+        """Calculate per-category statistics.
+
+        ``is_correct is None`` means the judge was unavailable (transient
+        retries exhausted, sentinel/empty answer, etc.); those QAs drop out
+        of both numerator and denominator, same as ``LLMJudge.evaluate``.
+
+        Each ``is_correct`` is the per-question MAJORITY verdict across the
+        num_runs judgments (``_majority_vote``), so this breakdown is a
+        per-question count. The top-level ``open_correct`` is instead the
+        MEAN of per-run accuracies, so on split-vote questions (e.g. 2/3
+        CORRECT) the two can differ by a small amount — they are two valid
+        views (per-question majority vs per-run mean), not a discrepancy.
+        """
         category_data = defaultdict(lambda: {"correct": 0, "total": 0})
-        
+
         for result in detailed_results:
             category = result.get("category", "unknown")
+            ic = result.get("is_correct")
+            if ic is None:
+                continue
             category_data[category]["total"] += 1
-            if result.get("is_correct", False):
+            if ic:
                 category_data[category]["correct"] += 1
         
         # Add accuracy

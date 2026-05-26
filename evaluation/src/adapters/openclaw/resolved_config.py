@@ -150,8 +150,25 @@ def build_openclaw_resolved_config(
         providers[provider_id] = provider_cfg
         resolved["agents"]["defaults"]["model"] = model_ref
 
+        # LLM streaming idle timeout. OpenClaw's built-in default is 60s
+        # (pi-embedded-runner/run/llm-idle-timeout.ts DEFAULT_LLM_IDLE_TIMEOUT_MS).
+        # Under cross-conv parallelism the provider's inter-chunk gap can
+        # exceed 60s → idle abort → runner falls back to lastAssistant in
+        # payloads.ts:220, which (because openclaw sessionStore aliases all
+        # per-QA session-ids to one UUID per conv container) ends up being
+        # the previous QA's archived assistant message — surfacing as the
+        # current QA's reply and polluting accuracy. Surface this knob via
+        # ``agent_llm.idle_timeout_seconds`` so the operator can widen it.
+        idle_timeout_seconds = agent_llm.get("idle_timeout_seconds")
+        if idle_timeout_seconds is not None:
+            resolved["agents"]["defaults"]["llm"] = {
+                "idleTimeoutSeconds": int(idle_timeout_seconds)
+            }
+
     # === plugins (allow + slots + entries) ===============================
-    resolved["plugins"] = _build_plugins_section(memory_mode, context_engine_mode)
+    resolved["plugins"] = _build_plugins_section(
+        memory_mode, context_engine_mode
+    )
 
     return resolved
 

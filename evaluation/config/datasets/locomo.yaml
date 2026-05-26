@@ -29,7 +29,16 @@ evaluation:
     base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   
   num_runs: 3  # Number of judging runs per question
-  
+
+  # Stage 4 throughput. Total in-flight judge calls = N_keys × per-key budget.
+  # Full10 base (1540 q × 3 runs = 4620 calls) at the historical default
+  # per_key=4 with 4 LLM_API_KEY[_N] env keys → 16 in-flight, 35min on smoke3
+  # (≈0.55 call/s wall, ~29s per call). Raising per_key to 16 with 4 keys →
+  # 64 in-flight, expected ~4× speedup on Stage 4 (~9min smoke3) without
+  # affecting acc (concurrency only changes wall time, not judge content).
+  # If sophnet returns 429 storm in pipeline.log, lower this value.
+  judge_concurrency_per_key: 16
+
   # Filter settings
   # LoCoMo categories: "1", "2", "3", "5" (adversarial questions)
   filter_category: [5]  # Can use integers or strings, like [5] or ["5"]

@@ -96,7 +96,6 @@ def test_no_cli_args_preserves_yaml(tmp_path: Path):
         memory_plugin=None,
         context_engine=None,
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),
@@ -120,7 +119,6 @@ def test_memory_plugin_evermemos_overrides_and_resolves_image(tmp_path: Path):
         memory_plugin="evermemos",
         context_engine=None,
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),
@@ -139,7 +137,6 @@ def test_memory_plugin_none_wires_to_noop(tmp_path: Path):
         memory_plugin="none",
         context_engine=None,
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),
@@ -158,7 +155,6 @@ def test_memory_plugin_memory_core_no_image_lookup(tmp_path: Path):
         memory_plugin="memory-core",
         context_engine=None,
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),  # 3 entries; would be ambiguous
@@ -179,7 +175,6 @@ def test_context_engine_hypercompositor_resolves_image(tmp_path: Path):
         memory_plugin=None,
         context_engine="hypercompositor@0.9.6",
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),
@@ -197,7 +192,6 @@ def test_context_engine_none_unsets_field(tmp_path: Path):
         memory_plugin="evermemos",  # need at least one constraint for image
         context_engine="none",
         image=None,
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=_seeded_manifest(tmp_path),
@@ -214,7 +208,6 @@ def test_image_override_skips_manifest(tmp_path: Path):
         memory_plugin="evermemos",
         context_engine=None,
         image="openclaw-eval:custom-tag",
-        per_qa_isolation=None,
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=tmp_path / "no-manifest.yaml",  # nonexistent OK
@@ -224,25 +217,6 @@ def test_image_override_skips_manifest(tmp_path: Path):
     assert not res.triggered_build
 
 
-# ---------- --per-qa-isolation ---------------------------------------------
-
-def test_per_qa_isolation_passes_through(tmp_path: Path):
-    cfg = _baseline_yaml()
-    apply_plugin_overrides(
-        cfg,
-        memory_plugin=None,
-        context_engine=None,
-        image=None,
-        per_qa_isolation="snapshot",
-        build_missing=False,
-        registry_path=SHIPPED_REGISTRY,
-        manifest_path=_seeded_manifest(tmp_path),
-    )
-    assert cfg["openclaw_docker"]["per_qa_isolation"] == "snapshot"
-
-
-# ---------- error paths ----------------------------------------------------
-
 def test_kind_mismatch_exits(tmp_path: Path):
     cfg = _baseline_yaml()
     with pytest.raises(SystemExit):
@@ -251,7 +225,6 @@ def test_kind_mismatch_exits(tmp_path: Path):
             memory_plugin="hypercompositor@0.9.6",  # wrong slot
             context_engine=None,
             image=None,
-            per_qa_isolation=None,
             build_missing=False,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=_seeded_manifest(tmp_path),
@@ -266,7 +239,6 @@ def test_unknown_plugin_exits(tmp_path: Path):
             memory_plugin="totally-unknown",
             context_engine=None,
             image=None,
-            per_qa_isolation=None,
             build_missing=False,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=_seeded_manifest(tmp_path),
@@ -281,7 +253,6 @@ def test_npm_without_version_exits(tmp_path: Path):
             memory_plugin=None,
             context_engine="hypercompositor",  # no @version
             image=None,
-            per_qa_isolation=None,
             build_missing=False,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=_seeded_manifest(tmp_path),
@@ -296,7 +267,6 @@ def test_image_lookup_miss_without_build_missing_exits(tmp_path: Path):
             memory_plugin="evermemos",
             context_engine="hypercompositor@0.9.6",  # not in seeded manifest
             image=None,
-            per_qa_isolation=None,
             build_missing=False,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=_seeded_manifest(tmp_path),
@@ -337,7 +307,6 @@ def test_build_missing_invokes_build_py_and_re_resolves(tmp_path: Path):
             memory_plugin="evermemos",
             context_engine="hypercompositor@0.9.6",
             image=None,
-            per_qa_isolation=None,
             build_missing=True,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=manifest_path,
@@ -360,7 +329,6 @@ def test_build_missing_failure_exits(tmp_path: Path):
                 memory_plugin="evermemos",
                 context_engine="hypercompositor@0.9.6",
                 image=None,
-                per_qa_isolation=None,
                 build_missing=True,
                 registry_path=SHIPPED_REGISTRY,
                 manifest_path=_seeded_manifest(tmp_path),
@@ -380,7 +348,6 @@ def test_apply_overrides_is_idempotent(tmp_path: Path):
         memory_plugin="evermemos",
         context_engine=None,
         image=None,
-        per_qa_isolation="auto",
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=manifest_path,
@@ -388,7 +355,6 @@ def test_apply_overrides_is_idempotent(tmp_path: Path):
     snapshot1 = {
         "memory_mode": cfg["openclaw"]["memory_mode"],
         "image": cfg["openclaw_docker"]["image"],
-        "isolation": cfg["openclaw_docker"]["per_qa_isolation"],
     }
 
     res2 = apply_plugin_overrides(
@@ -396,7 +362,6 @@ def test_apply_overrides_is_idempotent(tmp_path: Path):
         memory_plugin="evermemos",
         context_engine=None,
         image=None,
-        per_qa_isolation="auto",
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=manifest_path,
@@ -404,7 +369,6 @@ def test_apply_overrides_is_idempotent(tmp_path: Path):
     snapshot2 = {
         "memory_mode": cfg["openclaw"]["memory_mode"],
         "image": cfg["openclaw_docker"]["image"],
-        "isolation": cfg["openclaw_docker"]["per_qa_isolation"],
     }
     assert snapshot1 == snapshot2
     assert res1 == res2
@@ -444,7 +408,6 @@ def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
             memory_plugin="evermemos",
             context_engine="hypercompositor@0.9.6",
             image=None,
-            per_qa_isolation=None,
             build_missing=True,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=manifest_path,
@@ -501,7 +464,6 @@ def test_build_missing_does_not_pass_none_plugin_to_build(tmp_path: Path):
             memory_plugin="none",
             context_engine="hypercompositor@0.9.6",
             image=None,
-            per_qa_isolation=None,
             build_missing=True,
             registry_path=SHIPPED_REGISTRY,
             manifest_path=manifest_path,
@@ -536,7 +498,6 @@ def test_two_plugins_both_overrides_image_resolves_full_combo(tmp_path: Path):
         memory_plugin="evermemos",
         context_engine="hypercompositor@0.9.6",
         image=None,
-        per_qa_isolation="auto",
         build_missing=False,
         registry_path=SHIPPED_REGISTRY,
         manifest_path=manifest_path,
@@ -544,4 +505,3 @@ def test_two_plugins_both_overrides_image_resolves_full_combo(tmp_path: Path):
     assert cfg["openclaw"]["memory_mode"] == "evermemos"
     assert cfg["openclaw"]["context_engine_mode"] == "hypercompositor"
     assert cfg["openclaw_docker"]["image"] == full_image
-    assert cfg["openclaw_docker"]["per_qa_isolation"] == "auto"

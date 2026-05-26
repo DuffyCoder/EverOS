@@ -536,7 +536,20 @@ async function handleAgentRun(input, launcher) {
   // due to lingering background timers; surface them via `killed` rather
   // than failing the whole call.
 
-  const reply = parsed.payloads?.[0]?.text ?? "";
+  // `parsed.payloads` is the chronological list of ALL assistant text
+  // emissions from `agent --local --json` — preamble ("Let's search...")
+  // → tool-use → final answer — see openclaw/src/agents/pi-embedded-
+  // subscribe.ts:239 (assistantTexts append-per-emission) and
+  // pi-embedded-runner/run/payloads.ts:271-302 (replyItems preserves
+  // order). The eval framework wants the FINAL answer, so we read the
+  // last text-bearing entry. Reading index 0 returns the preamble,
+  // which is what the LoCoMo eval graded for ~6 wrongly-rejected
+  // unanimous-WRONG cases (e.g. qa37/44/68/74/78/81 in locomo_1) before
+  // this fix.
+  const replyPayload =
+    parsed.payloads?.findLast((p) => p && typeof p.text === "string" && p.text.length > 0)
+    ?? parsed.payloads?.at(-1);
+  const reply = replyPayload?.text ?? "";
   const meta = parsed.meta || {};
   return {
     ok: true,

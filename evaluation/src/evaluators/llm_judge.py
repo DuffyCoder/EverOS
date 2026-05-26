@@ -18,7 +18,6 @@ Three judgment outcomes per call:
 import asyncio
 import json
 import logging
-import os
 import numpy as np
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
@@ -27,17 +26,60 @@ from tqdm import tqdm
 
 from evaluation.src.evaluators.base import BaseEvaluator
 from evaluation.src.evaluators.registry import register_evaluator
-from evaluation.src.core.data_models import AnswerResult, EvaluationResult
+from evaluation.src.core.data_models import (
+    ANSWER_ERROR_SENTINELS,
+    AnswerResult,
+    EvaluationResult,
+)
+from evaluation.src.utils.llm_keys import collect_llm_key_pool
 from evaluation.src.utils.prompts import get_prompt, format_prompt
 
 
 logger = logging.getLogger(__name__)
 
-# Upper bound for scanning ``LLM_API_KEY_<n>`` env vars. n in [2, _ENV_KEY_SCAN_MAX].
-_ENV_KEY_SCAN_MAX = 32
-
 # Default concurrent in-flight judge calls per AsyncOpenAI client.
+# Conservative value 4 historically chosen before multi-key support;
+# overridable per-yaml via ``judge_concurrency_per_key`` (see __init__).
+# Single judge call latency is ~25-30s wall (sophnet doubao-pro), so 16
+# in-flight gets ~0.55 call/s/key — fine within sophnet's per-key RPM
+# ceiling. Push higher (32/64) if user can verify their sophnet plan's
+# RPM allows it; watch for 429 storms in pipeline.log.
 _BASE_CONCURRENCY_PER_KEY = 4
+
+
+def _is_sentinel_answer(answer: Optional[str]) -> bool:
+    """Detect Stage 3 sentinel / empty answers that should bypass the judge.
+
+    The answer stage writes one of ``ANSWER_ERROR_SENTINELS`` (data_models)
+    into ``AnswerResult.answer`` when generation fails (timeout / retries
+    exhausted). Feeding these to the LLM just produces a near-deterministic
+    WRONG, so we treat them as judge-unavailable (None judgments) and they
+    drop out of the accuracy denominator. We match the EXACT sentinel set
+    rather than ``startswith("Error:")`` so a legitimate model answer that
+    merely begins with "Error:" (e.g. quoting an error message from the
+    conversation) is still judged normally instead of silently excluded.
+    """
+    if not answer:
+        return True
+    stripped = answer.strip()
+    if not stripped:
+        return True
+    return stripped in ANSWER_ERROR_SENTINELS
+
+
+def _majority_vote(judgments: List[Optional[bool]]) -> Optional[bool]:
+    """Per-result verdict for ``eval_results.json`` / hybrid category stats.
+
+    None when all judgments are unavailable. Strict majority of non-None
+    votes — a tie resolves to False (conservative; do not silently
+    inflate a borderline QA). Mirrors how
+    ``LLMJudge.evaluate`` already excludes None from the denominator.
+    """
+    non_none = [j for j in judgments if j is not None]
+    if not non_none:
+        return None
+    positives = sum(1 for j in non_none if j)
+    return positives * 2 > len(non_none)
 
 
 @register_evaluator("llm_judge")
@@ -66,19 +108,11 @@ class LLMJudge(BaseEvaluator):
             if isinstance(single, str) and single.strip():
                 api_keys = [single]
         # Env fallback: when caller passed nothing or only a single key,
-        # scan LLM_API_KEY / LLM_API_KEY_2 / ... numeric suffix vars.
-        # This lets the main eval pipeline (cli.py) pick up extra keys
-        # without changing dataset yaml. Scans the full range so a gap
-        # (e.g. _2 unset but _3 set) does not silently drop later keys.
+        # scan LLM_API_KEY / LLM_API_KEY_2 / ... numeric suffix vars via the
+        # shared helper. Adding keys to .env then auto-widens the pool here
+        # too — no separate config change required.
         if len(api_keys) <= 1:
-            env_keys: list[str] = []
-            primary = os.environ.get("LLM_API_KEY", "").strip()
-            if primary:
-                env_keys.append(primary)
-            for n in range(2, _ENV_KEY_SCAN_MAX + 1):
-                v = os.environ.get(f"LLM_API_KEY_{n}", "").strip()
-                if v:
-                    env_keys.append(v)
+            env_keys = collect_llm_key_pool()
             # Merge yaml-provided key with env extras, preserving order
             # and dedup-ing.
             api_keys = list(dict.fromkeys(api_keys + env_keys))
@@ -100,17 +134,29 @@ class LLMJudge(BaseEvaluator):
         self.num_runs = config.get("num_runs", 3)
 
         # Concurrency cap + transient retry. Default scales with the
-        # number of api_keys: a single key keeps the original 4-concurrent
-        # budget, while N keys lift it to 4N. Adding a key to .env
-        # automatically buys parallelism instead of just spreading the
-        # same 4 in-flight across keys. Explicit ``judge_concurrency``
-        # overrides the default.
+        # number of api_keys: N keys × per-key in-flight budget. Adding a
+        # key to .env automatically buys parallelism instead of spreading
+        # the same total in-flight across keys. Two yaml knobs:
+        #   * judge_concurrency_per_key (int): per-AsyncOpenAI in-flight
+        #     budget. Default _BASE_CONCURRENCY_PER_KEY (4). Bump up to
+        #     saturate sophnet per-key RPM — e.g. 16 brings the 4-key
+        #     pool from 16→64 in-flight, observed ~4× speedup on Stage 4
+        #     in smoke3 (acc unchanged).
+        #   * judge_concurrency (int): hard override on the final number.
+        #     Wins over per-key calc if set.
+        per_key = int(
+            config.get("judge_concurrency_per_key") or _BASE_CONCURRENCY_PER_KEY
+        )
         configured = config.get("judge_concurrency")
         if configured is None:
-            self._concurrency = _BASE_CONCURRENCY_PER_KEY * len(self.clients)
+            self._concurrency = per_key * len(self.clients)
         else:
             self._concurrency = int(configured)
         self._max_retries = int(config.get("judge_max_retries", 4))
+        logger.info(
+            "LLMJudge initialized: keys=%d per_key=%d concurrency=%d retries=%d",
+            len(self.clients), per_key, self._concurrency, self._max_retries,
+        )
 
     def _judge_concurrency(self) -> int:
         return self._concurrency
@@ -336,18 +382,34 @@ class LLMJudge(BaseEvaluator):
         could not produce a verdict (transient retries exhausted, empty
         content, parse failure, etc.). Aggregation excludes None values
         from the accuracy denominator.
+
+        Sentinel/empty answers (Audit #7 R1/R2/R3): when Stage 3 fails
+        internally it surfaces ``"Error: ..."`` (or ``""``) as the
+        answer. Feeding it to the judge would burn API quota only to
+        get a near-deterministic WRONG that silently pulls accuracy
+        down. Treat sentinel answers as judge-unavailable (all
+        judgments None) — same semantics as transient judge failures
+        so they drop out of the denominator. Stage 3 still emits a
+        loud ❌ log so operators see the underlying adapter failure.
         """
         question = answer_result.question
         golden_answer = answer_result.golden_answer
         generated_answer = answer_result.answer
 
-        # Multiple evaluations, keep independent judgments (Optional[bool])
         judgments: List[Optional[bool]] = []
-        for _ in range(self.num_runs):
-            is_correct = await self._judge_answer(
-                question, golden_answer, generated_answer
+        if _is_sentinel_answer(generated_answer):
+            print(
+                f"  ⚠️ LLMJudge: sentinel/empty answer for "
+                f"{answer_result.question_id} "
+                f"({(generated_answer or '')[:60]!r}) — judge skipped"
             )
-            judgments.append(is_correct)
+            judgments = [None] * self.num_runs
+        else:
+            for _ in range(self.num_runs):
+                judgment = await self._judge_answer(
+                    question, golden_answer, generated_answer
+                )
+                judgments.append(judgment)
 
         # Use judgment_1, judgment_2, ... format
         llm_judgments = {
@@ -360,6 +422,7 @@ class LLMJudge(BaseEvaluator):
             "golden_answer": golden_answer,
             "generated_answer": generated_answer,
             "llm_judgments": llm_judgments,
+            "is_correct": _majority_vote(judgments),
             "category": answer_result.category,
         }
 
