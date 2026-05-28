@@ -139,6 +139,20 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 "-v", f"{tmp_host}:/tmp:rw",
             ]
         )
+        # Optional host bind-mounts, opt-in via the OPENCLAW_EXTRA_MOUNTS env
+        # var (``;``-separated docker ``-v`` specs, e.g.
+        # "/host/plugin:/app/extensions/openviking:ro"). Lets a run inject
+        # local-source code (e.g. the openviking plugin from a fork checkout,
+        # loaded in-container via jiti from source) over the baked image
+        # without rebuilding it. Unset => no effect; image content is used
+        # as-is, so normal/image-based runs are unaffected.
+        for spec in os.environ.get("OPENCLAW_EXTRA_MOUNTS", "").split(";"):
+            spec = spec.strip()
+            if spec:
+                cmd.extend(["-v", spec])
+                logger.info(
+                    "openclaw docker: extra mount %s for %s", spec, conv_id
+                )
         if self._mem_limit:
             cmd.extend(["--memory", self._mem_limit])
         # Plugins that talk to a host-side service (e.g. evermemos plugin
