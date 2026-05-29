@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -50,6 +51,9 @@ logger = logging.getLogger(__name__)
 # Written under each conversation workspace before ``docker stop`` so logs
 # survive ``docker run --rm`` (which deletes the container after stop).
 EVAL_DOCKER_CONTAINER_LOG = "eval_docker_container.log"
+
+# Filename for per-conversation plugin stdout capture (plugin_summary JSON lines).
+PLUGIN_STDOUT_LOG = "plugin-stdout.log"
 
 
 @register_adapter("openclaw-docker")
@@ -93,6 +97,10 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._remove_container_on_stop: bool = bool(
             cfg.get("remove_container_on_stop", True)
         )
+        # Per-conv background ``docker logs -f`` processes that stream plugin
+        # stdout to plugin-stdout.log under artifacts/openclaw/<conv>/.
+        # Keys are conv_ids; values are (proc, file_handle) tuples.
+        self._plugin_log_procs: dict[str, tuple[subprocess.Popen, Any]] = {}
 
 
     # ---------------------------------------------------- container lifecycle
@@ -195,6 +203,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         cid = stdout.decode().strip()
         logger.info("container %s started for %s", cid[:12], conv_id)
         await self._verify_container_alive(cid, conv_id)
+        self._start_plugin_log_capture(cid, conv_id)
         return cid
 
     async def _verify_container_alive(self, cid: str, conv_id: str) -> None:
@@ -569,6 +578,84 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         except Exception as err:  # noqa: BLE001
             logger.warning("orphan container sweep failed: %s", err)
 
+    # ---------------------------------------- plugin stdout log capture
+
+    def _plugin_log_path(self, conv_id: str) -> Optional[Path]:
+        """Return the path for the plugin stdout log for this conversation.
+
+        Layout: ``<output_dir>/artifacts/openclaw/<conv_id>/plugin-stdout.log``
+        Uses ``self.output_dir`` which is set by the pipeline before prepare().
+        Returns None when output_dir is not yet known (avoids crashes in tests
+        where output_dir may be unset).
+        """
+        output_dir = getattr(self, "output_dir", None)
+        if not output_dir:
+            return None
+        return Path(output_dir) / "artifacts" / "openclaw" / conv_id / PLUGIN_STDOUT_LOG
+
+    def _start_plugin_log_capture(self, cid: str, conv_id: str) -> None:
+        """Spawn ``docker logs -f <cid>`` in the background, appending to
+        the per-conv plugin-stdout.log artifact file.
+
+        Append mode: multiple QA runs in the same conversation each produce
+        stdout; all are written to the same file so a single grep covers the
+        whole conversation.
+
+        The subprocess is tracked in ``self._plugin_log_procs[conv_id]`` and
+        is terminated when the conversation container is stopped.
+        """
+        log_path = self._plugin_log_path(conv_id)
+        if log_path is None:
+            logger.debug(
+                "plugin log capture skipped for %s: output_dir not set", conv_id
+            )
+            return
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # pylint: disable=consider-using-with
+            log_file = open(log_path, "ab")  # noqa: WPS515
+            proc = subprocess.Popen(
+                ["docker", "logs", "-f", cid],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+            self._plugin_log_procs[conv_id] = (proc, log_file)
+            logger.info(
+                "plugin stdout capture started for %s → %s (cid=%s)",
+                conv_id, log_path, cid[:12],
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "failed to start plugin log capture for %s (cid=%s): %s",
+                conv_id, cid[:12], err,
+            )
+
+    def _stop_plugin_log_capture(self, conv_id: str) -> None:
+        """Terminate the ``docker logs -f`` subprocess for this conversation.
+
+        ``docker logs -f`` exits naturally when the container stops, but we
+        terminate explicitly for safety and to ensure the file handle is closed.
+        """
+        entry = self._plugin_log_procs.pop(conv_id, None)
+        if entry is None:
+            return
+        proc, log_file = entry
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2)
+        except Exception as err:  # noqa: BLE001
+            logger.debug("plugin log proc termination error for %s: %s", conv_id, err)
+        finally:
+            try:
+                log_file.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     # --------------------------------------------------- subprocess routing
 
     def _bridge_script_path(self) -> Path:
@@ -578,12 +665,23 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         return Path(__file__).parent.parent.parent / "scripts" / "openclaw_eval_bridge.mjs"
 
     async def _arun_bridge_via_docker(
-        self, conv_id: str, payload: dict, timeout: float = 600.0
+        self,
+        conv_id: str,
+        payload: dict,
+        timeout: float = 600.0,
+        question_id: Optional[str] = None,
     ) -> dict:
         """Run a single bridge command inside the conv's docker container.
 
         Mirrors arun_bridge protocol: serialize payload to stdin JSON,
         receive single JSON object on stdout.
+
+        When ``question_id`` is provided and the command is ``agent_run``,
+        three recall-trace env vars are injected via ``docker exec -e``
+        so the OpenViking plugin can tag its plugin_summary lines:
+          - OV_CURRENT_QUESTION_ID  = question_id (e.g. locomo_7_qa9)
+          - OV_CURRENT_CONV_ID      = conv_id     (e.g. locomo_7)
+          - OV_RECALL_TRACE_LEVEL   = host env or default "1"
         """
         handle = self._docker_handles.get(conv_id)
         if handle is None:
@@ -621,9 +719,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
 
         cmd = [
             "docker", "exec", "-i",
+        ]
+        # Inject OV recall-trace env vars for agent_run commands.
+        if question_id and payload.get("command") == "agent_run":
+            cmd.extend([
+                "-e", f"OV_CURRENT_QUESTION_ID={question_id}",
+                "-e", f"OV_CURRENT_CONV_ID={conv_id}",
+                "-e", f"OV_RECALL_TRACE_LEVEL={os.environ.get('OV_RECALL_TRACE_LEVEL', '1')}",
+            ])
+        cmd.extend([
             handle["container_id"],
             "node", "/eval/openclaw_eval_bridge.mjs",
-        ]
+        ])
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -742,6 +849,9 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         async def _stop_one(conv_id: str, handle: dict) -> None:
             cid = handle["container_id"]
             vol = handle.get("volume_dir")
+            # Stop plugin stdout log capture before stopping the container so
+            # the log file is flushed and closed cleanly.
+            self._stop_plugin_log_capture(conv_id)
             if self._capture_container_logs and isinstance(vol, str) and vol:
                 await self._dump_container_logs_to_workspace(cid, vol, conv_id)
             await self._docker_stop_container(cid)
@@ -759,6 +869,9 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             for conv_id, h in list(self._docker_handles.items())
         ], return_exceptions=True)
         self._docker_handles.clear()
+        # Clean up any remaining plugin log procs (e.g. convs not in _docker_handles).
+        for conv_id in list(self._plugin_log_procs.keys()):
+            self._stop_plugin_log_capture(conv_id)
 
     # ---------------------------------------- override answer to use docker
 
@@ -792,6 +905,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 resp = await self._arun_bridge_via_docker(
                     conv_id, payload,
                     timeout=float(self._exec_timeout),
+                    question_id=qid,
                 )
             except (BridgeError, BridgeTimeout) as err:
                 logger.warning("docker bridge failed for %s/%s: %s",
