@@ -2,7 +2,7 @@
   "name": "@openclaw/openviking",
   "version": "2026.4.33",
   "displayName": "OpenViking",
-  "description": "OpenClaw context-engine plugin for memory management — powered by OpenViking",
+  "description": "OpenClaw context-engine plugin for memory management \u2014 powered by OpenViking",
   "type": "module",
   "files": [
     "*.ts",
@@ -11,11 +11,12 @@
     "openclaw.plugin.json",
     "package.json"
   ],
+  "scripts": {},
   "engines": {
-    "openclaw": ">=2026.3.7"
+    "openclaw": ">=2026.4.24"
   },
   "dependencies": {
-    "@sinclair/typebox": "0.34.49",
+    "@sinclair/typebox": "0.34.48",
     "fflate": "^0.8.2"
   },
   "openclaw": {
@@ -23,12 +24,12 @@
       "./index.ts"
     ],
     "compat": {
-      "pluginApi": ">=2026.3.7",
-      "minGatewayVersion": "2026.3.7"
+      "pluginApi": ">=2026.4.24",
+      "minGatewayVersion": "2026.4.24"
     },
     "build": {
-      "openclawVersion": "2026.3.7",
-      "pluginSdkVersion": "2026.3.7"
+      "openclawVersion": "2026.4.24",
+      "pluginSdkVersion": "2026.4.24"
     }
   }
 }

@@ -176,13 +176,13 @@ const QUERY_TOKEN_STOPWORDS = new Set([
   "you",
 ]);
 
-type RecallQueryProfile = {
+export type RecallQueryProfile = {
   tokens: string[];
   wantsPreference: boolean;
   wantsTemporal: boolean;
 };
 
-function buildRecallQueryProfile(query: string): RecallQueryProfile {
+export function buildRecallQueryProfile(query: string): RecallQueryProfile {
   const text = query.trim();
   const allTokens = text.toLowerCase().match(QUERY_TOKEN_RE) ?? [];
   const tokens = allTokens.filter((token) => !QUERY_TOKEN_STOPWORDS.has(token));
@@ -207,15 +207,43 @@ function lexicalOverlapBoost(tokens: string[], text: string): number {
   return Math.min(0.2, (matched / Math.min(tokens.length, 4)) * 0.2);
 }
 
+export type RankBreakdown = {
+  base_score: number;
+  leaf_boost: number;
+  event_boost: number;
+  pref_boost: number;
+  overlap_boost: number;
+  matched_tokens: string[];
+  total: number;
+};
+
+export function computeRankBreakdown(item: FindResultItem, query: RecallQueryProfile): RankBreakdown {
+  const base_score = clampScore(item.score);
+  const abstract = (item.abstract ?? item.overview ?? "").trim();
+  const leaf_boost = isLeafLikeMemory(item) ? 0.12 : 0;
+  const event_boost = query.wantsTemporal && isEventMemory(item) ? 0.1 : 0;
+  const pref_boost = query.wantsPreference && isPreferencesMemory(item) ? 0.08 : 0;
+  // Pre-lowercase so lexicalOverlapBoost's internal toLowerCase is a no-op
+  const text = `${item.uri} ${abstract}`.toLowerCase();
+  const haystack = ` ${text} `;
+  const matched_tokens = query.tokens.slice(0, 8).filter(
+    (t) => haystack.includes(` ${t} `) || haystack.includes(t),
+  );
+  const overlap_boost = lexicalOverlapBoost(query.tokens, text);
+  return {
+    base_score,
+    leaf_boost,
+    event_boost,
+    pref_boost,
+    overlap_boost,
+    matched_tokens,
+    total: base_score + leaf_boost + event_boost + pref_boost + overlap_boost,
+  };
+}
+
 function rankForInjection(item: FindResultItem, query: RecallQueryProfile): number {
   // Keep ranking simple and stable: semantic score + light query-aware boosts.
-  const baseScore = clampScore(item.score);
-  const abstract = (item.abstract ?? item.overview ?? "").trim();
-  const leafBoost = isLeafLikeMemory(item) ? 0.12 : 0;
-  const eventBoost = query.wantsTemporal && isEventMemory(item) ? 0.1 : 0;
-  const preferenceBoost = query.wantsPreference && isPreferencesMemory(item) ? 0.08 : 0;
-  const overlapBoost = lexicalOverlapBoost(query.tokens, `${item.uri} ${abstract}`);
-  return baseScore + leafBoost + eventBoost + preferenceBoost + overlapBoost;
+  return computeRankBreakdown(item, query).total;
 }
 
 export function pickMemoriesForInjection(
