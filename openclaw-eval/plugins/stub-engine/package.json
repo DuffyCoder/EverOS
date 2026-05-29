@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/stub-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Stub context-engine plugin — Stage 3 Phase 4 smoke gate. Injects a sentinel passphrase via assemble().systemPromptAddition; no-op ingest. Validates Phase 0-2 slot wiring end-to-end.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

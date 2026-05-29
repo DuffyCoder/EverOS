@@ -1,0 +1,118 @@
+# OV + memory-core on LoCoMo via per-session bundle ingest.
+#
+# B1 wiring (memory-core in memory slot, OV in context-engine slot,
+# both writing memory in parallel):
+#   * memory_mode=memory-core: agent gets memory_search/memory_get tools;
+#     memorySearch indexes memory/*.md via BM25 + sophnet embeddings.
+#   * context_engine_mode=openviking: OV's afterTurn captures per turn
+#     into the OV backend; before_prompt_build injects OV memories.
+#   * Both surfaces are populated during ingest:
+#       - memory-core: agent's tail-cued file_write writes memory/*.md
+#       - OV: afterTurn hook fires regardless and persists to OV
+#
+# At QA time the agent has BOTH:
+#   - OV's auto-recall content prepended via context-engine assemble
+#   - memory_search tool over memory-core's index of memory/*.md
+#
+# This is the "stacked surfaces" eval: does OV alongside memory-core's
+# tool surface change agent behavior vs OV-only (B2)?
+#
+# Image: same tag as the noop variant — context-engine is the only
+# bundled-source plugin, memory-core is base-extension. Runtime memory
+# slot is selected by MEMORY_PLUGIN_ID env (set by docker adapter from
+# yaml memory_mode).
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "doubao-seed-2-0-code-preview-260215"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  max_concurrent: 4
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "session_bundle"
+  answer_mode: "agent_local"
+  memory_mode: "memory-core"
+  context_engine_mode: "openviking"
+  agent_timeout_seconds: 90
+  # Aligned to OV team's B1 (OV+memcore) reference setup:
+  #   * ingest_session_tail = README weak prompt. autoCapture is
+  #     structurally unviable on LoCoMo (threshold formula yields 104k
+  #     tokens with gpt-4.1-mini); memcore writes come from the agent
+  #     responding to this prompt with file_write tool calls.
+  #   * ov_ingest channel: shared OV namespace (user_id_template="")
+  #     matching OV's ``import_to_ov.py --no-user-agent-id`` flag. Cross-
+  #     conv name collisions are resolved by the rerank stage at QA time.
+  ingest_session_tail: "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]"
+  ov_ingest:
+    base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
+    api_key_env: "OPENVIKING_API_KEY"
+    account_id: "default"
+    # Shared OV namespace via fixed ``user_id`` — matches openclaw-eval's
+    # default ``--user eval-1`` behavior so SDK ingest and the in-container
+    # OV plugin both read from ``viking://user/eval-1/...``. Empty user_id
+    # would have produced HTTP 400 because OV server's multi-tenant mode
+    # (root_api_key set) requires X-OpenViking-User header on every
+    # tenant-scoped request.
+    user_id: "eval-1"
+    task_timeout_sec: 600
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+      - "OPENVIKING_BASE_URL"
+      - "OPENVIKING_API_KEY"
+      - "OPENVIKING_ACCOUNT_ID"
+      - "OPENVIKING_USER_ID"
+      # OPENVIKING_AGENT_PREFIX intentionally NOT forwarded — see noop yaml.
+    model:
+      id: "doubao-seed-2-0-code-preview-260215"
+      name: "Doubao Seed 2.0 Code Preview (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "session_bundle"
+    answer_mode: "shared"
+
+openclaw_docker:
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins@sha256:d972aad0ccb3c1495f451b0cdb467a6b7bec782625ce3374e2fdb343793e45d2"
+  max_concurrent_containers: 4
+  mem_limit: "2g"
+  network: "bridge"
+  per_rpc_timeout_seconds: 360
+  add_host_gateway: true

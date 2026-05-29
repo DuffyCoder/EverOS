@@ -1,0 +1,63 @@
+- image: openclaw-eval:7da23c3-memory-core-0000000-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-08T15:28:28Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+- image: openclaw-eval:7da23c3-openviking-b7e6bcb-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-08T15:58:00Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+    openviking:
+      kind: context-engine
+      version: bundled
+      rev: b7e6bcb
+      source: bundled-source
+- image: openclaw-eval:7da23c3-memory-core-0000000-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-09T07:16:09Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+- image: openclaw-eval:7da23c3-openviking-b7e6bcb-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-09T07:42:08Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+    openviking:
+      kind: context-engine
+      version: bundled
+      rev: b7e6bcb
+      source: bundled-source
+- image: openclaw-eval:7da23c3-memory-core-0000000-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-09T09:07:15Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+- image: openclaw-eval:7da23c3-openviking-b7e6bcb-slim
+  openclaw_sha: 7da23c3
+  built_at: '2026-05-09T09:08:32Z'
+  plugins:
+    memory-core:
+      kind: memory
+      version: bundled
+      source: bundled
+    openviking:
+      kind: context-engine
+      version: bundled
+      rev: b7e6bcb
+      source: bundled-source

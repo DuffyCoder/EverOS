@@ -360,6 +360,54 @@ cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_
 uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ```
 
+### Plugin selection via CLI (openclaw-docker only)
+
+> For a full, copy-pasteable LoCoMo reproduction (OpenViking & memory-core
+> baselines via the `openclaw-docker` adapter — prerequisites, docker images,
+> required env vars, and the per-round `round_finish.sh` reset), see
+> [`docs/locomo-fair-baseline.md`](../docs/locomo-fair-baseline.md). The
+> OpenViking system config is
+> `evaluation/config/systems/openclaw-docker-openviking-session-bundle-noop.yaml`.
+
+The `openclaw-docker` adapter accepts CLI overrides for the memory and
+context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
+
+> **Note**: the `--memory-plugin` / `--context-engine` / `--image` /
+> `--build-missing` flags are honored by the
+> `openclaw-docker` adapter only. Other adapters (mem0, memos, zep,
+> evermemos online API, …) do not consume these flags; pass them and
+> the eval will run, but the flags will have no effect on those
+> systems. The image_resolver also only applies to openclaw-docker.
+
+```bash
+# Memory plugin only — image auto-resolved from image_manifest.yaml
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
+    --memory-plugin evermemos
+
+# Context-engine plugin only (memory slot wired to noop)
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
+    --memory-plugin none \
+    --context-engine hypercompositor@0.9.6
+
+# Both plugins, in one image
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
+    --memory-plugin evermemos \
+    --context-engine hypercompositor@0.9.6
+
+# Explicit image override (skips manifest lookup)
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
+    --image openclaw-eval:7da23c3-evermemos-9b3a1f4-slim
+
+# Auto-build the image if it's not in the manifest
+uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
+    --memory-plugin evermemos --build-missing
+```
+
+Plugin ids and their kinds live in
+`evaluation/config/plugin_registry.yaml`. Image tags built by `build.py`
+are recorded in `evaluation/config/image_manifest.yaml` and used by the
+CLI's image resolver.
+
 ## 📄 License
 
 Same as the parent project.

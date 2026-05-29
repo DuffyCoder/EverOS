@@ -4,6 +4,7 @@ Pipeline core module.
 Orchestrates the evaluation workflow across four stages: Add → Search → Answer → Evaluate.
 """
 
+import json
 import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -35,6 +36,9 @@ from evaluation.src.metrics.retrieval_metrics import evaluate_retrieval_metrics
 from evaluation.src.metrics.content_overlap import evaluate_content_overlap
 from evaluation.src.metrics.answer_aux_metrics import build_answer_aux_metrics
 from evaluation.src.metrics.diagnostics import aggregate_diagnostics
+from evaluation.src.metrics.forced_terminate_metrics import (
+    build_forced_terminate_metrics,
+)
 from evaluation.src.metrics.benchmark_summary import build_benchmark_summary
 from evaluation.src.metrics.latency_views import aggregate_all, records_to_jsonl
 from evaluation.src.metrics.latency_invariants import (
@@ -278,6 +282,19 @@ class Pipeline:
             self.console.print(
                 "\n[yellow]⏭️  Skip Add stage (already completed)[/yellow]"
             )
+            # When Add is skipped, the pre-add init that add() normally triggers
+            # (e.g. spawning the docker runtime per conversation) never runs, so
+            # later stages have no runtime to talk to. prepare() is idempotent,
+            # so call it here to restore that init on the resume/replay path.
+            # resume=True tells prepare() this is a resume, NOT a fresh ingest:
+            # adapters that mint a run-id / clean data on add must reuse the prior
+            # run and skip destructive cleanup (see openclaw_docker / mem0).
+            await self.adapter.prepare(
+                conversations=dataset.conversations,
+                output_dir=self.output_dir,
+                checkpoint_manager=self.checkpoint,
+                resume=True,
+            )
             # Rebuild index metadata (handled by adapter, only needed for local systems)
             # For online APIs, returns None but still need to set results["index"]
             index = self.adapter.build_lazy_index(
@@ -285,6 +302,15 @@ class Pipeline:
             )
             results["index"] = index  # Set even if None
         else:
+            # Replay path (Add not in stages): same rationale as above — prepare()
+            # the adapter runtime before later stages run against it. resume=True:
+            # reuse the prior run, skip destructive cleanup (see skip-add branch).
+            await self.adapter.prepare(
+                conversations=dataset.conversations,
+                output_dir=self.output_dir,
+                checkpoint_manager=self.checkpoint,
+                resume=True,
+            )
             # Rebuild index metadata (handled by adapter, only needed for local systems)
             # For online APIs, returns None but still need to set results["index"]
             index = self.adapter.build_lazy_index(
@@ -781,6 +807,35 @@ class Pipeline:
         self.saver.save_json(metrics, "answer_aux_metrics.json")
         return metrics
 
+    def _aggregate_forced_terminate_metrics(self) -> dict:
+        """Walk per-conv events.jsonl files in the run output and aggregate
+        the forced_terminate ratio. Returns the same shape as
+        build_forced_terminate_metrics; empty (agent_run_count=0) when no
+        events files exist (non-openclaw adapters or in-memory runs).
+
+        Best-effort: corrupt JSONL lines are skipped silently rather than
+        failing the diagnostics emit.
+        """
+        events_acc: list[dict] = []
+        try:
+            for events_file in self.output_dir.rglob("events.jsonl"):
+                try:
+                    fh = events_file.open("r", encoding="utf-8")
+                except OSError:
+                    continue
+                with fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            events_acc.append(json.loads(line))
+                        except (ValueError, TypeError):
+                            continue
+        except OSError:
+            pass
+        return build_forced_terminate_metrics(events_acc)
+
     def _write_diagnostics_and_summary_artifact(
         self,
         *,
@@ -804,6 +859,12 @@ class Pipeline:
             answer_results_metadata=answer_metadata,
             index=index,
         )
+        # R-S3-4: aggregate forced_terminate ratio from per-conv events.jsonl
+        # so latency stats are interpretable. Best-effort scan: skip silently
+        # if no events.jsonl artifacts exist (non-openclaw adapters).
+        forced_terminate = self._aggregate_forced_terminate_metrics()
+        if forced_terminate.get("agent_run_count", 0) > 0:
+            diagnostics["forced_terminate"] = forced_terminate
         self.saver.save_json(diagnostics, "diagnostics.json")
 
         # Phase 1: Layer-1 canonical latency views derived from the

@@ -56,6 +56,45 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 - `openclaw-hybrid-noflush.yaml` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
 - `openclaw-hybrid.yaml` (`openclaw.yaml` main preset) ← full stack. Closest to production but with documented divergences above.
 
+## Cross-QA short-term isolation (OV / openclaw-eval alignment)
+
+OV LoCoMo presets use **one OV `session_id` (UUID) per conversation** for
+SDK ingest and QA-time `before_prompt_build` / assemble. OpenClaw's
+on-disk transcript is still keyed by that same `--session-id` passed to
+`agent_run`.
+
+After each QA the docker adapter calls bridge `archive_session`, which
+renames `state/agents/main/sessions/<session_id>.jsonl` to
+`<session_id>.jsonl.<ts>`. The next QA reuses the same `session_id` but
+starts with an empty short-term buffer. OV server-side state keyed by the
+UUID is **not** cleared by the rename.
+
+Without `archive_session`, later QAs in the same conv would accumulate
+prior Q/A turns in the jsonl and inflate `final_context_tokens` (Tier B
+transcript estimate) as well as the live LLM prompt.
+
+## `final_context_tokens` diagnostics (`answer_mode: agent_local`)
+
+The harness reports `final_context_tokens_mean` / `final_context_tokens_stats`
+in `report.txt` Diagnostics. Semantics depend on the adapter answer path:
+
+| Adapter answer path | `final_context_tokens` meaning |
+|---------------------|--------------------------------|
+| **OpenClaw `agent_local`** (incl. `openclaw-docker`) | Last LLM hop **prompt-side** tokens (`lastCallUsage` / session assistant `usage`, including cache read/write when present). Fallback: provider usage → session jsonl usage → **session transcript tiktoken** (system/tool overhead + messages before the final assistant turn) → coarse estimate (system + schema + harness question only). |
+| **EverMemOS / search-then-answer** | tiktoken estimate of the **retrieved context string** passed to the shared answer LLM (not the full agent prompt). |
+
+Also recorded for OpenClaw agent runs:
+
+- `agent_run_total_input_tokens` — sum of prompt-side tokens across all LLM hops.
+- `final_context_tokens_source` / `agent_run_total_input_tokens_source` — provenance
+  (`last_call_usage`, `session_jsonl_*`, `session_transcript_*`, `prompt_estimate`).
+
+**Cross-system comparability:** OpenClaw agent_local counts are typically
+much larger (workspace bootstrap, tool schemas, context-engine assemble).
+Use them to compare OpenClaw plugin presets (OV vs memory-core vs noop).
+Do **not** treat them as directly comparable to EverMemOS
+`final_context_tokens` without reading both definitions.
+
 ## Bugs the benchmark is *not* designed to catch
 
 - **LLM judge leniency.** Cross-mode sweeps on LoCoMo conv 9 showed gpt-4o-mini accepting `"Sep 2023"` as matching the gold `"Mar 2023"`. Consider adding a stricter exact-match sanity rail before trusting accuracy deltas below ~5%.

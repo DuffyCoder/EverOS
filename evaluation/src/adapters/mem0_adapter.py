@@ -136,7 +136,18 @@ class Mem0Adapter(OnlineAPIAdapter):
         if not clean_before_add:
             self.console.print("   ⏭️  Skipping data cleanup (clean_before_add=false)", style="dim")
             return
-        
+
+        # Resume/replay: the pipeline calls prepare() again before search/answer
+        # when add() was already completed in a prior run. Cleaning here would
+        # wipe the data that add() ingested, leaving search/answer on an empty
+        # store. Only clean on the fresh add path (add() -> prepare(), no flag).
+        if kwargs.get("resume"):
+            self.console.print(
+                "   ⏭️  Skipping data cleanup (resume=True: data already ingested)",
+                style="dim",
+            )
+            return
+
         self.console.print(f"\n{'='*60}", style="bold yellow")
         self.console.print(f"Preparation: Cleaning existing data", style="bold yellow")
         self.console.print(f"{'='*60}", style="bold yellow")

@@ -235,7 +235,6 @@ def test_build_openclaw_resolved_config_fts_only(tmp_path):
         workspace_dir=str(tmp_path / "ws"),
         native_store_dir=str(tmp_path / "state"),
         backend_mode="fts_only",
-        flush_mode="disabled",
     )
     memory_search = cfg["agents"]["defaults"]["memorySearch"]
     assert memory_search["provider"] == "auto"
@@ -319,7 +318,6 @@ def test_build_openclaw_resolved_config_hybrid_with_embedding(tmp_path):
         workspace_dir=str(tmp_path / "ws"),
         native_store_dir=str(tmp_path / "state"),
         backend_mode="hybrid",
-        flush_mode="shared_llm",
         embedding={
             "provider": "sophnet",
             "model": "text-embeddings",

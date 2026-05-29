@@ -1,0 +1,10 @@
+# build.py stages active plugin's sidecar/ here before running
+# `docker build` (Dockerfile.eval has a single ``COPY _active_sidecar/``
+# that works uniformly across plugins). The directory is always rebuilt;
+# never commit its contents.
+_active_sidecar/
+
+# Python sidecar bytecode
+plugins/*/sidecar/__pycache__/
+plugins/*/sidecar/**/__pycache__/
+plugins/*/sidecar/**/*.pyc

@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/mem0",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Form B memory plugin: registers MemoryPluginRuntime + memory_search/memory_get tools that delegate to a co-located Python sidecar wrapping the mem0ai SDK.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

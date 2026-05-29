@@ -10,7 +10,7 @@ adapter: "openclaw"
 
 llm:
   provider: "openai"
-  model: "gpt-4o-mini"
+  model: "${LLM_MODEL}"
   api_key: "${LLM_API_KEY}"
   base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
   temperature: 0.0
@@ -36,7 +36,7 @@ openclaw:
     provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
     model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
     api_key: "${SOPH_API_KEY}"
-    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/6RT1wCDeN59dVd1L10UMRz/easyllms/embeddings}"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
     easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
     output_dimensionality: 1024             # DEFAULT_SOPHNET_DIMENSIONS
   prompts:

@@ -1,14 +1,17 @@
-.PHONY: dev-setup setup-hooks lint test clean help
+.PHONY: dev-setup setup-hooks lint test clean help smoke-stage3 clean-docker clean-docker-aggressive
 
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  dev-setup        - Full dev environment setup (sync deps + install hooks)"
-	@echo "  setup-hooks      - Install pre-commit hooks only"
-	@echo "  lint             - Run linters"
-	@echo "  test             - Run tests"
-	@echo "  clean            - Clean up generated files"
-	@echo "  help             - Show this help message"
+	@echo "  dev-setup                - Full dev environment setup (sync deps + install hooks)"
+	@echo "  setup-hooks              - Install pre-commit hooks only"
+	@echo "  lint                     - Run linters"
+	@echo "  test                     - Run tests"
+	@echo "  clean                    - Clean up generated files"
+	@echo "  smoke-stage3             - Run Phase 4 + Phase 5 real-machine gates"
+	@echo "  clean-docker             - Reclaim docker disk (safe defaults)"
+	@echo "  clean-docker-aggressive  - Drop older eval images + build cache"
+	@echo "  help                     - Show this help message"
 
 # Full development environment setup
 dev-setup:
@@ -45,3 +48,13 @@ clean:
 	find . -type f -name ".coverage" -delete 2>/dev/null || true
 	rm -rf .pytest_cache 2>/dev/null || true
 	@echo "Cleaned up generated files."
+
+# Stage 3 operator targets — see docs/superpowers/runbooks/stage3-operator.md
+smoke-stage3:
+	./openclaw-eval/scripts/smoke_stage3.sh
+
+clean-docker:
+	./openclaw-eval/scripts/clean_docker.sh
+
+clean-docker-aggressive:
+	./openclaw-eval/scripts/clean_docker.sh --aggressive
