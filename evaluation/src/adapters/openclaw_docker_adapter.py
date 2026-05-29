@@ -704,6 +704,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
         env_vars = list(agent_llm.get("env_vars") or [])
 
+        # Forward OV recall-trace env vars through the envForSandbox whitelist
+        # in the in-container bridge.mjs. Without this, `docker exec -e
+        # OV_CURRENT_QUESTION_ID=...` (added below) reaches the bridge process
+        # but bridge.mjs::envForSandbox drops anything not listed in
+        # ``agent_llm_env_vars`` before spawning the openclaw subprocess that
+        # hosts the OV plugin — so the plugin's ``process.env`` sees nothing
+        # and the trace header is always "unknown".
+        if question_id and payload.get("command") == "agent_run":
+            for _name in ("OV_CURRENT_QUESTION_ID", "OV_CURRENT_CONV_ID", "OV_RECALL_TRACE_LEVEL"):
+                if _name not in env_vars:
+                    env_vars.append(_name)
+
         # Rewrite host paths from ``_bridge_base_payload`` to the in-container
         # paths set up by the entrypoint. All QAs/ingest share /workspace/state.
         payload = {
