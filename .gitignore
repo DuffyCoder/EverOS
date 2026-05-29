@@ -240,3 +240,5 @@ docs/opt_docs
 
 # Editor
 .vscode/
+# qa_logs tool output
+/reports/qa_logs/
