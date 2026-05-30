@@ -209,6 +209,12 @@ def dump_qa_logs(
         out_dir / "10_recall_topk.txt",
         args.qid,
     )
+    # 12-15 openclaw conv artifacts (events / session manifest / internal log / metrics)
+    oc_conv_dir = _find_openclaw_conv_dir(args.results_root, args.system, args.run_name, qa.conv)
+    _dump_openclaw_events(out_dir / "12_openclaw_events.json", oc_conv_dir, args.qid)
+    _dump_session_manifest_evidence(out_dir / "13_session_manifest_evidence.json", oc_conv_dir, qa.evidence_turns)
+    _dump_openclaw_internal_log(out_dir / "14_openclaw_internal.log", oc_conv_dir)
+    _dump_openclaw_metrics(out_dir / "15_openclaw_metrics.json", oc_conv_dir)
 
 
 # ── Section helpers ───────────────────────────────────────────────────────────
@@ -838,3 +844,189 @@ def _parse_ts(line: str) -> Optional[datetime]:
         return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S,%f")
     except ValueError:
         return None
+
+
+# ── openclaw conv artifact helpers ────────────────────────────────────────────
+
+def _find_openclaw_conv_dir(
+    results_root: Path,
+    system: str,
+    run_name: str,
+    conv: str,
+) -> Optional[Path]:
+    """Locate the per-conv openclaw artifact directory.
+
+    Path:
+        <results_root>/locomo-<system>-<run_name>/artifacts/openclaw/run-*/conversations/<conv>/
+    """
+    run_dir = results_root / f"locomo-{system}-{run_name}"
+    matches = sorted(run_dir.glob(
+        f"artifacts/openclaw/run-*/conversations/{conv}"
+    ))
+    return matches[0] if matches else None
+
+
+def _dump_openclaw_events(
+    path: Path, oc_conv_dir: Optional[Path], qid: str,
+) -> None:
+    """events.jsonl filtered to events mentioning the qid + all conv-wide events.
+
+    Returns a JSON object with two keys:
+      - per_qid: events whose 'question_id' == qid (per-qa errors, etc.)
+      - conv_wide: events with no 'question_id' (ingest_mode_session_bundle,
+        ov_session_opened, ov_sdk_ingest_complete, etc. — these are conv-level
+        markers that contextualize the per-qa events.)
+    """
+    if not oc_conv_dir or not (oc_conv_dir / "events.jsonl").exists():
+        path.write_text(
+            json.dumps({"note": "events.jsonl not found", "oc_conv_dir": str(oc_conv_dir)}) + "\n"
+        )
+        return
+    per_qid: list[dict] = []
+    conv_wide: list[dict] = []
+    try:
+        with (oc_conv_dir / "events.jsonl").open(errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("question_id") == qid:
+                    per_qid.append(e)
+                elif "question_id" not in e:
+                    conv_wide.append(e)
+    except OSError as ex:
+        path.write_text(json.dumps({"error": str(ex)}) + "\n")
+        return
+    path.write_text(json.dumps(
+        {"per_qid": per_qid, "conv_wide": conv_wide},
+        ensure_ascii=False, indent=2,
+    ) + "\n")
+
+
+def _dump_session_manifest_evidence(
+    path: Path, oc_conv_dir: Optional[Path], evidence_turns: list[EvidenceTurn],
+) -> None:
+    """Map each evidence dia_id (e.g. D2:1) to its session_id from session_manifest.
+
+    Lets the reader trace which openclaw session bundle covered a given
+    evidence turn. The session_id is the openclaw-internal label (S1, S2, …),
+    raw_session_key is the dataset's session_2 / session_20 / etc.
+    """
+    if not oc_conv_dir or not (oc_conv_dir / "session_manifest.json").exists():
+        path.write_text(
+            json.dumps({"note": "session_manifest.json not found"}) + "\n"
+        )
+        return
+    try:
+        manifest = json.loads((oc_conv_dir / "session_manifest.json").read_text())
+    except (json.JSONDecodeError, OSError) as ex:
+        path.write_text(json.dumps({"error": str(ex)}) + "\n")
+        return
+    sessions = manifest.get("sessions", [])
+    # Build dia_id → session lookup
+    dia_to_session: dict[str, dict] = {}
+    for s in sessions:
+        for dia_id in s.get("source_message_ids", []) or []:
+            dia_to_session[dia_id] = {
+                "session_id": s.get("session_id"),
+                "raw_session_key": s.get("raw_session_key"),
+                "session_message_count": len(s.get("source_message_ids", []) or []),
+            }
+    matched: list[dict] = []
+    for t in evidence_turns:
+        entry = dia_to_session.get(t.dia_id)
+        matched.append({
+            "dia_id": t.dia_id,
+            "speaker": t.speaker,
+            "text_head": (t.text or "")[:120],
+            "session_match": entry,
+        })
+    path.write_text(json.dumps({
+        "schema_version": manifest.get("schema_version"),
+        "total_sessions": len(sessions),
+        "total_messages": len(manifest.get("messages", [])),
+        "evidence_to_session": matched,
+    }, ensure_ascii=False, indent=2) + "\n")
+
+
+def _dump_openclaw_internal_log(
+    path: Path, oc_conv_dir: Optional[Path],
+) -> None:
+    """openclaw internal log entries flattened to (time, level, parent, message) tuples."""
+    if not oc_conv_dir:
+        path.write_text("# oc_conv_dir not found\n")
+        return
+    log_glob = list((oc_conv_dir / ".openclaw-container-tmp" / "openclaw").glob("openclaw-*.log"))
+    if not log_glob:
+        path.write_text("# no openclaw internal log under .openclaw-container-tmp/openclaw/\n")
+        return
+    out: list[str] = [f"# source: {log_glob[0]}"]
+    try:
+        with log_glob[0].open(errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    out.append(line[:300])
+                    continue
+                ts = e.get("time", "?")
+                meta = e.get("_meta", {})
+                level = meta.get("logLevelName", "?")
+                parents = meta.get("parentNames", [])
+                parent_label = ".".join(parents) if parents else "root"
+                msg = e.get("1") or e.get("0") or ""
+                # truncate massive JSON blobs in message
+                if isinstance(msg, str):
+                    msg_display = msg if len(msg) <= 500 else msg[:500] + "...[truncated]"
+                else:
+                    msg_display = json.dumps(msg, ensure_ascii=False)[:500]
+                out.append(f"{ts} [{level}] [{parent_label}] {msg_display}")
+    except OSError as ex:
+        out.append(f"# read error: {ex}")
+    path.write_text("\n".join(out) + "\n")
+
+
+def _dump_openclaw_metrics(
+    path: Path, oc_conv_dir: Optional[Path],
+) -> None:
+    """Bundle openclaw metrics/* + handle.json into a single JSON for quick inspection."""
+    if not oc_conv_dir:
+        path.write_text(json.dumps({"note": "oc_conv_dir not found"}) + "\n")
+        return
+    bundle: dict = {"conv_dir": str(oc_conv_dir)}
+    # handle.json (run config)
+    handle = oc_conv_dir / "handle.json"
+    if handle.exists():
+        try:
+            bundle["handle"] = json.loads(handle.read_text())
+        except (json.JSONDecodeError, OSError) as ex:
+            bundle["handle_error"] = str(ex)
+    # metrics/*.json
+    metrics_dir = oc_conv_dir / "metrics"
+    if metrics_dir.is_dir():
+        bundle["metrics"] = {}
+        for m in sorted(metrics_dir.glob("*.json")):
+            try:
+                bundle["metrics"][m.name] = json.loads(m.read_text())
+            except (json.JSONDecodeError, OSError) as ex:
+                bundle["metrics"][m.name] = {"_error": str(ex)}
+    # state/agents/main/sessions/sessions.json (one-level)
+    sess = oc_conv_dir / "state" / "agents" / "main" / "sessions" / "sessions.json"
+    if sess.exists():
+        try:
+            sess_data = json.loads(sess.read_text())
+            # Compact: only keys + sample
+            bundle["agent_sessions"] = {
+                "keys": list(sess_data.keys()),
+                "count": len(sess_data),
+            }
+        except (json.JSONDecodeError, OSError) as ex:
+            bundle["agent_sessions_error"] = str(ex)
+    path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n")
