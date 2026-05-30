@@ -208,6 +208,7 @@ def dump_qa_logs(
         qa.conv,
         out_dir / "10_recall_topk.txt",
         args.qid,
+        ingest_log_path=out_dir / "04_log_ingest.txt",
     )
     # 12-15 openclaw conv artifacts (events / session manifest / internal log / metrics)
     oc_conv_dir = _find_openclaw_conv_dir(args.results_root, args.system, args.run_name, qa.conv)
@@ -322,28 +323,32 @@ def _md_to_uri(md_path: Path, mem_root: Path, conv: str) -> str:
 def _dump_ingest_lines(
     path: Path, ov_log: Path, conv: str, evidence_turns: list[EvidenceTurn],
 ) -> None:
-    """Grep ov-server.log for lines naming the conv + key evidence phrase or 'Enqueued'."""
+    """Grep ov-server.log for ingest lines naming this conv.
+
+    Filter: conv string in line AND (Enqueued|upsert). Evidence-phrase secondary
+    filter was dropped — ingest log writes the LLM-extracted abstract, which
+    almost never matches the raw evidence text verbatim, so phrase filter
+    yielded 0 hits in practice. Conv-scoped Enqueued lines are the right
+    granularity: they include every memory URI that landed under this conv,
+    which is what 11_picking_analysis needs for its ingest-log fallback.
+    """
     if not ov_log.exists():
         path.write_text(f"# ov_log not found: {ov_log}\n")
         return
-    phrases = _evidence_phrases(evidence_turns)
-    needles = [conv, *phrases]
-    needles_lower = [n.lower() for n in needles]
     hits: list[str] = []
+    conv_l = conv.lower()
     with ov_log.open(errors="replace") as f:
         for line in f:
             ll = line.lower()
-            if conv.lower() not in ll:
+            if conv_l not in ll:
                 continue
             if "enqueued" not in ll and "upsert" not in ll:
-                continue
-            if not any(n in ll for n in needles_lower):
                 continue
             hits.append(_strip_vector_arrays(line.rstrip("\n")))
             if len(hits) >= INGEST_LINE_CAP:
                 break
     if not hits:
-        path.write_text(f"# no ingest lines found for {conv} matching {phrases!r}\n")
+        path.write_text(f"# no ingest lines found for {conv}\n")
         return
     path.write_text("\n".join(hits) + "\n")
 
@@ -583,12 +588,14 @@ def _dump_picking_analysis(
     conv: str,
     recall_topk_path: Path,
     qid: str,
+    ingest_log_path: Optional[Path] = None,
 ) -> None:
     """Cross-reference injected bullets against vector/rerank scores.
 
     Reverse-lookup each picked bullet's abstract_head against .ovdata to get
-    its URI, then look that URI up in 10_recall_topk to find vector rank,
-    vector score, rerank score.
+    its URI. When .ovdata is missing (e.g. namespace cleaned after run), fall
+    back to grepping the ingest log (04_log_ingest.txt) for the bullet's
+    abstract_head — the Enqueued log line carries both abstract and URI.
     """
     if not session_jsonl or not session_jsonl.exists():
         path.write_text(
@@ -609,14 +616,57 @@ def _dump_picking_analysis(
         path.write_text("# no injected bullets in this turn\n")
         return
 
-    # Build URI -> .md content map for reverse lookup
+    # Build URI -> content map. Primary source: .ovdata; fallback: ingest log.
+    md_cache: list[tuple[str, str]] = []  # (uri, content)
+    fallback_used = False
+
     mem_root = ovdata_root / "viking" / "default" / "user" / conv / "memories"
     if not mem_root.exists():
         for cand in ovdata_root.rglob(f"user/{conv}/memories"):
             mem_root = cand
             break
-    if not mem_root.exists():
-        path.write_text(f"# memories dir not found under {ovdata_root}\n")
+
+    if mem_root.exists():
+        for md in mem_root.rglob("*.md"):
+            try:
+                content = md.read_text(errors="replace")
+                rel = md.relative_to(mem_root)
+                uri = f"viking://user/{conv}/memories/{rel.as_posix()}"
+                md_cache.append((uri, content))
+            except OSError:
+                pass
+
+    if not md_cache and ingest_log_path and ingest_log_path.exists():
+        # Fallback: parse ingest log for (URI, abstract) pairs from Enqueued lines.
+        # Line shape: ...Enqueued embedding message: EmbeddingMsg(message='...',
+        #   context_data={...'uri': 'viking://...', ..., 'abstract': '...'}
+        fallback_used = True
+        uri_re = re.compile(r"'uri':\s*'(viking://[^']+)'")
+        abs_re = re.compile(r"'abstract':\s*\"([^\"]+?)\"")
+        seen = set()
+        try:
+            with ingest_log_path.open(errors="replace") as f:
+                for line in f:
+                    mu = uri_re.search(line)
+                    if not mu:
+                        continue
+                    uri = mu.group(1)
+                    if uri in seen:
+                        continue
+                    ma = abs_re.search(line)
+                    if not ma:
+                        continue
+                    abstract = ma.group(1)
+                    md_cache.append((uri, abstract))
+                    seen.add(uri)
+        except OSError:
+            pass
+
+    if not md_cache:
+        path.write_text(
+            f"# bullets→URI reverse lookup unavailable: ovdata missing under {ovdata_root} "
+            f"AND no ingest log fallback (04 path: {ingest_log_path})\n"
+        )
         return
 
     # Parse 10_recall_topk for URI -> (vec_rank, vec_score, level) and URI -> rerank_score
@@ -645,22 +695,14 @@ def _dump_picking_analysis(
                 except (ValueError, IndexError):
                     pass
 
-    # Reverse picked bullets to URIs
+    # Reverse picked bullets to URIs using md_cache (built above from ovdata or ingest log)
     picked: list[dict] = []
-    md_cache: list[tuple[Path, str]] = []
-    for md in mem_root.rglob("*.md"):
-        try:
-            md_cache.append((md, md.read_text(errors="replace")))
-        except OSError:
-            pass
-
     for i, b in enumerate(bullets):
         head = b.abstract_head[:50]
         matched_uri = None
-        for md, content in md_cache:
+        for uri, content in md_cache:
             if head in content:
-                rel = md.relative_to(mem_root)
-                matched_uri = f"viking://user/{conv}/memories/{rel.as_posix()}"
+                matched_uri = uri
                 break
         picked.append({
             "i": i, "chars": b.chars, "uri": matched_uri,
@@ -675,6 +717,8 @@ def _dump_picking_analysis(
     out.append("=== PICKED 5 BULLETS — REVERSE LOOKUP ===")
     out.append(f"injected total chars: {total_chars}  (plugin budget typical 4000)")
     out.append(f"budget usage: {100 * total_chars / 4000:.1f}%")
+    if fallback_used:
+        out.append("# NOTE: ovdata missing — URI lookup fell back to ingest-log abstract grep")
     out.append("")
     out.append(f"{'#':>2}  {'chars':>5}  {'vec_rk':>6}  {'vec_sc':>7}  {'rerank':>7}  uri")
     for p in picked:
