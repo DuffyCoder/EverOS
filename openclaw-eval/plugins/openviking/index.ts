@@ -208,6 +208,20 @@ export function prepareRecallQuery(rawText: string): PreparedRecallQuery {
   };
 }
 
+export function selectAutoRecallQuery(event: {
+  messages?: unknown[];
+  prompt?: unknown;
+}): string {
+  const promptText =
+    typeof event.prompt === "string"
+      ? sanitizeUserTextForCapture(event.prompt)
+      : "";
+  if (promptText) {
+    return promptText;
+  }
+  return extractLatestUserText(event.messages);
+}
+
 export function tokenizeCommandArgs(args: string): string[] {
   const tokens: string[] = [];
   let current = "";
@@ -1432,10 +1446,7 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
       }
 
       const eventObj = (event ?? {}) as { messages?: unknown[]; prompt?: string };
-      const latestUserText = extractLatestUserText(eventObj.messages);
-      const rawRecallQuery =
-        latestUserText ||
-        (typeof eventObj.prompt === "string" ? sanitizeUserTextForCapture(eventObj.prompt) : "");
+      const rawRecallQuery = selectAutoRecallQuery(eventObj);
       const recallQuery = prepareRecallQuery(rawRecallQuery);
       const queryText = recallQuery.query;
       if (!queryText) {

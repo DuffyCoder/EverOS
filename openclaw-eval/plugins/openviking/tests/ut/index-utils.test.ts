@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   prepareRecallQuery,
+  selectAutoRecallQuery,
   sanitizeOpenVikingAgentIdHeader,
   createSessionAgentResolver,
 } from "../../index.js";
@@ -96,6 +97,32 @@ describe("createSessionAgentResolver", () => {
     const r1 = resolver.resolve("s1");
     const r2 = resolver.resolve("s1");
     expect(r1.resolved).toBe(r2.resolved);
+  });
+});
+
+describe("selectAutoRecallQuery", () => {
+  it("prefers event.prompt over stale user messages", () => {
+    const result = selectAutoRecallQuery({
+      prompt: "本轮问题：Melanie 报名的是什么比赛？",
+      messages: [
+        { role: "user", content: "上一轮问题 <relevant-memories>stale</relevant-memories>" },
+        { role: "assistant", content: "上一轮答案" },
+      ],
+    });
+
+    expect(result).toBe("本轮问题：Melanie 报名的是什么比赛？");
+  });
+
+  it("falls back to latest user message when prompt is empty", () => {
+    const result = selectAutoRecallQuery({
+      prompt: "   ",
+      messages: [
+        { role: "user", content: "first question" },
+        { role: "user", content: "second question" },
+      ],
+    });
+
+    expect(result).toBe("second question");
   });
 });
 
