@@ -21,11 +21,13 @@ This preserves the base image's existing eval runtime fixes, including:
 - `archive_session` support for resetting short-term QA transcripts.
 - Existing entrypoint and OpenClaw runtime wiring.
 
-The patch only replaces:
+The patch installs the new plugin under:
 
 ```text
 /opt/openclaw/extensions/openviking
 ```
+
+and sets `INSTALL_PLUGIN_ID=openviking` so the container entrypoint writes this directory into `plugins.load.paths`. Without that env var, OpenClaw can continue loading the old bundled plugin from `/app/extensions/openviking` or `/app/dist/extensions/openviking`.
 
 ## Regenerate The Tarball
 
@@ -115,8 +117,7 @@ docker run --rm --entrypoint grep \
   -n "findLast\\|archive_session" /eval/openclaw_eval_bridge.mjs
 ```
 
-Both `findLast` and `archive_session` should appear. If they do not, the image
-is not based on the expected fixed OpenViking eval image.
+Both `findLast` and `archive_session` should appear. Also verify `/workspace/openclaw.docker.json` contains `plugins.load.paths` with `/opt/openclaw/extensions/openviking` after the container starts. If not, the image may still load the old bundled plugin from `/app`.
 
 ## Use In Evaluation
 

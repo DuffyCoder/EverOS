@@ -6,6 +6,8 @@ FROM ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlas
 
 COPY --chown=node:node openclaw-openviking-2026.6.04.tgz /tmp/ov-plugin.tgz
 
+ENV INSTALL_PLUGIN_ID=openviking
+
 USER root
 RUN rm -rf /opt/openclaw/extensions/openviking && \
     mkdir -p /opt/openclaw/extensions/openviking && \
