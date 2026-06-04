@@ -155,7 +155,7 @@ type OpenClawPluginApi = {
   ) => void;
 };
 
-const AUTO_RECALL_TIMEOUT_MS = 5_000;
+const AUTO_RECALL_TIMEOUT_MS = 30_000;
 const RECALL_QUERY_MAX_CHARS = 4_000;
 
 /**
