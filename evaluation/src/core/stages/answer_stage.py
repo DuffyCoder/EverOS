@@ -205,16 +205,24 @@ async def run_answer_stage(
     # semaphore's first MAX_CONCURRENT slots fan out to distinct conv ids
     # instead of being monopolized by the first conv's QAs (which would
     # all serialize behind the same per-conv lock and defeat parallelism).
+    # In serial mode (MAX_CONCURRENT == 1) round-robin is a no-op for
+    # concurrency but reorders wall-clock execution from conv-major to
+    # qa_idx-major, which breaks any post-hoc tooling that assumes the
+    # canonical (conv_id, qa_idx) order (e.g. qa_logs annotate.py). Skip it.
     if pending_tasks:
         by_conv: dict[str, list] = defaultdict(list)
         for qa, sr in pending_tasks:
             by_conv[sr.conversation_id].append((qa, sr))
-        pending_tasks = [
-            task
-            for column in zip_longest(*by_conv.values())
-            for task in column
-            if task is not None
-        ]
+        if MAX_CONCURRENT > 1:
+            pending_tasks = [
+                task
+                for column in zip_longest(*by_conv.values())
+                for task in column
+                if task is not None
+            ]
+        else:
+            # serial: conv-major preserves (conv_id, qa_idx) wall-clock order
+            pending_tasks = [task for tasks in by_conv.values() for task in tasks]
 
     if not pending_tasks:
         print(f"✅ All questions already processed!")
@@ -269,6 +277,11 @@ async def run_answer_stage(
         # 1. Grabbing the conv lock first means a slot is only held once the QA
         # can actually run. (Single lock-acquire order everywhere → no cycle.)
         async with conv_locks[search_result.conversation_id], semaphore:
+            # Wall-clock start of the QA's actual run (after lock acquisition).
+            # Pair with answer_latency_ms to reconstruct per-QA wall-clock
+            # windows post-hoc — needed by qa_logs raw_dump when session-bundle
+            # adapters don't write per-qa session jsonl (so user_ts is absent).
+            qa_start_unix_ms = int(time.time() * 1000)
             context = ""
             context_chars = 0
             context_tokens = 0
@@ -374,6 +387,7 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 final_tokens = context_tokens
             metadata = {
                 **qa.metadata,
+                "qa_start_unix_ms": qa_start_unix_ms,
                 "answer_latency_ms": answer_latency_ms,
                 "final_context_chars": context_chars,
                 "final_context_tokens": final_tokens,

@@ -1,39 +1,43 @@
-"""Raw log/dataset/jsonl excerpt dumper.
+"""Per-stage raw log dumper.
 
-Instead of rendering a synthesized markdown report, this module writes one
-directory per qid with 10-12 files, each containing unprocessed source content
-(JSON records, log line excerpts, .md file contents). The user inspects these
-directly with cat / grep / less — no second-order interpretation by qa_logs.
+One directory per qid, one file per pipeline stage. Each file is the raw
+text/log/json of its source — no markdown wrapping, no tables, no derived
+analysis. The reader views with cat / less / grep.
 
-File layout per qid (under <out_dir>/<qid>/):
+File layout per qid:
 
-    00_summary.txt               1-pager: qid, question, golden, judge, generated_answer
-    01_dataset_record.json       dataset.qa[qid_idx] JSON object
-    02_evidence_turns.json       session turns that evidence dia_id references
-    03_ovdata_golden.md          .ovdata candidate md files that match evidence phrase
-    04_log_ingest.txt            ov-server.log lines mentioning candidate golden URI
-    05_log_archive.txt           ov-server.log task_tracker / commit_session lines for this qid
-    06_session_jsonl_record.json session jsonl: this qa's user + assistant records
-    07_log_recall.txt            ov-server.log lines tagged with [qid=...] for recall stages
-    08_eval_record.json          eval_results + answer_results record for this qid
-    09_window.txt                window inference notes (source, start, end, n lines)
-    10_recall_topk.txt           structured vector+rerank topk table (raw rows)
-    11_picking_analysis.txt      reverse picked bullets → URIs + cross-ref recall scores
+    01_question.txt   raw question + golden + evidence dialogue text
+    02_ingest.log     raw OV server log lines (Enqueued/upsert) for this conv,
+                       filtered to this run's wall-clock window
+    03_storage.txt    raw cat of every .md file under .ovdata for this conv —
+                       ONLY if .ovdata mtime falls in this run's window
+    04_recall.log     raw OV server log lines (vector retrieval), filtered by
+                       [qid=...] tag AND this qa's wall-clock window
+    05_rerank.log     raw OV server log lines (rerank + recall_trace + telemetry),
+                       same scoping as 04
+    06_prompt.txt     raw agent LLM user_message_text (verbatim from session jsonl)
+    07_thinking.txt   raw agent LLM assistant_thinking
+    08_answer.txt     raw agent LLM assistant_text
+    09_judge.json     raw eval_results.json entry for this qid
 
-Scoping mechanism
------------------
-After feat/qid-tagging on the OpenViking-fork server side, every recall and
-archive log row carries a ``[qid=<qid>]`` prefix. The dumper greps by that
-tag — the per-qid time window is only kept as a *secondary* sanity bound, not
-as an exclusive filter. For pre-tagging legacy logs the ``_LEGACY_LOG_COMPAT``
-constant gates a conv-match fallback (which is the OLD broken behavior, kept
-only for diagnosing historical runs).
+When a stage's source data does not exist for this run (e.g. OV server log
+was rotated past this run's time window, .ovdata namespace was re-ingested
+by a later run, session jsonl missing), the file is a single
+``# unavailable: <reason>`` line. That line is the only tool-generated text.
 
-No heuristics
--------------
-``_infer_window`` returns exact ``[user_ts, user_ts + answer_latency_ms]``
-bounds when both session jsonl and answer_results are available, or an
-``unavailable_*`` spec otherwise. No ±N-second padding is applied anywhere.
+Wall-clock window scoping is critical because OV server log
+(``.runlogs/ov-server.log``) and ``.ovdata`` are **globally shared live
+files**, not per-run snapshots. Without window filtering, ``--run-name X``
+would silently return live state instead of run X's state. The window
+filter is the only way to be honest about data freshness.
+
+Window sources:
+  * per-qa (04, 05): session jsonl ``user_ts_ms`` + answer_results.json
+    ``answer_latency_ms`` → ``[user_ts, user_ts + latency]``
+  * per-run (02): the run's ``pipeline.log`` first and last timestamps
+  * per-run-or-recent (03): any .md file under the conv's memories dir
+    whose mtime falls within the per-run window — if no .md is in-window,
+    the storage state is from a different run and we mark unavailable
 """
 from __future__ import annotations
 
@@ -45,100 +49,28 @@ from pathlib import Path
 from typing import Optional
 
 from evaluation.tools.qa_logs.cli import CLIArgs
-from evaluation.tools.qa_logs.dataset_loader import EvidenceTurn, load_qa
-from evaluation.tools.qa_logs.eval_results import load_eval_result
+from evaluation.tools.qa_logs.dataset_loader import load_qa
 from evaluation.tools.qa_logs.session_jsonl import find_user_message
 
-# ── Limits to keep dumps tractable ────────────────────────────────────────────
 
-INGEST_LINE_CAP = 200
-ARCHIVE_LINE_CAP = 200
-RECALL_LINE_CAP = 2000
-OVDATA_FILE_CAP = 5
-OVDATA_FILE_BYTES_CAP = 32_000
-
-_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
-_VECTOR_RE = re.compile(r"('vector':\s*)\[[\d.\-eE+,\s]+\]")
-_VECTOR_RE_JSON = re.compile(r'("vector":\s*)\[[\d.\-eE+,\s]+\]')
-
-# vector_topk row: "  [N] URI: <uri>, score: X.XXXX, level: Y, ..."
-_VEC_ROW_RE = re.compile(
-    r"\[(\d+)\] URI:\s*(\S+),\s*score:\s*([\d.\-eE+]+),\s*level:\s*(\d+)"
-)
-# rerank "Added initial candidate" row: "[RecursiveSearch] Added initial candidate: <uri> (score: X.XXXX)"
-_RERANK_ROW_RE = re.compile(
-    r"Added initial candidate:\s*(\S+)\s*\(score:\s*([\d.\-eE+]+)\)"
-)
-# Telemetry summary returned count
-_RETURNED_RE = re.compile(r"'returned':\s*(\d+)")
-
-# qid tag injected by OpenViking-fork plain-debug logger after feat/qid-tagging
-_QID_RE = re.compile(r"\[qid=([^\]]+)\]")
-# Set True ONLY when inspecting pre-qid-tagging legacy logs. Falls back to
-# conv-substring matching, which leaks rows from other concurrent QAs of the
-# same conv — diagnostic value only.
-_LEGACY_LOG_COMPAT = False
-
-
-def _strip_vector_arrays(line: str) -> str:
-    """Replace huge embedding arrays inline with '<truncated N floats>' marker.
-
-    Keeps the surrounding fields (uri, level, owner_user_id, meta, ...) untouched
-    so the line still reads as raw log output.
-    """
-    def _sub(m: re.Match) -> str:
-        body = m.group(0)
-        try:
-            inner = body[body.index("[") + 1: body.rindex("]")]
-            n = inner.count(",") + 1 if inner.strip() else 0
-        except ValueError:
-            n = 0
-        return f"{m.group(1)}[<truncated {n} floats>]"
-
-    line = _VECTOR_RE.sub(_sub, line)
-    line = _VECTOR_RE_JSON.sub(_sub, line)
-    return line
-
-
-def _match_qid(line: str, qid: str, conv: str) -> bool:
-    """Return True if line carries [qid={qid}] tag.
-
-    In legacy compat mode (pre-qid-tagging logs), fall back to conv-substring
-    match — this is the OLD broken behavior preserved only for legacy run
-    diagnostics. The fallback leaks rows from concurrent QAs of the same conv.
-    """
-    if f"[qid={qid}]" in line:
-        return True
-    if _LEGACY_LOG_COMPAT and conv in line:
-        return True
-    return False
+_LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
+_PIPELINE_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - ")
 
 
 @dataclass
-class WindowSpec:
-    """Result of window inference.
-
-    ``source`` is a free-form label describing how the bounds were derived.
-    Recognized values:
-      * ``session_jsonl_exact`` — exact ``[user_ts, user_ts + answer_latency_ms]``.
-      * ``unavailable_no_session_jsonl`` — no per-QA session jsonl artifact.
-      * ``unavailable_session_parse_error:<exc>`` — jsonl present but unreadable.
-      * ``unavailable_no_user_ts`` — turn record had no usable timestamp.
-      * ``unavailable_no_latency_in_answer_results`` — user_ts known but no
-        ``answer_latency_ms`` in the answer_results record.
-
-    When the source is any ``unavailable_*`` variant, ``start`` and ``end`` are
-    ``None`` and the line scanners skip the window-bounded check; the
-    ``[qid=...]`` tag is then the sole scoping mechanism.
-    """
-    source: str
+class WallClockWindow:
+    """A `[start, end]` window plus a label describing where it came from."""
     start: Optional[datetime]
     end: Optional[datetime]
-    user_ts_ms: Optional[int] = None
-    answer_latency_ms: Optional[float] = None
+    source: str
+
+    @property
+    def is_known(self) -> bool:
+        return self.start is not None and self.end is not None
 
 
-# ── Public entrypoint ─────────────────────────────────────────────────────────
+# ── Public entrypoint ────────────────────────────────────────────────────────
+
 
 def dump_qa_logs(
     args: CLIArgs,
@@ -150,738 +82,157 @@ def dump_qa_logs(
     session_jsonl: Optional[Path],
     answer_results_path: Optional[Path] = None,
 ) -> None:
-    """Write 10-12 raw files into out_dir for the given qid."""
+    """Write 9 raw per-stage files into ``out_dir`` for ``args.qid``."""
     out_dir.mkdir(parents=True, exist_ok=True)
-
     qa = load_qa(dataset_path, args.qid)
-    eval_path = args.results_root / f"locomo-{args.system}-{args.run_name}" / "eval_results.json"
-    eval_result = load_eval_result(eval_path, args.qid)
-
-    raw_dataset = _raw_dataset_record(dataset_path, qa.conv, args.qid)
+    run_dir = args.results_root / f"locomo-{args.system}-{args.run_name}"
+    eval_path = run_dir / "eval_results.json"
     answer_record = _answer_record(answer_results_path, args.qid)
 
-    window = _infer_window(args, qa.conv, session_jsonl, answer_record)
+    qa_window = _qa_window(session_jsonl, args.qid, answer_record)
+    run_window = _run_window(run_dir)
+    # NOTE: previous versions fell back to run_window when qa_window was
+    # unknown. That was unsafe — it expanded per-qa dumps to the full
+    # multi-hour run, polluting 04/05 with every other qa's recalls. After
+    # answer_stage started writing metadata.qa_start_unix_ms, _qa_window has
+    # a robust fallback path; if both session_jsonl and qa_start_unix_ms are
+    # absent we now leave qa_window unknown and let 04/05 emit "# unavailable".
 
-    # 00 summary
-    _write_summary(out_dir / "00_summary.txt", args.qid, qa, eval_result, window)
-    # 01 dataset record
-    (out_dir / "01_dataset_record.json").write_text(
-        json.dumps(raw_dataset, ensure_ascii=False, indent=2) + "\n"
+    (out_dir / "01_question.txt").write_text(_question_text(qa))
+    (out_dir / "02_ingest.log").write_text(
+        _ingest_log(ov_log, qa.conv, run_window)
     )
-    # 02 evidence turns
-    (out_dir / "02_evidence_turns.json").write_text(
-        json.dumps(
-            [_evidence_turn_to_dict(t) for t in qa.evidence_turns],
-            ensure_ascii=False, indent=2,
-        ) + "\n"
+    (out_dir / "03_storage.txt").write_text(
+        _storage_files(ovdata_root, qa.conv, run_window)
     )
-    # 03 ovdata golden md files
-    _dump_ovdata_candidates(out_dir / "03_ovdata_golden.md", ovdata_root, qa.conv, qa.evidence_turns)
-    # 04 ingest log lines
-    _dump_ingest_lines(out_dir / "04_log_ingest.txt", ov_log, qa.conv, qa.evidence_turns)
-    # 05 archive log lines (qid-tag scoped)
-    _dump_archive_lines(out_dir / "05_log_archive.txt", ov_log, qa.conv, args.qid, window)
-    # 06 session jsonl record
-    _dump_session_record(out_dir / "06_session_jsonl_record.json", session_jsonl, args.qid)
-    # 07 recall log lines (qid-tag scoped)
-    _dump_recall_lines(out_dir / "07_log_recall.txt", ov_log, qa.conv, args.qid, window)
-    # 08 eval record
-    eval_record_raw = _eval_record_raw(eval_path, args.qid)
-    (out_dir / "08_eval_record.json").write_text(
-        json.dumps(
-            {
-                "eval_results.json": eval_record_raw,
-                "answer_results.json": answer_record,
-            },
-            ensure_ascii=False, indent=2,
-        ) + "\n"
+    (out_dir / "04_recall.log").write_text(
+        _recall_log(ov_log, args.qid, qa_window)
     )
-    # 09 window notes
-    (out_dir / "09_window.txt").write_text(_render_window(window) + "\n")
-    # 10 recall topk structured (vector top N + rerank candidates with URI/score/level)
-    _dump_recall_topk(out_dir / "10_recall_topk.txt", ov_log, qa.conv, window)
-    # 11 picking analysis (reverse picked bullets to URIs + cross-ref with vector/rerank scores)
-    _dump_picking_analysis(
-        out_dir / "11_picking_analysis.txt",
-        session_jsonl,
-        ovdata_root,
-        qa.conv,
-        out_dir / "10_recall_topk.txt",
-        args.qid,
-        ingest_log_path=out_dir / "04_log_ingest.txt",
+    (out_dir / "05_rerank.log").write_text(
+        _rerank_log(ov_log, args.qid, qa_window)
     )
-    # 12-15 openclaw conv artifacts (events / session manifest / internal log / metrics)
-    oc_conv_dir = _find_openclaw_conv_dir(args.results_root, args.system, args.run_name, qa.conv)
-    _dump_openclaw_events(out_dir / "12_openclaw_events.json", oc_conv_dir, args.qid)
-    _dump_session_manifest_evidence(out_dir / "13_session_manifest_evidence.json", oc_conv_dir, qa.evidence_turns)
-    _dump_openclaw_internal_log(out_dir / "14_openclaw_internal.log", oc_conv_dir)
-    _dump_openclaw_metrics(out_dir / "15_openclaw_metrics.json", oc_conv_dir)
+
+    prompt, thinking, answer = _session_jsonl_blobs(session_jsonl, args.qid)
+    (out_dir / "06_prompt.txt").write_text(prompt)
+    (out_dir / "07_thinking.txt").write_text(thinking)
+    (out_dir / "08_answer.txt").write_text(answer)
+
+    (out_dir / "09_judge.json").write_text(_judge_json(eval_path, args.qid))
 
 
-# ── Section helpers ───────────────────────────────────────────────────────────
-
-def _write_summary(path: Path, qid: str, qa, eval_result, window: WindowSpec) -> None:
-    judgments = eval_result.judgments or {}
-    lines = [
-        f"qid: {qid}",
-        f"conv: {qa.conv}",
-        f"category: {qa.category}",
-        f"question: {qa.question}",
-        f"golden_answer: {qa.golden}",
-        f"judge.is_correct: {eval_result.correct}",
-        f"judge.llm_judgments: {judgments}",
-        f"generated_answer: {eval_result.generated}",
-        f"window_source: {window.source}  ({window.start} -> {window.end})",
-    ]
-    path.write_text("\n".join(lines) + "\n")
+# ── Window resolution ────────────────────────────────────────────────────────
 
 
-def _raw_dataset_record(dataset_path: Path, conv: str, qid: str) -> dict:
-    """Return the raw qa object plus sample_id metadata for traceability."""
-    data = json.loads(Path(dataset_path).read_text())
-    conv_pos = int(conv.split("_", 1)[1])
-    qid_idx = int(qid.rsplit("_qa", 1)[1])
-    sample = data[conv_pos] if 0 <= conv_pos < len(data) else None
-    if sample is None:
-        return {}
-    return {
-        "dataset_index": conv_pos,
-        "sample_id_in_dataset": sample.get("sample_id"),
-        "conv_id_eval_side": conv,
-        "qid_idx": qid_idx,
-        "qa": sample["qa"][qid_idx],
-    }
+def _qa_window(
+    session_jsonl: Optional[Path], qid: str, answer_record: Optional[dict],
+) -> WallClockWindow:
+    """qa window from session_jsonl user_ts (preferred) or answer_results.json (fallback).
 
+    Two anchoring paths, in order of precision:
 
-def _evidence_turn_to_dict(t: EvidenceTurn) -> dict:
-    return {
-        "session_idx": t.session_idx,
-        "dia_id": t.dia_id,
-        "speaker": t.speaker,
-        "text": t.text,
-        "session_date_time": t.timestamp,
-    }
+    1. **session_jsonl user_ts**: per-qa ``qa<idx>.jsonl`` (or single per-conv
+       ``session.jsonl``) records the user-turn ``timestamp`` field in unix
+       epoch ms. Best when the adapter writes per-qa jsonl.
 
+    2. **answer_results.json qa_start_unix_ms**: session-bundle adapters write
+       only ``locomo_0__bootstrap.jsonl`` (no per-qa file), so user_ts is
+       unavailable. answer_stage records ``metadata.qa_start_unix_ms`` (wall-
+       clock captured under conv_lock + semaphore) for these cases.
 
-def _dump_ovdata_candidates(
-    path: Path, ovdata_root: Path, conv: str, evidence_turns: list[EvidenceTurn],
-) -> None:
-    """Find candidate golden md files in ovdata and copy contents verbatim."""
-    if not ovdata_root.exists():
-        path.write_text(f"# ovdata root not found: {ovdata_root}\n")
-        return
-    mem_root = ovdata_root / "viking" / "default" / "user" / conv / "memories"
-    if not mem_root.exists():
-        # Try alternative ovdata layouts
-        for cand in ovdata_root.rglob(f"user/{conv}/memories"):
-            mem_root = cand
-            break
-    if not mem_root.exists():
-        path.write_text(f"# memories dir not found under {ovdata_root}\n")
-        return
+    Both paths compute ``end = start + answer_latency_ms``.
+    Bounds are converted to local-host tz via ``datetime.fromtimestamp`` so
+    they align with OV server log timestamps (Python ``logging`` defaults).
+    """
+    latency_ms = ((answer_record or {}).get("metadata") or {}).get("answer_latency_ms")
 
-    phrases = _evidence_phrases(evidence_turns)
-    hits: list[tuple[Path, str]] = []
-    for md in mem_root.rglob("*.md"):
+    # Path 1: session_jsonl user_ts + latency
+    if session_jsonl and session_jsonl.exists():
         try:
-            content = md.read_text(errors="replace")
-        except OSError:
-            continue
-        if any(p.lower() in content.lower() for p in phrases):
-            hits.append((md, content))
-            if len(hits) >= OVDATA_FILE_CAP:
-                break
+            qid_idx = int(qid.rsplit("_qa", 1)[1])
+        except (IndexError, ValueError) as e:
+            return WallClockWindow(None, None, f"unavailable: bad qid {qid!r}: {e}")
+        msg_idx = 0 if session_jsonl.name == f"qa{qid_idx}.jsonl" else qid_idx
+        try:
+            turn = find_user_message(session_jsonl, msg_idx)
+        except (IndexError, KeyError):
+            turn = None
+        if (turn and turn.unix_ts_ms and turn.unix_ts_ms > 0
+                and isinstance(latency_ms, (int, float)) and latency_ms > 0):
+            start = datetime.fromtimestamp(turn.unix_ts_ms / 1000.0)
+            end = datetime.fromtimestamp((turn.unix_ts_ms + latency_ms) / 1000.0)
+            return WallClockWindow(start, end, f"session_jsonl user_ts + {latency_ms}ms")
 
-    if not hits:
-        path.write_text(f"# no .md under {mem_root} matches evidence phrases: {phrases!r}\n")
-        return
-
-    body: list[str] = []
-    for md_path, content in hits:
-        uri = _md_to_uri(md_path, mem_root, conv)
-        body.append(f"# === {uri} === ({md_path})")
-        snippet = content if len(content) <= OVDATA_FILE_BYTES_CAP else content[:OVDATA_FILE_BYTES_CAP] + "\n# ... (truncated)"
-        body.append(snippet)
-        body.append("")
-    path.write_text("\n".join(body) + "\n")
-
-
-def _evidence_phrases(evidence_turns: list[EvidenceTurn]) -> list[str]:
-    phrases: list[str] = []
-    for t in evidence_turns:
-        text = (t.text or "").strip()
-        if text:
-            phrases.append(text[:40])
-    return phrases or ["__no_evidence__"]
-
-
-def _md_to_uri(md_path: Path, mem_root: Path, conv: str) -> str:
-    rel = md_path.relative_to(mem_root)
-    return f"viking://user/{conv}/memories/{rel.as_posix()}"
-
-
-def _dump_ingest_lines(
-    path: Path, ov_log: Path, conv: str, evidence_turns: list[EvidenceTurn],
-) -> None:
-    """Grep ov-server.log for ingest lines naming this conv.
-
-    Filter: conv string in line AND (Enqueued|upsert). Evidence-phrase secondary
-    filter was dropped — ingest log writes the LLM-extracted abstract, which
-    almost never matches the raw evidence text verbatim, so phrase filter
-    yielded 0 hits in practice. Conv-scoped Enqueued lines are the right
-    granularity: they include every memory URI that landed under this conv,
-    which is what 11_picking_analysis needs for its ingest-log fallback.
-    """
-    if not ov_log.exists():
-        path.write_text(f"# ov_log not found: {ov_log}\n")
-        return
-    hits: list[str] = []
-    conv_l = conv.lower()
-    with ov_log.open(errors="replace") as f:
-        for line in f:
-            ll = line.lower()
-            if conv_l not in ll:
-                continue
-            if "enqueued" not in ll and "upsert" not in ll:
-                continue
-            hits.append(_strip_vector_arrays(line.rstrip("\n")))
-            if len(hits) >= INGEST_LINE_CAP:
-                break
-    if not hits:
-        path.write_text(f"# no ingest lines found for {conv}\n")
-        return
-    path.write_text("\n".join(hits) + "\n")
-
-
-def _dump_archive_lines(
-    path: Path, ov_log: Path, conv: str, qid: str, window: WindowSpec,
-) -> None:
-    """task_tracker + commit_session lines attributed to this qid.
-
-    Primary filter is the ``[qid={qid}]`` tag stamped by the OV server's
-    plain-debug logger after feat/qid-tagging. Window is kept only as a
-    secondary sanity bound — it does NOT widen row inclusion. For legacy
-    pre-tagging logs, enable ``_LEGACY_LOG_COMPAT`` at module top to fall
-    back to conv-substring matching (which is the OLD leaky behavior, kept
-    only for historical diagnostics).
-    """
-    legacy_active = _LEGACY_LOG_COMPAT
-    header = [
-        f"# qid filter: [qid={qid}]",
-        f"# window (sanity, not exclusive): {window.start} -> {window.end}",
-        "# loggers tracked: task_tracker, session.session [TRACER]",
-    ]
-    if legacy_active:
-        header.append(
-            "# WARN: _LEGACY_LOG_COMPAT=True — falling back to conv match for "
-            "rows that pre-date qid tagging; lines without [qid=] are "
-            "conv-leaked and NOT exclusive to this qid."
+    # Path 2: answer_results.json qa_start_unix_ms + latency
+    start_ms = ((answer_record or {}).get("metadata") or {}).get("qa_start_unix_ms")
+    if (isinstance(start_ms, int) and start_ms > 0
+            and isinstance(latency_ms, (int, float)) and latency_ms > 0):
+        start = datetime.fromtimestamp(start_ms / 1000.0)
+        end = datetime.fromtimestamp((start_ms + latency_ms) / 1000.0)
+        return WallClockWindow(
+            start, end,
+            f"answer_results qa_start_unix_ms + {latency_ms}ms",
         )
 
-    lines_out: list[str] = []
-    if not ov_log.exists():
-        header.append(f"# ov_log not found: {ov_log}")
-    else:
-        try:
-            with ov_log.open("r", errors="replace") as f:
-                for line in f:
-                    # Sanity window check: when bounds are known, skip lines
-                    # clearly outside. When window is unavailable, skip the
-                    # timestamp check entirely so qid filter is sole scoping.
-                    if window.start is not None and window.end is not None:
-                        ts = _parse_ts(line)
-                        if ts is None:
-                            continue
-                        if not (window.start <= ts <= window.end):
-                            continue
-                    # Logger include: task_tracker activity or TRACER commit traces
-                    if (
-                        "task_tracker" not in line
-                        and "TaskTracker" not in line
-                        and "[TRACER]" not in line
-                    ):
-                        continue
-                    # qid-grep primary filter
-                    if not _match_qid(line, qid, conv):
-                        continue
-                    lines_out.append(line.rstrip("\n"))
-                    if len(lines_out) >= ARCHIVE_LINE_CAP:
-                        break
-        except OSError as e:
-            header.append(f"# ov_log open error: {e}")
-
-    body = "\n".join(header + [""] + lines_out)
-    path.write_text(body + "\n")
+    return WallClockWindow(
+        None, None,
+        "unavailable: no session_jsonl user_ts and no answer_results.qa_start_unix_ms",
+    )
 
 
-def _dump_session_record(path: Path, session_jsonl: Optional[Path], qid: str) -> None:
-    if not session_jsonl or not session_jsonl.exists():
-        path.write_text(json.dumps({"note": "no session jsonl present for this run"}, indent=2) + "\n")
-        return
-    qid_idx = int(qid.rsplit("_qa", 1)[1])
-    # Per-QA files (qa<N>.jsonl) have just one user message at index 0.
-    # Legacy single-jsonl files use the real qid_idx.
-    msg_idx = 0 if session_jsonl.name == f"qa{qid_idx}.jsonl" else qid_idx
-    try:
-        turn = find_user_message(session_jsonl, msg_idx)
-    except (IndexError, KeyError) as e:
-        path.write_text(json.dumps({"error": str(e)}, indent=2) + "\n")
-        return
-    record = {
-        "user_message_text": turn.text,
-        "user_message_unix_ts_ms": turn.unix_ts_ms,
-        "injected_bullets": [
-            {"chars": b.chars, "abstract_head": b.abstract_head, "text": b.text}
-            for b in turn.injected_bullets
-        ],
-        "assistant_text": turn.assistant_text,
-        "assistant_thinking": turn.assistant_thinking,
-    }
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+def _run_window(run_dir: Path) -> WallClockWindow:
+    """Per-run window anchored on artifacts dir mtimes (unix epoch).
 
+    Sampled mtimes (all unix epoch, tz-safe across host moves):
+      * ``run-YYYYMMDDTHHMMSS/`` artifact dir mtime — captures run start
+      * every per-qa session jsonl mtime — captures per-qa progress
+        (some images don't write these — see "fallback" below)
+      * every per-conv ``events.jsonl`` mtime — written incrementally
+      * ``eval_results.json`` and ``answer_results.json`` mtimes —
+        written at run end, so they pin the upper bound when session
+        jsonl per-qa files are absent
+      * ``pipeline.log`` mtime — written throughout the run
 
-_RECALL_LOGGERS = (
-    "hierarchical_retriever",
-    "viking_vector_index_backend",   # vector store query backend
-    "openai_rerank",                 # rerank model
-    "openai_embedders",              # query embed
-    "telemetry.execution",           # Telemetry summary lines
-)
-
-
-def _dump_recall_lines(
-    path: Path, ov_log: Path, conv: str, qid: str, window: WindowSpec,
-) -> None:
-    """Stream every recall-stage log row attributed to this qid via [qid=...] tag.
-
-    Window is kept ONLY as a secondary sanity-check filter (bounds the linear
-    scan; does NOT widen the row inclusion). For new runs every selected line
-    carries ``[qid={qid}]``; for legacy logs (pre-feat/qid-tagging) the
-    ``_LEGACY_LOG_COMPAT`` fallback can be enabled to pass-through conv-matched
-    lines — the file will then carry an explicit deprecation header.
-
-    Caps at RECALL_LINE_CAP lines with a truncation marker.
+    Min-max gives a sound run window in the current host's local tz
+    (matching OV server log timestamps).
     """
-    legacy_active = _LEGACY_LOG_COMPAT
-    header = [
-        f"# qid filter: [qid={qid}]",
-        f"# window (sanity, not exclusive): {window.start} -> {window.end}",
-        f"# loggers tracked: {', '.join(_RECALL_LOGGERS)}",
-        f"# line cap: {RECALL_LINE_CAP}",
-    ]
-    if legacy_active:
-        header.append(
-            "# WARN: _LEGACY_LOG_COMPAT=True — falling back to conv match for "
-            "rows that pre-date qid tagging; lines without [qid=] are "
-            "conv-leaked and NOT exclusive to this qid."
-        )
-
-    lines_out: list[str] = []
-    truncated = False
-    if not ov_log.exists():
-        header.append(f"# ov_log not found: {ov_log}")
-    else:
-        try:
-            with ov_log.open("r", errors="replace") as f:
-                for line in f:
-                    # Sanity window check (skipped when bounds unavailable)
-                    if window.start is not None and window.end is not None:
-                        ts = _parse_ts(line)
-                        if ts is None:
-                            continue
-                        if not (window.start <= ts <= window.end):
-                            continue
-                    # Logger include filter
-                    if not any(needle in line for needle in _RECALL_LOGGERS):
-                        continue
-                    # qid-grep primary filter
-                    if not _match_qid(line, qid, conv):
-                        continue
-                    lines_out.append(_strip_vector_arrays(line.rstrip("\n")))
-                    if len(lines_out) >= RECALL_LINE_CAP:
-                        truncated = True
-                        break
-        except OSError as e:
-            header.append(f"# ov_log open error: {e}")
-
-    body = "\n".join(header + [""] + lines_out)
-    if truncated:
-        body += f"\n# ... truncated at {RECALL_LINE_CAP} lines (raise RECALL_LINE_CAP to see more)"
-    path.write_text(body + "\n")
-
-
-def _dump_recall_topk(path: Path, ov_log: Path, conv: str, window: WindowSpec) -> None:
-    """Extract structured vector_topk + rerank_topk tables from the recall window.
-
-    Walks the same window as 07_log_recall, but parses each vector / rerank /
-    telemetry line into rows and prints two aligned tables. Quick way to see
-    'did golden show up in vector top? in rerank top? what score?' without
-    scanning 900 raw log lines.
-
-    Note: 10_recall_topk continues to use conv-substring matching plus the
-    sanity window because the vector/rerank rows are emitted as multi-line
-    blocks by recursive search, and the [qid=...] tag sits only on the
-    enclosing header line — parsing structured rows still needs the full
-    block. This file is a *visualization* of 07_log_recall, not an
-    additional source of truth.
-    """
-    if not ov_log.exists():
-        path.write_text(f"# ov_log not found: {ov_log}\n")
-        return
-
-    vector_rows: list[tuple[int, str, float, int]] = []
-    rerank_rows: list[tuple[str, float]] = []
-    telemetry_returns: list[int] = []
-
-    with ov_log.open(errors="replace") as f:
-        for line in f:
-            if window.start is not None and window.end is not None:
-                ts = _parse_ts(line)
-                if ts is None:
-                    continue
-                if not (window.start <= ts <= window.end):
-                    continue
-            if conv not in line and "Telemetry summary" not in line:
-                continue
-            mv = _VEC_ROW_RE.search(line)
-            if mv:
-                vector_rows.append((int(mv.group(1)), mv.group(2), float(mv.group(3)), int(mv.group(4))))
-                continue
-            mr = _RERANK_ROW_RE.search(line)
-            if mr:
-                rerank_rows.append((mr.group(1), float(mr.group(2))))
-                continue
-            if "Telemetry summary" in line:
-                mt = _RETURNED_RE.search(line)
-                if mt:
-                    telemetry_returns.append(int(mt.group(1)))
-
-    out: list[str] = []
-    out.append(f"# window: {window.start} -> {window.end}  ({window.source})")
-    out.append(f"# conv filter: {conv}")
-    out.append("")
-    out.append("=== TELEMETRY ===")
-    if telemetry_returns:
-        out.append(f"search.find returned counts in window: {telemetry_returns}")
-    else:
-        out.append("no Telemetry summary found in window")
-    out.append("")
-    out.append(f"=== VECTOR TOPK  ({len(vector_rows)} rows) ===")
-    out.append(f"{'rank':>4}  {'score':>7}  {'L':>1}  uri")
-    for rank, uri, score, level in vector_rows:
-        out.append(f"{rank:>4}  {score:>7.4f}  {level:>1}  {uri}")
-    out.append("")
-    out.append(f"=== RERANK CANDIDATES  ({len(rerank_rows)} rows) ===")
-    out.append("# rerank scores from openai_rerank model; rank reflects emit order")
-    out.append(f"{'rk':>3}  {'score':>7}  uri")
-    # Sort rerank rows by score descending for analysis
-    rerank_sorted = sorted(enumerate(rerank_rows), key=lambda x: -x[1][1])
-    for new_rank, (emit_idx, (uri, score)) in enumerate(rerank_sorted, 1):
-        out.append(f"{new_rank:>3}  {score:>7.4f}  {uri}")
-    path.write_text("\n".join(out) + "\n")
-
-
-def _dump_picking_analysis(
-    path: Path,
-    session_jsonl: Optional[Path],
-    ovdata_root: Path,
-    conv: str,
-    recall_topk_path: Path,
-    qid: str,
-    ingest_log_path: Optional[Path] = None,
-) -> None:
-    """Cross-reference injected bullets against vector/rerank scores.
-
-    Reverse-lookup each picked bullet's abstract_head against .ovdata to get
-    its URI. When .ovdata is missing (e.g. namespace cleaned after run), fall
-    back to grepping the ingest log (04_log_ingest.txt) for the bullet's
-    abstract_head — the Enqueued log line carries both abstract and URI.
-    """
-    if not session_jsonl or not session_jsonl.exists():
-        path.write_text(
-            "# session jsonl missing — cannot reverse picked bullets to URIs\n"
-        )
-        return
-
-    qid_idx = int(qid.rsplit("_qa", 1)[1])
-    msg_idx = 0 if session_jsonl.name == f"qa{qid_idx}.jsonl" else qid_idx
-    try:
-        turn = find_user_message(session_jsonl, msg_idx)
-    except (IndexError, KeyError) as e:
-        path.write_text(f"# could not load session turn: {e}\n")
-        return
-
-    bullets = turn.injected_bullets
-    if not bullets:
-        path.write_text("# no injected bullets in this turn\n")
-        return
-
-    # Build URI -> content map. Primary source: .ovdata; fallback: ingest log.
-    md_cache: list[tuple[str, str]] = []  # (uri, content)
-    fallback_used = False
-
-    mem_root = ovdata_root / "viking" / "default" / "user" / conv / "memories"
-    if not mem_root.exists():
-        for cand in ovdata_root.rglob(f"user/{conv}/memories"):
-            mem_root = cand
-            break
-
-    if mem_root.exists():
-        for md in mem_root.rglob("*.md"):
+    art_root = run_dir / "artifacts" / "openclaw"
+    mtimes: list[float] = []
+    if art_root.exists():
+        for run_artifact_dir in art_root.glob("run-*"):
             try:
-                content = md.read_text(errors="replace")
-                rel = md.relative_to(mem_root)
-                uri = f"viking://user/{conv}/memories/{rel.as_posix()}"
-                md_cache.append((uri, content))
+                mtimes.append(run_artifact_dir.stat().st_mtime)
             except OSError:
                 pass
-
-    if not md_cache and ingest_log_path and ingest_log_path.exists():
-        # Fallback: parse ingest log for (URI, abstract) pairs from Enqueued lines.
-        # Line shape: ...Enqueued embedding message: EmbeddingMsg(message='...',
-        #   context_data={...'uri': 'viking://...', ..., 'abstract': '...'}
-        fallback_used = True
-        uri_re = re.compile(r"'uri':\s*'(viking://[^']+)'")
-        abs_re = re.compile(r"'abstract':\s*\"([^\"]+?)\"")
-        seen = set()
-        try:
-            with ingest_log_path.open(errors="replace") as f:
-                for line in f:
-                    mu = uri_re.search(line)
-                    if not mu:
-                        continue
-                    uri = mu.group(1)
-                    if uri in seen:
-                        continue
-                    ma = abs_re.search(line)
-                    if not ma:
-                        continue
-                    abstract = ma.group(1)
-                    md_cache.append((uri, abstract))
-                    seen.add(uri)
-        except OSError:
-            pass
-
-    if not md_cache:
-        path.write_text(
-            f"# bullets→URI reverse lookup unavailable: ovdata missing under {ovdata_root} "
-            f"AND no ingest log fallback (04 path: {ingest_log_path})\n"
-        )
-        return
-
-    # Parse 10_recall_topk for URI -> (vec_rank, vec_score, level) and URI -> rerank_score
-    vec_index: dict[str, tuple[int, float, int]] = {}
-    rerank_index: dict[str, float] = {}
-    if recall_topk_path.exists():
-        section = None
-        for line in recall_topk_path.read_text().splitlines():
-            if line.startswith("=== VECTOR"):
-                section = "vector"
-                continue
-            if line.startswith("=== RERANK"):
-                section = "rerank"
-                continue
-            if line.startswith("===") or not line.strip() or line.startswith("#") or line.startswith("rank") or line.startswith(" rk"):
-                continue
-            parts = line.split()
-            if section == "vector" and len(parts) >= 4:
+            for p in run_artifact_dir.rglob("state/agents/main/sessions/*.jsonl"):
                 try:
-                    vec_index[parts[3]] = (int(parts[0]), float(parts[1]), int(parts[2]))
-                except (ValueError, IndexError):
+                    mtimes.append(p.stat().st_mtime)
+                except OSError:
                     pass
-            elif section == "rerank" and len(parts) >= 3:
+            for p in run_artifact_dir.rglob("events.jsonl"):
                 try:
-                    rerank_index[parts[2]] = float(parts[1])
-                except (ValueError, IndexError):
+                    mtimes.append(p.stat().st_mtime)
+                except OSError:
                     pass
-
-    # Reverse picked bullets to URIs using md_cache (built above from ovdata or ingest log)
-    picked: list[dict] = []
-    for i, b in enumerate(bullets):
-        head = b.abstract_head[:50]
-        matched_uri = None
-        for uri, content in md_cache:
-            if head in content:
-                matched_uri = uri
-                break
-        picked.append({
-            "i": i, "chars": b.chars, "uri": matched_uri,
-            "vec": vec_index.get(matched_uri or "_"),
-            "rerank": rerank_index.get(matched_uri or "_"),
-            "head": head,
-        })
-
-    # Render
-    out: list[str] = []
-    total_chars = sum(b.chars for b in bullets)
-    out.append("=== PICKED 5 BULLETS — REVERSE LOOKUP ===")
-    out.append(f"injected total chars: {total_chars}  (plugin budget typical 4000)")
-    out.append(f"budget usage: {100 * total_chars / 4000:.1f}%")
-    if fallback_used:
-        out.append("# NOTE: ovdata missing — URI lookup fell back to ingest-log abstract grep")
-    out.append("")
-    out.append(f"{'#':>2}  {'chars':>5}  {'vec_rk':>6}  {'vec_sc':>7}  {'rerank':>7}  uri")
-    for p in picked:
-        vec = p["vec"]
-        vec_rk = f"{vec[0]}" if vec else "—"
-        vec_sc = f"{vec[1]:.4f}" if vec else "—"
-        rerank = f"{p['rerank']:.4f}" if p["rerank"] is not None else "—"
-        uri_disp = p["uri"] or f"(unresolved: {p['head'][:30]}...)"
-        out.append(f"{p['i']:>2}  {p['chars']:>5}  {vec_rk:>6}  {vec_sc:>7}  {rerank:>7}  {uri_disp}")
-
-    # Show all rerank candidates with picked / not-picked annotation
-    picked_uris = {p["uri"] for p in picked if p["uri"]}
-    out.append("")
-    out.append("=== ALL RERANK CANDIDATES vs PICKED (sorted by rerank score) ===")
-    out.append("# this is the key view: rerank order top-down, picked marked")
-    out.append(f"{'rk':>3}  {'rerank':>7}  picked  uri")
-    for rk, (uri, rerank_score) in enumerate(
-        sorted(rerank_index.items(), key=lambda x: -x[1]), 1
-    ):
-        mark = "  ✓  " if uri in picked_uris else "  ·  "
-        out.append(f"{rk:>3}  {rerank_score:>7.4f}  {mark}  {uri}")
-    path.write_text("\n".join(out) + "\n")
+    # End-of-run signals — these are reliably written even when per-qa
+    # session jsonl artifacts are not (e.g. session bundle bridges that
+    # produce only locomo_0__bootstrap.jsonl).
+    for name in ("eval_results.json", "answer_results.json", "pipeline.log"):
+        p = run_dir / name
+        if p.exists():
+            try:
+                mtimes.append(p.stat().st_mtime)
+            except OSError:
+                pass
+    if not mtimes:
+        return WallClockWindow(None, None,
+                               f"unavailable: no run artifacts under {run_dir}")
+    start = datetime.fromtimestamp(min(mtimes))
+    end = datetime.fromtimestamp(max(mtimes))
+    return WallClockWindow(start, end, "run artifact + result file mtimes (unix epoch)")
 
 
-
-def _eval_record_raw(eval_results_path: Path, qid: str) -> dict | None:
-    if not eval_results_path.exists():
-        return None
-    data = json.loads(eval_results_path.read_text())
-    detailed = data.get("detailed_results")
-    if isinstance(detailed, dict):
-        for user, recs in detailed.items():
-            for r in recs or []:
-                if r.get("question_id") == qid:
-                    return {"user": user, **r}
-    for r in data.get("results") or []:
-        if r.get("question_id") == qid:
-            return r
-    return None
-
-
-def _answer_record(answer_results_path: Optional[Path], qid: str) -> dict | None:
-    if not answer_results_path or not answer_results_path.exists():
-        return None
-    data = json.loads(answer_results_path.read_text())
-    if isinstance(data, list):
-        for r in data:
-            if r.get("question_id") == qid:
-                return r
-    return None
-
-
-# ── Window inference ─────────────────────────────────────────────────────────
-
-def _infer_window(
-    args: CLIArgs,
-    conv: str,
-    session_jsonl: Optional[Path],
-    answer_record: Optional[dict],
-) -> WindowSpec:
-    """Compute exact ``[user_ts, user_ts + answer_latency_ms]`` bounds.
-
-    No padding. No log-extent fallback. No heuristic widening. When session
-    jsonl or ``answer_latency_ms`` is missing, return a spec with
-    ``source='unavailable_*'`` and ``start=end=None`` — the caller writes
-    09_window.txt accordingly and the line scanners do not apply
-    window-bounded checks (qid filter is still primary).
-    """
-    if session_jsonl is None or not session_jsonl.exists():
-        return WindowSpec(
-            source="unavailable_no_session_jsonl",
-            start=None, end=None,
-            user_ts_ms=None, answer_latency_ms=None,
-        )
-
-    try:
-        qid_idx = int(args.qid.rsplit("_qa", 1)[1])
-    except (IndexError, ValueError) as e:
-        return WindowSpec(
-            source=f"unavailable_session_parse_error:{e}",
-            start=None, end=None,
-            user_ts_ms=None, answer_latency_ms=None,
-        )
-
-    msg_idx = 0 if session_jsonl.name == f"qa{qid_idx}.jsonl" else qid_idx
-    try:
-        turn = find_user_message(session_jsonl, msg_idx)
-    except (IndexError, KeyError, ValueError) as e:
-        return WindowSpec(
-            source=f"unavailable_session_parse_error:{type(e).__name__}",
-            start=None, end=None,
-            user_ts_ms=None, answer_latency_ms=None,
-        )
-
-    user_ts_ms = turn.unix_ts_ms
-    if user_ts_ms is None or user_ts_ms <= 0:
-        return WindowSpec(
-            source="unavailable_no_user_ts",
-            start=None, end=None,
-            user_ts_ms=None, answer_latency_ms=None,
-        )
-
-    latency_ms = None
-    if answer_record:
-        meta = answer_record.get("metadata") or {}
-        latency_ms = meta.get("answer_latency_ms")
-    if not isinstance(latency_ms, (int, float)) or latency_ms <= 0:
-        return WindowSpec(
-            source="unavailable_no_latency_in_answer_results",
-            start=None, end=None,
-            user_ts_ms=user_ts_ms, answer_latency_ms=None,
-        )
-
-    start_dt = datetime.fromtimestamp(user_ts_ms / 1000.0)
-    end_dt = datetime.fromtimestamp((user_ts_ms + latency_ms) / 1000.0)
-    return WindowSpec(
-        source="session_jsonl_exact",
-        start=start_dt, end=end_dt,
-        user_ts_ms=user_ts_ms, answer_latency_ms=float(latency_ms),
-    )
-
-
-def _render_window(w: WindowSpec) -> str:
-    """Render 09_window.txt contents.
-
-    When bounds are known, includes the exact ISO timestamps and
-    ``answer_latency_ms``. When unavailable, replaces the note with the
-    explicit fact that the qid tag is the sole scoping mechanism.
-    """
-    user_ts_iso = (
-        datetime.fromtimestamp(w.user_ts_ms / 1000.0).isoformat()
-        if w.user_ts_ms else "unavailable"
-    )
-    latency_disp = (
-        f"{w.answer_latency_ms}" if w.answer_latency_ms is not None else "unavailable"
-    )
-    start_disp = w.start.isoformat() if w.start else "unavailable"
-    end_disp = w.end.isoformat() if w.end else "unavailable"
-
-    if w.start is not None and w.end is not None:
-        note = (
-            "exact bounds [user_ts, user_ts + answer_latency_ms]; "
-            "no padding applied"
-        )
-    else:
-        note = (
-            "window unavailable — line-level [qid=...] filter is the sole "
-            "scoping mechanism"
-        )
-
-    lines = [
-        f"source: {w.source}",
-        f"user_ts: {user_ts_iso}",
-        f"answer_latency_ms: {latency_disp}",
-        f"window_start: {start_disp}",
-        f"window_end: {end_disp}",
-        f"note: {note}",
-    ]
-    return "\n".join(lines)
-
-
-def _parse_ts(line: str) -> Optional[datetime]:
-    m = _TS_RE.match(line)
+def _line_ts(line: str) -> Optional[datetime]:
+    m = _LOG_TS_RE.match(line)
     if not m:
         return None
     try:
@@ -890,187 +241,274 @@ def _parse_ts(line: str) -> Optional[datetime]:
         return None
 
 
-# ── openclaw conv artifact helpers ────────────────────────────────────────────
-
-def _find_openclaw_conv_dir(
-    results_root: Path,
-    system: str,
-    run_name: str,
-    conv: str,
-) -> Optional[Path]:
-    """Locate the per-conv openclaw artifact directory.
-
-    Path:
-        <results_root>/locomo-<system>-<run_name>/artifacts/openclaw/run-*/conversations/<conv>/
-    """
-    run_dir = results_root / f"locomo-{system}-{run_name}"
-    matches = sorted(run_dir.glob(
-        f"artifacts/openclaw/run-*/conversations/{conv}"
-    ))
-    return matches[0] if matches else None
+def _in_window(ts: Optional[datetime], window: WallClockWindow) -> bool:
+    if not window.is_known:
+        return True  # window unknown — don't reject
+    if ts is None:
+        return False
+    return window.start <= ts <= window.end
 
 
-def _dump_openclaw_events(
-    path: Path, oc_conv_dir: Optional[Path], qid: str,
-) -> None:
-    """events.jsonl filtered to events mentioning the qid + all conv-wide events.
+# ── 01 question ──────────────────────────────────────────────────────────────
 
-    Returns a JSON object with two keys:
-      - per_qid: events whose 'question_id' == qid (per-qa errors, etc.)
-      - conv_wide: events with no 'question_id' (ingest_mode_session_bundle,
-        ov_session_opened, ov_sdk_ingest_complete, etc. — these are conv-level
-        markers that contextualize the per-qa events.)
-    """
-    if not oc_conv_dir or not (oc_conv_dir / "events.jsonl").exists():
-        path.write_text(
-            json.dumps({"note": "events.jsonl not found", "oc_conv_dir": str(oc_conv_dir)}) + "\n"
+
+def _question_text(qa) -> str:
+    parts = [
+        f"QUESTION: {qa.question}",
+        "",
+        f"GOLDEN: {qa.golden}",
+        "",
+        "EVIDENCE:",
+    ]
+    if not qa.evidence_turns:
+        parts.append("(no evidence turns listed in dataset.qa.evidence)")
+        return "\n".join(parts) + "\n"
+    for t in qa.evidence_turns:
+        parts.append(
+            f"[{t.dia_id}] {t.speaker} @ session_{t.session_idx} ({t.timestamp or '?'})"
         )
-        return
-    per_qid: list[dict] = []
-    conv_wide: list[dict] = []
-    try:
-        with (oc_conv_dir / "events.jsonl").open(errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if e.get("question_id") == qid:
-                    per_qid.append(e)
-                elif "question_id" not in e:
-                    conv_wide.append(e)
-    except OSError as ex:
-        path.write_text(json.dumps({"error": str(ex)}) + "\n")
-        return
-    path.write_text(json.dumps(
-        {"per_qid": per_qid, "conv_wide": conv_wide},
-        ensure_ascii=False, indent=2,
-    ) + "\n")
+        parts.append(t.text or "")
+        parts.append("")
+    return "\n".join(parts)
 
 
-def _dump_session_manifest_evidence(
-    path: Path, oc_conv_dir: Optional[Path], evidence_turns: list[EvidenceTurn],
-) -> None:
-    """Map each evidence dia_id (e.g. D2:1) to its session_id from session_manifest.
+# ── 02 ingest ────────────────────────────────────────────────────────────────
 
-    Lets the reader trace which openclaw session bundle covered a given
-    evidence turn. The session_id is the openclaw-internal label (S1, S2, …),
-    raw_session_key is the dataset's session_2 / session_20 / etc.
+
+def _ingest_log(ov_log: Path, conv: str, run_window: WallClockWindow) -> str:
+    """OV server log lines matching this conv AND inside this run's window.
+
+    Conv filter (Enqueued|upsert + conv substring) is the same as before;
+    the new constraint is the wall-clock window — without it, ingest from
+    a completely different run leaks into the output and misleads the
+    reader. If 0 lines match, the file shows an unavailable stub naming
+    the window we expected to see.
     """
-    if not oc_conv_dir or not (oc_conv_dir / "session_manifest.json").exists():
-        path.write_text(
-            json.dumps({"note": "session_manifest.json not found"}) + "\n"
+    if not ov_log.exists():
+        return f"# unavailable: ov_log not found at {ov_log}\n"
+    if not run_window.is_known:
+        return (
+            f"# unavailable: cannot scope ingest lines without a run window "
+            f"({run_window.source})\n"
         )
-        return
-    try:
-        manifest = json.loads((oc_conv_dir / "session_manifest.json").read_text())
-    except (json.JSONDecodeError, OSError) as ex:
-        path.write_text(json.dumps({"error": str(ex)}) + "\n")
-        return
-    sessions = manifest.get("sessions", [])
-    # Build dia_id → session lookup
-    dia_to_session: dict[str, dict] = {}
-    for s in sessions:
-        for dia_id in s.get("source_message_ids", []) or []:
-            dia_to_session[dia_id] = {
-                "session_id": s.get("session_id"),
-                "raw_session_key": s.get("raw_session_key"),
-                "session_message_count": len(s.get("source_message_ids", []) or []),
-            }
-    matched: list[dict] = []
-    for t in evidence_turns:
-        entry = dia_to_session.get(t.dia_id)
-        matched.append({
-            "dia_id": t.dia_id,
-            "speaker": t.speaker,
-            "text_head": (t.text or "")[:120],
-            "session_match": entry,
-        })
-    path.write_text(json.dumps({
-        "schema_version": manifest.get("schema_version"),
-        "total_sessions": len(sessions),
-        "total_messages": len(manifest.get("messages", [])),
-        "evidence_to_session": matched,
-    }, ensure_ascii=False, indent=2) + "\n")
+    out: list[str] = []
+    conv_l = conv.lower()
+    for line in ov_log.open(errors="replace"):
+        ll = line.lower()
+        if conv_l not in ll:
+            continue
+        if "enqueued" not in ll and "upsert" not in ll:
+            continue
+        ts = _line_ts(line)
+        if not _in_window(ts, run_window):
+            continue
+        out.append(line.rstrip("\n"))
+    if not out:
+        return (
+            f"# unavailable: no ingest lines in {ov_log} matching "
+            f"conv={conv} within run window "
+            f"[{run_window.start} → {run_window.end}] ({run_window.source}). "
+            f"OV server log is a live file that rotates per process restart; "
+            f"this run's ingest traffic was overwritten by a later run.\n"
+        )
+    return "\n".join(out) + "\n"
 
 
-def _dump_openclaw_internal_log(
-    path: Path, oc_conv_dir: Optional[Path],
-) -> None:
-    """openclaw internal log entries flattened to (time, level, parent, message) tuples."""
-    if not oc_conv_dir:
-        path.write_text("# oc_conv_dir not found\n")
-        return
-    log_glob = list((oc_conv_dir / ".openclaw-container-tmp" / "openclaw").glob("openclaw-*.log"))
-    if not log_glob:
-        path.write_text("# no openclaw internal log under .openclaw-container-tmp/openclaw/\n")
-        return
-    out: list[str] = [f"# source: {log_glob[0]}"]
-    try:
-        with log_glob[0].open(errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    out.append(line[:300])
-                    continue
-                ts = e.get("time", "?")
-                meta = e.get("_meta", {})
-                level = meta.get("logLevelName", "?")
-                parents = meta.get("parentNames", [])
-                parent_label = ".".join(parents) if parents else "root"
-                msg = e.get("1") or e.get("0") or ""
-                # truncate massive JSON blobs in message
-                if isinstance(msg, str):
-                    msg_display = msg if len(msg) <= 500 else msg[:500] + "...[truncated]"
-                else:
-                    msg_display = json.dumps(msg, ensure_ascii=False)[:500]
-                out.append(f"{ts} [{level}] [{parent_label}] {msg_display}")
-    except OSError as ex:
-        out.append(f"# read error: {ex}")
-    path.write_text("\n".join(out) + "\n")
+# ── 03 storage ───────────────────────────────────────────────────────────────
 
 
-def _dump_openclaw_metrics(
-    path: Path, oc_conv_dir: Optional[Path],
-) -> None:
-    """Bundle openclaw metrics/* + handle.json into a single JSON for quick inspection."""
-    if not oc_conv_dir:
-        path.write_text(json.dumps({"note": "oc_conv_dir not found"}) + "\n")
-        return
-    bundle: dict = {"conv_dir": str(oc_conv_dir)}
-    # handle.json (run config)
-    handle = oc_conv_dir / "handle.json"
-    if handle.exists():
+def _storage_files(
+    ovdata_root: Path, conv: str, run_window: WallClockWindow,
+) -> str:
+    """Cat .md files only when their mtime indicates they belong to this run.
+
+    .ovdata is a shared namespace that gets re-ingested by later runs. If
+    every .md file under the conv's memories dir was written outside this
+    run's wall-clock window, the current state is some other run's data,
+    not this run's — mark unavailable.
+    """
+    if not ovdata_root.exists():
+        return f"# unavailable: ovdata root not found: {ovdata_root}\n"
+    mem_root = ovdata_root / "viking" / "default" / "user" / conv / "memories"
+    if not mem_root.exists():
+        for cand in ovdata_root.rglob(f"user/{conv}/memories"):
+            mem_root = cand
+            break
+    if not mem_root.exists():
+        return f"# unavailable: memories dir not found under {ovdata_root} for {conv}\n"
+    files = sorted(mem_root.rglob("*.md"))
+    if not files:
+        return f"# unavailable: no .md files under {mem_root}\n"
+    if run_window.is_known:
+        in_window = [
+            md for md in files
+            if _in_window(datetime.fromtimestamp(md.stat().st_mtime), run_window)
+        ]
+        if not in_window:
+            # All current files are from a different run — be honest about it.
+            sample_mtime = datetime.fromtimestamp(files[0].stat().st_mtime)
+            return (
+                f"# unavailable: {len(files)} .md files exist under {mem_root} "
+                f"but ALL mtimes are outside this run's window "
+                f"[{run_window.start} → {run_window.end}] ({run_window.source}). "
+                f"Sample mtime: {sample_mtime}. "
+                f".ovdata is a shared namespace re-ingested per run; this run's "
+                f"storage state was overwritten by a later ingest.\n"
+            )
+        files = in_window  # keep all in-window files
+    parts: list[str] = []
+    for md in files:
+        rel = md.relative_to(mem_root)
+        uri = f"viking://user/{conv}/memories/{rel.as_posix()}"
         try:
-            bundle["handle"] = json.loads(handle.read_text())
-        except (json.JSONDecodeError, OSError) as ex:
-            bundle["handle_error"] = str(ex)
-    # metrics/*.json
-    metrics_dir = oc_conv_dir / "metrics"
-    if metrics_dir.is_dir():
-        bundle["metrics"] = {}
-        for m in sorted(metrics_dir.glob("*.json")):
-            try:
-                bundle["metrics"][m.name] = json.loads(m.read_text())
-            except (json.JSONDecodeError, OSError) as ex:
-                bundle["metrics"][m.name] = {"_error": str(ex)}
-    # state/agents/main/sessions/sessions.json (one-level)
-    sess = oc_conv_dir / "state" / "agents" / "main" / "sessions" / "sessions.json"
-    if sess.exists():
-        try:
-            sess_data = json.loads(sess.read_text())
-            # Compact: only keys + sample
-            bundle["agent_sessions"] = {
-                "keys": list(sess_data.keys()),
-                "count": len(sess_data),
-            }
-        except (json.JSONDecodeError, OSError) as ex:
-            bundle["agent_sessions_error"] = str(ex)
-    path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n")
+            content = md.read_text(errors="replace")
+        except OSError as e:
+            content = f"[read error: {e}]"
+        parts.append(f"==={uri}===")
+        parts.append(content.rstrip("\n"))
+        parts.append("")
+    return "\n".join(parts) + "\n"
+
+
+# ── 04 recall ────────────────────────────────────────────────────────────────
+
+
+def _recall_log(ov_log: Path, qid: str, qa_window: WallClockWindow) -> str:
+    """Vector retrieval lines for this qa, scoped by wall-clock window.
+
+    Uses pure time-window filtering (no ``[qid=...]`` tag — server source
+    is clean; qid attribution is done post-process via
+    ``evaluation/tools/qa_logs/annotate.py`` when needed). Strict-serial
+    eval (``openclaw-docker-openviking-session-bundle-noop-serial.yaml``)
+    guarantees the qa window has no overlap with other qa, so every line
+    in the window belongs to this qa.
+    """
+    del qid  # qid no longer used for filtering; window does the work
+    if not ov_log.exists():
+        return f"# unavailable: ov_log not found at {ov_log}\n"
+    if not qa_window.is_known:
+        return (
+            f"# unavailable: cannot scope recall without a qa window "
+            f"({qa_window.source})\n"
+        )
+    out: list[str] = []
+    for line in ov_log.open(errors="replace"):
+        ts = _line_ts(line)
+        if not _in_window(ts, qa_window):
+            continue
+        if "hierarchical_retriever" in line and "[RecursiveSearch]" not in line:
+            out.append(line.rstrip("\n"))
+        elif "viking_vector_index_backend" in line:
+            out.append(line.rstrip("\n"))
+        elif "openai_embedders" in line:
+            out.append(line.rstrip("\n"))
+    if not out:
+        return (
+            f"# unavailable: no vector-retrieval lines in {ov_log} "
+            f"within qa window [{qa_window.start} → {qa_window.end}] "
+            f"({qa_window.source}). Either the eval was not strict-serial "
+            f"(non-overlapping windows required), or the OV server log "
+            f"was rotated past this qa's time.\n"
+        )
+    return "\n".join(out) + "\n"
+
+
+# ── 05 rerank ────────────────────────────────────────────────────────────────
+
+
+def _rerank_log(ov_log: Path, qid: str, qa_window: WallClockWindow) -> str:
+    """Rerank phase lines for this qa, scoped by wall-clock window."""
+    del qid  # qid no longer used for filtering; window does the work
+    if not ov_log.exists():
+        return f"# unavailable: ov_log not found at {ov_log}\n"
+    if not qa_window.is_known:
+        return (
+            f"# unavailable: cannot scope rerank without a qa window "
+            f"({qa_window.source})\n"
+        )
+    out: list[str] = []
+    for line in ov_log.open(errors="replace"):
+        ts = _line_ts(line)
+        if not _in_window(ts, qa_window):
+            continue
+        if "hierarchical_retriever" in line and "[RecursiveSearch]" in line:
+            out.append(line.rstrip("\n"))
+        elif "openai_rerank" in line:
+            out.append(line.rstrip("\n"))
+        elif "telemetry.execution" in line:
+            out.append(line.rstrip("\n"))
+    if not out:
+        return (
+            f"# unavailable: no rerank lines in {ov_log} within "
+            f"qa window [{qa_window.start} → {qa_window.end}] "
+            f"({qa_window.source}).\n"
+        )
+    return "\n".join(out) + "\n"
+
+
+# ── 06 / 07 / 08 session jsonl blobs ─────────────────────────────────────────
+
+
+def _session_jsonl_blobs(
+    session_jsonl: Optional[Path], qid: str
+) -> tuple[str, str, str]:
+    if not session_jsonl or not session_jsonl.exists():
+        msg = f"# unavailable: session jsonl not found ({session_jsonl})\n"
+        return msg, msg, msg
+    qid_idx = int(qid.rsplit("_qa", 1)[1])
+    msg_idx = 0 if session_jsonl.name == f"qa{qid_idx}.jsonl" else qid_idx
+    try:
+        turn = find_user_message(session_jsonl, msg_idx)
+    except (IndexError, KeyError) as e:
+        msg = f"# unavailable: could not locate qa turn in {session_jsonl}: {e}\n"
+        return msg, msg, msg
+    prompt = turn.text if turn.text is not None else (
+        "# unavailable: session jsonl has no user message text for this turn\n"
+    )
+    thinking = turn.assistant_thinking if turn.assistant_thinking is not None else (
+        "# unavailable: assistant emitted no thinking block\n"
+    )
+    answer = turn.assistant_text if turn.assistant_text is not None else (
+        "# unavailable: assistant emitted no text response\n"
+    )
+    return _with_trailing_nl(prompt), _with_trailing_nl(thinking), _with_trailing_nl(answer)
+
+
+def _with_trailing_nl(s: str) -> str:
+    return s if s.endswith("\n") else s + "\n"
+
+
+# ── 09 judge ─────────────────────────────────────────────────────────────────
+
+
+def _judge_json(eval_results_path: Path, qid: str) -> str:
+    if not eval_results_path.exists():
+        return f"# unavailable: eval_results.json not found at {eval_results_path}\n"
+    try:
+        data = json.loads(eval_results_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return f"# unavailable: {type(e).__name__} reading eval_results.json: {e}\n"
+    detailed = data.get("detailed_results")
+    if isinstance(detailed, dict):
+        for user, recs in detailed.items():
+            for r in recs or []:
+                if r.get("question_id") == qid:
+                    record = {"user": user, **r}
+                    return json.dumps(record, ensure_ascii=False, indent=2) + "\n"
+    for r in data.get("results") or []:
+        if r.get("question_id") == qid:
+            return json.dumps(r, ensure_ascii=False, indent=2) + "\n"
+    return f"# unavailable: no entry for qid={qid} in {eval_results_path}\n"
+
+
+def _answer_record(
+    answer_results_path: Optional[Path], qid: str
+) -> Optional[dict]:
+    if not answer_results_path or not answer_results_path.exists():
+        return None
+    data = json.loads(answer_results_path.read_text())
+    if isinstance(data, list):
+        for r in data:
+            if r.get("question_id") == qid:
+                return r
+    return None

@@ -162,9 +162,16 @@ def dump_qa_logs(args: CLIArgs, out_dir: Path) -> None:
     )
 
 
-def dump_qa_logs_all_errors(args: CLIArgs) -> None:
-    """Raw-dump version of all-errors mode: one directory per wrong qid."""
+def dump_qa_logs_all_errors(args: CLIArgs) -> int:
+    """Raw-dump version of all-errors mode: one directory per wrong qid.
+
+    Returns the number of qids whose dump raised an exception. A manifest
+    json is always written at ``<base_out>/_manifest.json`` so callers can
+    machine-read per-qid status (full eval = ~2k qids; silent failures are
+    invisible without it).
+    """
     import dataclasses
+    import json
 
     eval_results_path = (
         args.results_root / f"locomo-{args.system}-{args.run_name}" / "eval_results.json"
@@ -172,12 +179,37 @@ def dump_qa_logs_all_errors(args: CLIArgs) -> None:
     wrong = list_wrong_qids(eval_results_path)
     print(f"[qa_logs] {len(wrong)} wrong qids in run={args.run_name}")
     base_out = Path(args.out or f"reports/qa_logs/{args.run_name}")
+    base_out.mkdir(parents=True, exist_ok=True)
 
+    manifest: list[dict] = []
+    failed_count = 0
     for i, qid in enumerate(wrong, 1):
+        entry: dict = {"qid": qid, "status": "ok"}
         try:
             sub_args = dataclasses.replace(args, qid=qid, qid_mode="single")
-            dump_qa_logs(sub_args, base_out / qid)
+            dump_dir = base_out / qid
+            dump_qa_logs(sub_args, dump_dir)
+            entry["dump_dir"] = str(dump_dir)
         except Exception as e:
-            print(f"[qa_logs] {qid} FAILED: {e}")
+            entry["status"] = "failed"
+            entry["error"] = f"{type(e).__name__}: {e}"
+            failed_count += 1
+            print(f"[qa_logs] {qid} FAILED: {type(e).__name__}: {e}")
+        manifest.append(entry)
         if i % 50 == 0:
-            print(f"[qa_logs] {i}/{len(wrong)} done")
+            print(f"[qa_logs] {i}/{len(wrong)} done ({failed_count} failed so far)")
+
+    manifest_path = base_out / "_manifest.json"
+    manifest_path.write_text(json.dumps({
+        "run_name": args.run_name,
+        "system": args.system,
+        "total": len(wrong),
+        "ok": len(wrong) - failed_count,
+        "failed": failed_count,
+        "entries": manifest,
+    }, indent=2, ensure_ascii=False))
+    print(
+        f"[qa_logs] manifest: {manifest_path} "
+        f"({len(wrong) - failed_count} ok, {failed_count} failed)"
+    )
+    return failed_count
