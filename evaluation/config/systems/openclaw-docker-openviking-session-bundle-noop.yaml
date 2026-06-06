@@ -181,7 +181,7 @@ openclaw_docker:
   # are mutable, so a re-push under the same tag could silently change what
   # teammates pull. The tag is kept only for readability; docker resolves by
   # the @sha256 digest. Re-pin the digest if the image is ever rebuilt.
-  image: "ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim@sha256:b73fe1cea8a1a2862fb48ba155bb09216728bb1404c4f9b4c2f1202b79698a87"
+  image: "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-on-findlast-slim"
   # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
   # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
   # is the bottleneck (single sophnet key for fact-extract), so total
@@ -196,4 +196,4 @@ openclaw_docker:
   per_rpc_timeout_seconds: 360
   add_host_gateway: true              # OV plugin reaches host:1933
   # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
-  remove_container_on_stop: false     # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container
+  remove_container_on_stop: true     # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container

@@ -18,6 +18,8 @@ import {
   compileSessionPatterns,
   shouldBypassSession,
   extractNewTurnMessages,
+  extractLatestUserText,
+  sanitizeUserTextForCapture,
 } from "./text-utils.js";
 import {
   clampScore,
@@ -32,6 +34,7 @@ import {
 } from "./context-engine.js";
 import type { ContextEngineWithCommit } from "./context-engine.js";
 import {
+  buildAutoRecallContext,
   buildMemoryLines,
   buildMemoryLinesWithBudget,
   estimateTokenCount,
@@ -176,6 +179,7 @@ type OpenClawPluginApi = {
 };
 
 const DEFAULT_OPENCLAW_AGENT_ID = "main";
+const AUTO_RECALL_TIMEOUT_MS = 30_000;
 
 /**
  * OpenViking `UserIdentifier` allows only [a-zA-Z0-9_-] for agent_id
@@ -194,6 +198,19 @@ export function sanitizeOpenVikingAgentIdHeader(raw: string): string {
   return normalized.length > 0 ? normalized : "ov_agent";
 }
 
+export function selectAutoRecallQuery(event: {
+  messages?: unknown[];
+  prompt?: unknown;
+}): string {
+  const promptText =
+    typeof event.prompt === "string"
+      ? sanitizeUserTextForCapture(event.prompt)
+      : "";
+  if (promptText) {
+    return promptText;
+  }
+  return extractLatestUserText(event.messages);
+}
 export function tokenizeCommandArgs(args: string): string[] {
   const tokens: string[] = [];
   let current = "";
@@ -1503,6 +1520,73 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
     });
     api.on("session_end", async (_event: unknown, ctx?: HookAgentContext) => {
       rememberSessionAgentId(ctx ?? {});
+    });
+    api.on("before_prompt_build", async (event: unknown, ctx?: HookAgentContext) => {
+      rememberSessionAgentId(ctx ?? {});
+
+      if (cfg.logFindRequests) {
+        api.logger.info(
+          `openviking: hook before_prompt_build ctx=${JSON.stringify({
+            sessionId: ctx?.sessionId,
+            sessionKey: ctx?.sessionKey,
+            agentId: ctx?.agentId,
+          })}`,
+        );
+      }
+      if (isBypassedSession(ctx)) {
+        verboseRoutingInfo(
+          `openviking: bypassing before_prompt_build due to session pattern match (sessionKey=${ctx?.sessionKey ?? "none"}, sessionId=${ctx?.sessionId ?? "none"})`,
+        );
+        return;
+      }
+      const agentId = resolveAgentId(ctx?.sessionId, ctx?.sessionKey);
+      let client: OpenVikingClient;
+      try {
+        client = await withTimeout(
+          getClient(),
+          5000,
+          "openviking: client initialization timeout (OpenViking service not ready yet)"
+        );
+      } catch (err) {
+        api.logger.warn?.(`openviking: failed to get client: ${String(err)}`);
+        return;
+      }
+
+      const eventObj = (event ?? {}) as { messages?: unknown[]; prompt?: string };
+      const rawRecallQuery = selectAutoRecallQuery(eventObj);
+      const recallQuery = prepareRecallQuery(rawRecallQuery);
+      const queryText = recallQuery.query;
+      if (!queryText) {
+        return;
+      }
+      if (recallQuery.truncated) {
+        verboseRoutingInfo(
+          `openviking: recall query truncated (` +
+            `chars=${recallQuery.originalChars}->${recallQuery.finalChars})`,
+        );
+      }
+
+      try {
+        const recall = await withTimeout(
+          buildAutoRecallContext({
+            cfg,
+            client,
+            agentId,
+            queryText,
+            logger: api.logger,
+            verbose: (message) => verboseRoutingInfo(message),
+          }),
+          AUTO_RECALL_TIMEOUT_MS,
+          "openviking: auto-recall search timeout",
+        );
+        if (recall.block) {
+          return {
+            prependContext: recall.block,
+          };
+        }
+      } catch (err) {
+        api.logger.warn(`openviking: auto-recall failed: ${String(err)}`);
+      }
     });
     api.on("agent_end", async (_event: unknown, ctx?: HookAgentContext) => {
       rememberSessionAgentId(ctx ?? {});
