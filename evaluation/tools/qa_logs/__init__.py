@@ -4,8 +4,13 @@ evaluation.tools.qa_logs
 
 Public API for the qa_logs raw-dump pipeline.
 
-  dump_qa_logs(args, out_dir)       → writes per-qid raw-dump directory
-  dump_qa_logs_all_errors(args)     → iterates every wrong qid
+  dump_qa_logs(args, out_dir)       -> writes per-qid raw-dump directory
+  dump_qa_logs_all_errors(args)     -> iterates every wrong qid
+
+CLIs live in sibling modules:
+  python -m evaluation.tools.qa_logs.dump
+  python -m evaluation.tools.qa_logs.annotate
+  python -m evaluation.tools.qa_logs.materialize_qa_jsonl
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
-"""CLI for qa_logs: reconstruct full-link log report for a single qa
+"""Argument parser for qa_logs.dump: reconstruct full-link log report for a single qa
 or all wrong qa of a given run.
 
-Default behavior:
-  python -m evaluation.tools.qa_logs           # all wrong qa, latest run
-  python -m evaluation.tools.qa_logs --qid locomo_7_qa_9
-  python -m evaluation.tools.qa_logs --run-name main-noproxy-c4
+Examples:
+  python -m evaluation.tools.qa_logs.dump           # all wrong qa, latest run
+  python -m evaluation.tools.qa_logs.dump --qid locomo_7_qa_9
+  python -m evaluation.tools.qa_logs.dump --run-name main-noproxy-c4
 """
 import argparse
 import re
@@ -107,7 +107,8 @@ def parse_args(argv: Optional[list[str]] = None) -> CLIArgs:
 
     return CLIArgs(
         qid=qid_canonical, qid_mode=qid_mode,
-        run_name=run_name, system=ns.system,
+        run_name=run_name,
+        system=ns.system,
         ov_log=ns.ov_log, ovdata=ns.ovdata, dataset=ns.dataset,
         results_root=results_root, out=ns.out,
     )
