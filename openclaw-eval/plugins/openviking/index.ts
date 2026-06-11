@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { randomUUID } from "node:crypto";
 import { memoryOpenVikingConfigSchema } from "./config.js";
 import { registerSetupCli } from "./commands/setup.js";
 
@@ -1566,6 +1567,11 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
         );
       }
 
+      const traceContext = {
+        traceId: randomUUID(),
+        questionId: process.env["OV_CURRENT_QUESTION_ID"] ?? "unknown",
+        convId: process.env["OV_CURRENT_CONV_ID"] ?? "unknown",
+      };
       try {
         const recall = await withTimeout(
           buildAutoRecallContext({
@@ -1575,6 +1581,7 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
             queryText,
             logger: api.logger,
             verbose: (message) => verboseRoutingInfo(message),
+            traceContext,
           }),
           AUTO_RECALL_TIMEOUT_MS,
           "openviking: auto-recall search timeout",

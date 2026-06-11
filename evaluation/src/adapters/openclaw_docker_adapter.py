@@ -145,6 +145,13 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 "--label", f"eval.conv_id={conv_id}",
                 "-v", f"{volume_dir}:/workspace:rw",
                 "-v", f"{tmp_host}:/tmp:rw",
+                # --user maps to host uid which has no /etc/passwd entry inside
+                # the container, so $HOME defaults to "/" and gateway's
+                # mkdir($HOME/.openclaw) fails with EACCES. Pinning HOME to
+                # the mounted /workspace lets the gateway persist its config
+                # (.openclaw/openclaw.json, auth token) into the per-conv
+                # artifacts dir, which is host-writable for our uid.
+                "-e", "HOME=/workspace",
             ]
         )
         # Optional host bind-mounts, opt-in via the OPENCLAW_EXTRA_MOUNTS env
@@ -676,12 +683,11 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         Mirrors arun_bridge protocol: serialize payload to stdin JSON,
         receive single JSON object on stdout.
 
-        When ``question_id`` is provided and the command is ``agent_run``,
-        three recall-trace env vars are injected via ``docker exec -e``
-        so the OpenViking plugin can tag its plugin_summary lines:
-          - OV_CURRENT_QUESTION_ID  = question_id (e.g. locomo_7_qa9)
-          - OV_CURRENT_CONV_ID      = conv_id     (e.g. locomo_7)
-          - OV_RECALL_TRACE_LEVEL   = host env or default "1"
+        ``question_id`` is accepted for caller-signature compatibility
+        with other bridge invocations; this docker-route does not act on
+        it (qid propagation to the OV plugin is intentionally absent —
+        qa_logs tooling does post-process attribution via time windows,
+        not per-request headers).
         """
         handle = self._docker_handles.get(conv_id)
         if handle is None:
@@ -702,15 +708,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # Also forward yaml-declared agent_llm_env_vars so the in-container
         # bridge's envForSandbox passes secrets to the openclaw subprocess.
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
-        env_vars = list(agent_llm.get("env_vars") or [])
-
-        # Forward OV recall-trace env vars through the envForSandbox whitelist
-        # in the in-container bridge.mjs. Without this, `docker exec -e
-        # OV_CURRENT_QUESTION_ID=...` (added below) reaches the bridge process
-        # but bridge.mjs::envForSandbox drops anything not listed in
-        # ``agent_llm_env_vars`` before spawning the openclaw subprocess that
-        # hosts the OV plugin — so the plugin's ``process.env`` sees nothing
-        # and the trace header is always "unknown".
+        # Seed from whichever list the outer payload already carries
+        # (``_bridge_base_payload`` typically pre-fills this from yaml).
+        # The previous fallback ``payload.get(...) or env_vars`` silently
+        # dropped the OV vars appended below whenever the outer list was
+        # non-empty — so the whitelist never grew and bridge envForSandbox
+        # always stripped OV_CURRENT_QUESTION_ID, making qid header always
+        # "unknown" even though docker exec correctly injected ``-e``.
+        env_vars = list(payload.get("agent_llm_env_vars") or agent_llm.get("env_vars") or [])
+        # Forward OV recall-trace env vars through the envForSandbox whitelist so
+        # the in-container plugin sees them and tags X-OV-Question-Id (server
+        # recall_trace qid). Restored for qid/trace observability — time-window
+        # attribution alone loses per-request qid in the trace.
         if question_id and payload.get("command") == "agent_run":
             for _name in ("OV_CURRENT_QUESTION_ID", "OV_CURRENT_CONV_ID", "OV_RECALL_TRACE_LEVEL"):
                 if _name not in env_vars:
@@ -726,13 +735,15 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "state_dir": "/workspace/state",
             "home_dir": "/workspace/home",
             "cwd_dir": "/workspace",
-            "agent_llm_env_vars": payload.get("agent_llm_env_vars") or env_vars,
+            "agent_llm_env_vars": env_vars,
         }
 
         cmd = [
             "docker", "exec", "-i",
         ]
-        # Inject OV recall-trace env vars for agent_run commands.
+        # Inject OV recall-trace env vars for agent_run so the plugin tags
+        # X-OV-Question-Id (-> server recall_trace qid). Must precede the
+        # container id in the docker exec argv.
         if question_id and payload.get("command") == "agent_run":
             cmd.extend([
                 "-e", f"OV_CURRENT_QUESTION_ID={question_id}",
@@ -939,6 +950,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                     "error": err,
                 }])
                 return ""
+
+            # Provider burst protection (sophnet 429 "System protection
+            # triggered by request burst") surfaces as stop_reason=error with a
+            # rate-limit reply. Without retry the question is permanently lost
+            # (empty answer). Back off progressively per the provider's
+            # "increase requests gradually" guidance, then re-ask in place.
+            _rl_attempt = 0
+            while (resp.get("stop_reason") == "error"
+                   and "rate limit" in (resp.get("reply") or "").lower()
+                   and _rl_attempt < 3):
+                _rl_attempt += 1
+                _wait_s = 90 * _rl_attempt
+                logger.warning(
+                    "rate-limited agent_run for %s/%s; retry %d/3 in %ds",
+                    conv_id, qid, _rl_attempt, _wait_s,
+                )
+                await asyncio.sleep(_wait_s)
+                try:
+                    resp = await self._arun_bridge_via_docker(
+                        conv_id, payload,
+                        timeout=float(self._exec_timeout),
+                        question_id=qid,
+                    )
+                except (BridgeError, BridgeTimeout) as err:
+                    logger.warning("docker bridge failed on rate-limit retry "
+                                   "for %s/%s: %s", conv_id, qid, err)
+                    return ""
+                if not resp.get("ok"):
+                    logger.warning("docker agent_run failed on rate-limit retry "
+                                   "for %s/%s: %s", conv_id, qid,
+                                   resp.get("error", ""))
+                    return ""
 
             # Inherit v0.7 D5 stop_reason=error guard from base behavior.
             if resp.get("stop_reason") == "error":
