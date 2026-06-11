@@ -242,3 +242,9 @@ docs/opt_docs
 .vscode/
 # qa_logs tool output
 /reports/qa_logs/
+
+# Local eval experiment scratch (run artifacts, OV data dumps) — not for VCS
+evaluation/experiments/
+*.ovdata.tgz
+# Ad-hoc local debug helper (decode ov_archive_search toolResults)
+evaluation/read_ov_search.py
