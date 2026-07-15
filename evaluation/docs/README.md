@@ -14,6 +14,9 @@ must not add dependencies on the internal `openclaw-eval/` directory layout.
 
 Current component notes:
 
+- [`artifact-lifecycle.md`](artifact-lifecycle.md) documents conservative
+  inventory decisions, explicit KEEP pins, compact archives, and restore and
+  deletion-safety gates.
 - [`openclaw_adapter.md`](openclaw_adapter.md) documents the framework adapter's
   fidelity and comparison semantics.
 - [`round-finish.md`](round-finish.md) documents the legacy full-snapshot and
