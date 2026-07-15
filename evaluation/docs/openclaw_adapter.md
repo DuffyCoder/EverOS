@@ -24,6 +24,62 @@ current adapter is runtime-agnostic. The adapter behavior, runtime id, build
 flags, and manifest resolution are still specific to OpenClaw; only the
 builder location is supplied by the registry.
 
+## Portable local OpenViking runner
+
+The repository-root `build.sh` is a compatibility wrapper around
+`openclaw-eval/scripts/run_openviking_local_eval.sh`. It may be invoked from
+any working directory. The historical positional form remains valid:
+
+```bash
+./build.sh RUN_NAME [evaluation arguments...]
+```
+
+Inspect the resolved paths and forwarded arguments without installing plugin
+dependencies, stopping a server, deleting `.ovdata`, polling health, or
+starting an evaluation:
+
+```bash
+./build.sh --dry-run RUN_NAME --from-conv 0 --to-conv 1
+```
+
+A real run stops the process listening on port 1933 and resets
+`OPENVIKING_FORK/.ovdata`. Non-interactive callers must explicitly authorize
+that work with `--yes-reset`; an interactive caller may instead type exactly
+`yes` at the prompt. Required directories, configuration files, and
+executables are validated before the existing server is stopped. Filesystem
+overrides are normalized to absolute canonical paths before dry-run output or
+confirmation, with relative paths interpreted from the caller's working
+directory. A destructive run refuses `/`, requires the fork's
+`pyproject.toml` and `openviking/` checkout markers, and rejects any external
+path placed below the reset target.
+
+```bash
+./build.sh --yes-reset RUN_NAME --from-conv 0 --to-conv 1
+# The control flag is also accepted after RUN_NAME for positional compatibility:
+./build.sh RUN_NAME --yes-reset --from-conv 0 --to-conv 1
+```
+
+Defaults are derived from the checkout and can be overridden without editing
+the script:
+
+| Environment variable | Portable default |
+|----------------------|------------------|
+| `OPENVIKING_FORK` | `OpenViking-fork` beside this repository |
+| `OPENVIKING_PLUGIN_DIR` | `$OPENVIKING_FORK/examples/openclaw-plugin` |
+| `OPENVIKING_CONFIG` | `$HOME/.openviking/ov.local.conf` |
+| `OPENVIKING_SERVER_BIN` | `$OPENVIKING_FORK/.venv/bin/openviking-server` |
+| `EVAL_PYTHON` | this repository's `.venv/bin/python` |
+| `EVAL_SYSTEM` | `openclaw-docker-openviking-session-bundle-noop` |
+| `EVAL_LOG_DIR` | this repository's `.runlogs` |
+| `TCMALLOC_PATH` | unset; no allocator is preloaded |
+
+The source server still starts with direct provider access: inherited HTTP,
+HTTPS, and all-proxy variables are removed only from the server process. The
+runner selects the old listener with an exact port-1933 `ss` query, requires
+its unique PID to stop and release the port, then verifies that the healthy
+listener belongs to the newly launched server PID. It retains the plugin bind
+mount, LoCoMo dataset, and all trailing evaluation CLI arguments.
+
 The fidelity/comparability tradeoff is explicit. Three parts:
 
 ## Strictly faithful to OpenClaw
