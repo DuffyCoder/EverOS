@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -50,6 +51,9 @@ logger = logging.getLogger(__name__)
 # Written under each conversation workspace before ``docker stop`` so logs
 # survive ``docker run --rm`` (which deletes the container after stop).
 EVAL_DOCKER_CONTAINER_LOG = "eval_docker_container.log"
+
+# Filename for per-conversation plugin stdout capture (plugin_summary JSON lines).
+PLUGIN_STDOUT_LOG = "plugin-stdout.log"
 
 
 @register_adapter("openclaw-docker")
@@ -93,7 +97,249 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._remove_container_on_stop: bool = bool(
             cfg.get("remove_container_on_stop", True)
         )
+        # Per-conv background ``docker logs -f`` processes that stream plugin
+        # stdout to plugin-stdout.log under artifacts/openclaw/<conv>/.
+        # Keys are conv_ids; values are (proc, file_handle) tuples.
+        self._plugin_log_procs: dict[str, tuple[subprocess.Popen, Any]] = {}
 
+
+    # ----------------------------------------------------- clean_groups hook
+
+    async def add(
+        self,
+        conversations: List[Conversation],
+        output_dir: Any = None,
+        checkpoint_manager: Any = None,
+        **kwargs,
+    ) -> dict:
+        """Clean OpenViking per-conversation memory namespaces before ingest."""
+        clean_groups = getattr(self, "config", {}).get("clean_groups")
+        if clean_groups and not kwargs.get("resume"):
+            await self._clean_openviking_groups(conversations)
+        elif clean_groups:
+            logger.info(
+                "clean_groups enabled, but resume=True; skipping OpenViking cleanup"
+            )
+        return await super().add(
+            conversations,
+            output_dir=output_dir,
+            checkpoint_manager=checkpoint_manager,
+            **kwargs,
+        )
+
+    def _openviking_cleanup_enabled(self) -> bool:
+        context_engine_mode = str(
+            self._openclaw_cfg.get("context_engine_mode") or ""
+        ).strip()
+        return context_engine_mode == "openviking" or bool(
+            self._openclaw_cfg.get("ov_ingest")
+        )
+
+    def _openviking_cleanup_plan_for_conv(self, conv_id: str) -> dict[str, Any]:
+        """Resolve OpenViking cleanup targets using the ingest tenant config."""
+        from evaluation.src.adapters.openclaw.ov_ingest import OVIngestClient
+
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        base_url = str(
+            cfg.get("base_url") or "http://127.0.0.1:1933"
+        ).rstrip("/")
+        api_key_env = cfg.get("api_key_env") or "OPENVIKING_API_KEY"
+        api_key = os.environ.get(str(api_key_env), "") if api_key_env else ""
+        account_id = cfg.get("account_id") or "default"
+        user_id = self._resolve_ov_tenant_field(
+            cfg, "user_id", "user_id_template", "{conv_id}", conv_id,
+        )
+        agent_id = self._resolve_ov_tenant_field(
+            cfg, "agent_id", "agent_id_template", "", conv_id,
+        ) or None
+
+        client = OVIngestClient(
+            base_url,
+            api_key=api_key,
+            account_id=account_id,
+            user_id=user_id,
+            agent_id=agent_id,
+        )
+        headers = client._headers()
+
+        targets: list[dict[str, Any]] = []
+        if user_id:
+            user_root = f"viking://user/{user_id}"
+            if agent_id and self._openviking_cleanup_bool(
+                cfg, "isolate_user_scope_by_agent", "isolateUserScopeByAgent",
+            ):
+                user_root = f"{user_root}/agent/{agent_id}"
+            targets.append({
+                "scope": "user",
+                "uri": f"{user_root}/memories",
+                "headers": headers,
+            })
+        if agent_id:
+            agent_root = f"viking://agent/{agent_id}"
+            if user_id and self._openviking_cleanup_bool(
+                cfg, "isolate_agent_scope_by_user", "isolateAgentScopeByUser",
+            ):
+                agent_root = f"{agent_root}/user/{user_id}"
+            targets.append({
+                "scope": "agent",
+                "uri": f"{agent_root}/memories",
+                "headers": headers,
+            })
+        return {"base_url": base_url, "targets": targets}
+
+    @staticmethod
+    def _openviking_cleanup_bool(
+        cfg: dict[str, Any],
+        snake_key: str,
+        camel_key: str,
+        default: bool = False,
+    ) -> bool:
+        value = cfg.get(snake_key)
+        if value is None:
+            value = cfg.get(camel_key, default)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    async def _clean_openviking_groups(
+        self,
+        conversations: List[Conversation],
+    ) -> None:
+        """Delete OpenViking memory namespaces for conversations being ingested."""
+        if not self._openviking_cleanup_enabled():
+            logger.info(
+                "clean_groups enabled, but OpenViking is not configured; skipping"
+            )
+            return
+
+        import aiohttp
+
+        deduped: list[tuple[str, dict[str, Any]]] = []
+        seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
+        for conv in conversations:
+            plan = self._openviking_cleanup_plan_for_conv(conv.conversation_id)
+            base_url = plan["base_url"]
+            for target in plan["targets"]:
+                headers = {
+                    str(k): str(v) for k, v in dict(target["headers"]).items()
+                }
+                key = (
+                    base_url,
+                    target["uri"],
+                    tuple(sorted(headers.items())),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append((base_url, {**target, "headers": headers}))
+
+        if not deduped:
+            logger.info("OpenViking clean_groups found no cleanup targets")
+            return
+
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        timeout_sec = float(cfg.get("cleanup_timeout_sec") or 60)
+        print("\nclean_groups enabled, clearing OpenViking memory namespaces...")
+        timeout = aiohttp.ClientTimeout(total=timeout_sec)
+        results: list[dict[str, Any]] = []
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            for base_url, target in deduped:
+                results.append(await self._delete_openviking_uri(
+                    http,
+                    base_url,
+                    target["uri"],
+                    target["headers"],
+                ))
+
+        deleted = sum(1 for item in results if item.get("status") == "deleted")
+        missing = sum(1 for item in results if item.get("status") == "missing")
+        logger.info(
+            "OpenViking clean_groups complete: deleted=%d missing=%d targets=%d",
+            deleted,
+            missing,
+            len(results),
+        )
+        print(
+            "OpenViking cleanup complete: "
+            f"deleted={deleted} missing={missing} targets={len(results)}\n"
+        )
+
+    async def _delete_openviking_uri(
+        self,
+        http: Any,
+        base_url: str,
+        uri: str,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """Delete one OpenViking URI through the filesystem API."""
+        url = f"{base_url.rstrip('/')}/api/v1/fs"
+        params = {"uri": uri, "recursive": "true"}
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        max_retries = int(cfg.get("cleanup_max_retries") or 5)
+        retry_delay = float(cfg.get("cleanup_retry_delay_sec") or 2.0)
+
+        for attempt in range(max_retries + 1):
+            async with http.delete(url, headers=headers, params=params) as resp:
+                text = await resp.text()
+                if resp.status == 404:
+                    return {"uri": uri, "status": "missing", "http_status": 404}
+                if resp.status < 400:
+                    break
+                if (
+                    attempt < max_retries
+                    and resp.status == 409
+                    and self._openviking_cleanup_conflict_retryable(text)
+                ):
+                    logger.info(
+                        "OpenViking cleanup target busy for %s; retrying "
+                        "%d/%d in %.1fs",
+                        uri,
+                        attempt + 1,
+                        max_retries,
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise RuntimeError(
+                    f"OpenViking cleanup failed for {uri}: "
+                    f"HTTP {resp.status} {text[:500]}"
+                )
+
+        body: Any = {}
+        if text.strip():
+            try:
+                body = json.loads(text)
+            except json.JSONDecodeError:
+                body = {"raw": text}
+        if isinstance(body, dict) and body.get("status") == "error":
+            raise RuntimeError(
+                f"OpenViking cleanup failed for {uri}: {str(body)[:500]}"
+            )
+        result = body.get("result") if isinstance(body, dict) else None
+        return {
+            "uri": uri,
+            "status": "deleted",
+            "http_status": resp.status,
+            "result": result if isinstance(result, dict) else body,
+        }
+
+    @staticmethod
+    def _openviking_cleanup_conflict_retryable(text: str) -> bool:
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(body, dict):
+            return False
+        error = body.get("error")
+        if not isinstance(error, dict):
+            return False
+        details = error.get("details")
+        if not isinstance(details, dict):
+            details = {}
+        return bool(details.get("retryable")) or (
+            details.get("conflict_type") == "path_busy"
+        )
 
     # ---------------------------------------------------- container lifecycle
 
@@ -137,11 +383,18 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 "--label", f"eval.conv_id={conv_id}",
                 "-v", f"{volume_dir}:/workspace:rw",
                 "-v", f"{tmp_host}:/tmp:rw",
+                # --user maps to host uid which has no /etc/passwd entry inside
+                # the container, so $HOME defaults to "/" and gateway's
+                # mkdir($HOME/.openclaw) fails with EACCES. Pinning HOME to
+                # the mounted /workspace lets the gateway persist its config
+                # (.openclaw/openclaw.json, auth token) into the per-conv
+                # artifacts dir, which is host-writable for our uid.
+                "-e", "HOME=/workspace",
             ]
         )
         # Optional host bind-mounts, opt-in via the OPENCLAW_EXTRA_MOUNTS env
         # var (``;``-separated docker ``-v`` specs, e.g.
-        # "/host/plugin:/app/extensions/openviking:ro"). Lets a run inject
+        # "/host/plugin:/opt/openclaw/extensions/openviking:ro"). Lets a run inject
         # local-source code (e.g. the openviking plugin from a fork checkout,
         # loaded in-container via jiti from source) over the baked image
         # without rebuilding it. Unset => no effect; image content is used
@@ -195,6 +448,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         cid = stdout.decode().strip()
         logger.info("container %s started for %s", cid[:12], conv_id)
         await self._verify_container_alive(cid, conv_id)
+        self._start_plugin_log_capture(cid, conv_id)
         return cid
 
     async def _verify_container_alive(self, cid: str, conv_id: str) -> None:
@@ -248,6 +502,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # config already has enabled=true.
         await self._patch_memory_flush_enabled(cid, conv_id)
         await self._patch_streaming_usage_compat(cid, conv_id)
+        await self._patch_agent_llm_runtime_config(cid, conv_id)
 
     async def _patch_memory_flush_enabled(self, cid: str, conv_id: str) -> None:
         """Edit both /workspace/openclaw.json and /workspace/openclaw.docker.json
@@ -305,6 +560,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         if proc.returncode != 0:
             logger.warning(
                 "streaming usage compat patch failed for %s (cid=%s): %s",
+                conv_id, cid[:12], stderr.decode()[:200],
+            )
+
+    async def _patch_agent_llm_runtime_config(self, cid: str, conv_id: str) -> None:
+        """Patch baked docker config with yaml agent LLM runtime settings."""
+        from evaluation.src.adapters.openclaw.config_patches import (
+            build_agent_llm_runtime_jq,
+            shell_patch_openclaw_configs,
+        )
+
+        agent_llm = self._openclaw_cfg.get("agent_llm") or {}
+        model = agent_llm.get("model") or {}
+        model_max_tokens = model.get("max_tokens")
+        if model_max_tokens is None:
+            model_max_tokens = model.get("maxTokens")
+        jq_filter = build_agent_llm_runtime_jq(
+            model_max_tokens=model_max_tokens,
+            idle_timeout_seconds=agent_llm.get("idle_timeout_seconds"),
+        )
+        if jq_filter == ".":
+            return
+
+        cmd = shell_patch_openclaw_configs(jq_filter)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", cid, "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                "agent LLM runtime config patch failed for %s (cid=%s): %s",
                 conv_id, cid[:12], stderr.decode()[:200],
             )
 
@@ -544,6 +831,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         until docker daemon timeout. Same-process leftovers (this PID's
         own containers) are skipped via ``self._docker_handles``.
         """
+        if os.environ.get("EVAL_SKIP_ORPHAN_SWEEP") == "1":
+            return
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker", "ps", "-q",
@@ -569,6 +858,84 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         except Exception as err:  # noqa: BLE001
             logger.warning("orphan container sweep failed: %s", err)
 
+    # ---------------------------------------- plugin stdout log capture
+
+    def _plugin_log_path(self, conv_id: str) -> Optional[Path]:
+        """Return the path for the plugin stdout log for this conversation.
+
+        Layout: ``<output_dir>/artifacts/openclaw/<conv_id>/plugin-stdout.log``
+        Uses ``self.output_dir`` which is set by the pipeline before prepare().
+        Returns None when output_dir is not yet known (avoids crashes in tests
+        where output_dir may be unset).
+        """
+        output_dir = getattr(self, "output_dir", None)
+        if not output_dir:
+            return None
+        return Path(output_dir) / "artifacts" / "openclaw" / conv_id / PLUGIN_STDOUT_LOG
+
+    def _start_plugin_log_capture(self, cid: str, conv_id: str) -> None:
+        """Spawn ``docker logs -f <cid>`` in the background, appending to
+        the per-conv plugin-stdout.log artifact file.
+
+        Append mode: multiple QA runs in the same conversation each produce
+        stdout; all are written to the same file so a single grep covers the
+        whole conversation.
+
+        The subprocess is tracked in ``self._plugin_log_procs[conv_id]`` and
+        is terminated when the conversation container is stopped.
+        """
+        log_path = self._plugin_log_path(conv_id)
+        if log_path is None:
+            logger.debug(
+                "plugin log capture skipped for %s: output_dir not set", conv_id
+            )
+            return
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # pylint: disable=consider-using-with
+            log_file = open(log_path, "ab")  # noqa: WPS515
+            proc = subprocess.Popen(
+                ["docker", "logs", "-f", cid],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+            self._plugin_log_procs[conv_id] = (proc, log_file)
+            logger.info(
+                "plugin stdout capture started for %s → %s (cid=%s)",
+                conv_id, log_path, cid[:12],
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "failed to start plugin log capture for %s (cid=%s): %s",
+                conv_id, cid[:12], err,
+            )
+
+    def _stop_plugin_log_capture(self, conv_id: str) -> None:
+        """Terminate the ``docker logs -f`` subprocess for this conversation.
+
+        ``docker logs -f`` exits naturally when the container stops, but we
+        terminate explicitly for safety and to ensure the file handle is closed.
+        """
+        entry = self._plugin_log_procs.pop(conv_id, None)
+        if entry is None:
+            return
+        proc, log_file = entry
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2)
+        except Exception as err:  # noqa: BLE001
+            logger.debug("plugin log proc termination error for %s: %s", conv_id, err)
+        finally:
+            try:
+                log_file.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     # --------------------------------------------------- subprocess routing
 
     def _bridge_script_path(self) -> Path:
@@ -578,12 +945,22 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         return Path(__file__).parent.parent.parent / "scripts" / "openclaw_eval_bridge.mjs"
 
     async def _arun_bridge_via_docker(
-        self, conv_id: str, payload: dict, timeout: float = 600.0
+        self,
+        conv_id: str,
+        payload: dict,
+        timeout: float = 600.0,
+        question_id: Optional[str] = None,
     ) -> dict:
         """Run a single bridge command inside the conv's docker container.
 
         Mirrors arun_bridge protocol: serialize payload to stdin JSON,
         receive single JSON object on stdout.
+
+        ``question_id`` is accepted for caller-signature compatibility
+        with other bridge invocations; this docker-route does not act on
+        it (qid propagation to the OV plugin is intentionally absent —
+        qa_logs tooling does post-process attribution via time windows,
+        not per-request headers).
         """
         handle = self._docker_handles.get(conv_id)
         if handle is None:
@@ -604,7 +981,22 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # Also forward yaml-declared agent_llm_env_vars so the in-container
         # bridge's envForSandbox passes secrets to the openclaw subprocess.
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
-        env_vars = list(agent_llm.get("env_vars") or [])
+        # Seed from whichever list the outer payload already carries
+        # (``_bridge_base_payload`` typically pre-fills this from yaml).
+        # The previous fallback ``payload.get(...) or env_vars`` silently
+        # dropped the OV vars appended below whenever the outer list was
+        # non-empty — so the whitelist never grew and bridge envForSandbox
+        # always stripped OV_CURRENT_QUESTION_ID, making qid header always
+        # "unknown" even though docker exec correctly injected ``-e``.
+        env_vars = list(payload.get("agent_llm_env_vars") or agent_llm.get("env_vars") or [])
+        # Forward OV recall-trace env vars through the envForSandbox whitelist so
+        # the in-container plugin sees them and tags X-OV-Question-Id (server
+        # recall_trace qid). Restored for qid/trace observability — time-window
+        # attribution alone loses per-request qid in the trace.
+        if question_id and payload.get("command") == "agent_run":
+            for _name in ("OV_CURRENT_QUESTION_ID", "OV_CURRENT_CONV_ID", "OV_RECALL_TRACE_LEVEL"):
+                if _name not in env_vars:
+                    env_vars.append(_name)
 
         # Rewrite host paths from ``_bridge_base_payload`` to the in-container
         # paths set up by the entrypoint. All QAs/ingest share /workspace/state.
@@ -616,14 +1008,25 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             "state_dir": "/workspace/state",
             "home_dir": "/workspace/home",
             "cwd_dir": "/workspace",
-            "agent_llm_env_vars": payload.get("agent_llm_env_vars") or env_vars,
+            "agent_llm_env_vars": env_vars,
         }
 
         cmd = [
             "docker", "exec", "-i",
+        ]
+        # Inject OV recall-trace env vars for agent_run so the plugin tags
+        # X-OV-Question-Id (-> server recall_trace qid). Must precede the
+        # container id in the docker exec argv.
+        if question_id and payload.get("command") == "agent_run":
+            cmd.extend([
+                "-e", f"OV_CURRENT_QUESTION_ID={question_id}",
+                "-e", f"OV_CURRENT_CONV_ID={conv_id}",
+                "-e", f"OV_RECALL_TRACE_LEVEL={os.environ.get('OV_RECALL_TRACE_LEVEL', '1')}",
+            ])
+        cmd.extend([
             handle["container_id"],
             "node", "/eval/openclaw_eval_bridge.mjs",
-        ]
+        ])
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -742,6 +1145,9 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         async def _stop_one(conv_id: str, handle: dict) -> None:
             cid = handle["container_id"]
             vol = handle.get("volume_dir")
+            # Stop plugin stdout log capture before stopping the container so
+            # the log file is flushed and closed cleanly.
+            self._stop_plugin_log_capture(conv_id)
             if self._capture_container_logs and isinstance(vol, str) and vol:
                 await self._dump_container_logs_to_workspace(cid, vol, conv_id)
             await self._docker_stop_container(cid)
@@ -759,6 +1165,9 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
             for conv_id, h in list(self._docker_handles.items())
         ], return_exceptions=True)
         self._docker_handles.clear()
+        # Clean up any remaining plugin log procs (e.g. convs not in _docker_handles).
+        for conv_id in list(self._plugin_log_procs.keys()):
+            self._stop_plugin_log_capture(conv_id)
 
     # ---------------------------------------- override answer to use docker
 
@@ -792,6 +1201,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                 resp = await self._arun_bridge_via_docker(
                     conv_id, payload,
                     timeout=float(self._exec_timeout),
+                    question_id=qid,
                 )
             except (BridgeError, BridgeTimeout) as err:
                 logger.warning("docker bridge failed for %s/%s: %s",
@@ -813,6 +1223,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
                     "error": err,
                 }])
                 return ""
+
+            # Provider burst protection (sophnet 429 "System protection
+            # triggered by request burst") surfaces as stop_reason=error with a
+            # rate-limit reply. Without retry the question is permanently lost
+            # (empty answer). Back off progressively per the provider's
+            # "increase requests gradually" guidance, then re-ask in place.
+            _rl_attempt = 0
+            while (resp.get("stop_reason") == "error"
+                   and "rate limit" in (resp.get("reply") or "").lower()
+                   and _rl_attempt < 3):
+                _rl_attempt += 1
+                _wait_s = 90 * _rl_attempt
+                logger.warning(
+                    "rate-limited agent_run for %s/%s; retry %d/3 in %ds",
+                    conv_id, qid, _rl_attempt, _wait_s,
+                )
+                await asyncio.sleep(_wait_s)
+                try:
+                    resp = await self._arun_bridge_via_docker(
+                        conv_id, payload,
+                        timeout=float(self._exec_timeout),
+                        question_id=qid,
+                    )
+                except (BridgeError, BridgeTimeout) as err:
+                    logger.warning("docker bridge failed on rate-limit retry "
+                                   "for %s/%s: %s", conv_id, qid, err)
+                    return ""
+                if not resp.get("ok"):
+                    logger.warning("docker agent_run failed on rate-limit retry "
+                                   "for %s/%s: %s", conv_id, qid,
+                                   resp.get("error", ""))
+                    return ""
 
             # Inherit v0.7 D5 stop_reason=error guard from base behavior.
             if resp.get("stop_reason") == "error":

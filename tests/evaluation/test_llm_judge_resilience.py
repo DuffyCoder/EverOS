@@ -247,3 +247,19 @@ class TestPermanentErrorBypassesRetry:
         result = await judge._judge_answer("q", "g", "a")
         assert result is None
         assert calls["count"] == 1
+
+    async def test_non_chat_completion_response_no_retry(self):
+        """OpenAI-compatible upstreams can occasionally return a bare
+        string on the nominal success path. Treat that as judge-unavailable
+        instead of crashing the whole evaluation run."""
+        judge = _make_judge(max_retries=5)
+        calls = {"count": 0}
+
+        async def returns_string(**kwargs):
+            calls["count"] += 1
+            return "upstream returned a non-OpenAI response"
+
+        judge.client.chat.completions.create = returns_string
+        result = await judge._judge_answer("q", "g", "a")
+        assert result is None
+        assert calls["count"] == 1

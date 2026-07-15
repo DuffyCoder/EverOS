@@ -122,6 +122,7 @@ class Pipeline:
         smoke_questions: int = 3,
         from_conv: int = 0,
         to_conv: Optional[int] = None,
+        conv_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Run complete Pipeline.
@@ -135,6 +136,7 @@ class Pipeline:
             smoke_questions: Number of questions in smoke test (default 3)
             from_conv: Starting conversation index to process (inclusive, 0-based)
             to_conv: Ending conversation index to process (exclusive), None means all
+            conv_ids: Explicit conversation IDs or numeric suffixes to process
 
         Returns:
             Evaluation results dictionary
@@ -153,9 +155,24 @@ class Pipeline:
             )
         self.console.print(f"{'='*60}\n", style="bold cyan")
 
-        # Apply conversation range filter (before smoke test)
+        # Apply conversation filters (before smoke test)
         # This allows processing a subset of conversations for incremental/distributed testing
-        if from_conv > 0 or to_conv is not None:
+        if conv_ids:
+            dataset = self._apply_conversation_ids(dataset, conv_ids)
+            self.console.print(f"[cyan]📌 Conversation ID Filter Applied:[/cyan]")
+            self.console.print(
+                f"[cyan]   IDs: {', '.join(dataset.metadata.get('conversation_ids', []))}[/cyan]"
+            )
+            missing = dataset.metadata.get("missing_conversation_ids", [])
+            if missing:
+                self.console.print(
+                    f"[yellow]   Missing: {', '.join(missing)}[/yellow]"
+                )
+            self.console.print(
+                f"[cyan]   Conversations: {len(dataset.conversations)}[/cyan]"
+            )
+            self.console.print(f"[cyan]   Questions: {len(dataset.qa_pairs)}[/cyan]\n")
+        elif from_conv > 0 or to_conv is not None:
             dataset = self._apply_conversation_range(dataset, from_conv, to_conv)
             self.console.print(f"[cyan]📌 Conversation Range Filter Applied:[/cyan]")
             self.console.print(
@@ -772,6 +789,67 @@ class Pipeline:
                 "original_qa_count": len(dataset.qa_pairs),
             },
         )
+
+    def _apply_conversation_ids(
+        self, dataset: Dataset, conv_ids: List[str]
+    ) -> Dataset:
+        """Filter conversations by explicit IDs or numeric suffixes.
+
+        Examples:
+            ``["locomo_4", "locomo_3"]`` selects those exact conversations.
+            ``["4", "3"]`` normalizes to ``["locomo_4", "locomo_3"]`` for
+            a LoCoMo dataset. The output order follows the requested IDs.
+        """
+        normalized_ids = [
+            self._normalize_conversation_id(dataset.dataset_name, conv_id)
+            for conv_id in conv_ids
+            if str(conv_id).strip()
+        ]
+        by_id = {conv.conversation_id: conv for conv in dataset.conversations}
+        selected_convs = [
+            by_id[conv_id] for conv_id in normalized_ids if conv_id in by_id
+        ]
+        selected_ids = {conv.conversation_id for conv in selected_convs}
+        selected_qa_pairs = [
+            qa
+            for conv_id in normalized_ids
+            for qa in dataset.qa_pairs
+            if qa.metadata.get("conversation_id") == conv_id and conv_id in selected_ids
+        ]
+        missing = [conv_id for conv_id in normalized_ids if conv_id not in by_id]
+
+        if missing:
+            self.logger.warning(
+                "conversation id filter missing IDs: %s", ", ".join(missing)
+            )
+        self.logger.info(
+            "Conversation IDs %s - selected %d/%d conversations, %d/%d questions",
+            normalized_ids,
+            len(selected_convs),
+            len(dataset.conversations),
+            len(selected_qa_pairs),
+            len(dataset.qa_pairs),
+        )
+
+        return Dataset(
+            dataset_name=dataset.dataset_name,
+            conversations=selected_convs,
+            qa_pairs=selected_qa_pairs,
+            metadata={
+                **dataset.metadata,
+                "conversation_ids": normalized_ids,
+                "missing_conversation_ids": missing,
+                "original_conversation_count": len(dataset.conversations),
+                "original_qa_count": len(dataset.qa_pairs),
+            },
+        )
+
+    @staticmethod
+    def _normalize_conversation_id(dataset_name: str, conv_id: str) -> str:
+        value = str(conv_id).strip()
+        if value.isdigit():
+            return f"{dataset_name}_{value}"
+        return value
 
     # ========================================================================
     # Benchmark-extension artifact writers (Task 7). These are called from

@@ -42,6 +42,7 @@ function okResponse(result: unknown): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function setupPlugin(clientOverrides?: Record<string, unknown>) {
@@ -233,6 +234,202 @@ describe("Tool: memory_forget (behavioral)", () => {
     expect(forget).toBeDefined();
     expect(forget!.name).toBe("memory_forget");
     expect(forget!.description).toContain("Forget memory");
+  });
+});
+
+describe("Tool: ov_archive_search (behavioral)", () => {
+  it("describes archive search as a single high-signal query before follow-up", () => {
+    const { factoryTools, api } = setupPlugin();
+    contextEnginePlugin.register(api as any);
+    const factory = factoryTools.get("ov_archive_search");
+    expect(factory).toBeDefined();
+    const tool = factory!({ sessionId: "runtime-session", sessionKey: "sk" });
+
+    expect(tool.description).toContain("Start with one high-signal query");
+    expect(tool.description).not.toContain("at least 2");
+    expect(tool.description).not.toContain("search each separately");
+  });
+
+  it("renders source-aware archive hits and hides stale memory diff fields", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/v1/search/grep")) {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        expect(body.uri).toContain("/history");
+        expect(body).toMatchObject({ pattern: "career", case_insensitive: true });
+        return okResponse({
+          matches: [
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 8,
+              content: '        "before": "old career summary"',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 9,
+              content: '        "uri": "viking://user/default/memories/events/career.md"',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/messages.jsonl",
+              line: 10,
+              content: '{"id":"msg_1","role":"user","parts":[{"type":"text","text":"Career plan details"}]}',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 11,
+              content: '        "after": "Summary: Career plan details"',
+            },
+          ],
+          count: 4,
+          match_count: 4,
+          files_scanned: 2,
+        });
+      }
+      return okResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { factoryTools, api } = setupPlugin();
+    contextEnginePlugin.register(api as any);
+    const factory = factoryTools.get("ov_archive_search");
+    expect(factory).toBeDefined();
+    const tool = factory!({ sessionId: "runtime-session", sessionKey: "sk" });
+
+    const result = await tool.execute("tc-archive-search", { query: "career" }) as ToolResult;
+    const text = result.content[0]!.text;
+
+    expect(text).toContain("source: messages.jsonl");
+    expect(text).toContain("source: memory_diff.json");
+    expect(text).toContain("field: after");
+    expect(text).toContain("Career plan details");
+    expect(text).not.toContain('"before"');
+    expect(text).not.toContain('"uri"');
+    expect(text).not.toContain("uri:");
+    expect(result.details).toMatchObject({
+      query: "career",
+      matchCount: 2,
+      rawMatchCount: 4,
+      hiddenMatchCount: 2,
+      });
+  });
+
+  it("caps rendered archive hits to keep broad searches compact", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/search/grep")) {
+        return okResponse({
+          matches: Array.from({ length: 8 }, (_, index) => ({
+            uri: `viking://session/runtime-session/history/archive_001/messages.jsonl`,
+            line: index + 1,
+            content: `{"id":"msg_${index}","role":"user","parts":[{"type":"text","text":"sport detail ${index}"}]}`,
+          })),
+          count: 8,
+          match_count: 8,
+          files_scanned: 1,
+        });
+      }
+      return okResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { factoryTools, api } = setupPlugin();
+    contextEnginePlugin.register(api as any);
+    const factory = factoryTools.get("ov_archive_search");
+    expect(factory).toBeDefined();
+    const tool = factory!({ sessionId: "runtime-session", sessionKey: "sk" });
+
+    const result = await tool.execute("tc-archive-search", { query: "sport" }) as ToolResult;
+    const text = result.content[0]!.text;
+
+    expect(text).toContain("showing first 5");
+    expect(text).toContain("sport detail 4");
+    expect(text).not.toContain("sport detail 5");
+    expect(result.details.shownMatchCount).toBe(5);
+  });
+
+  it("does not encourage repeated broad retries after no-hit searches", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/search/grep")) {
+        return okResponse({
+          matches: [],
+          count: 0,
+          match_count: 0,
+          files_scanned: 1,
+        });
+      }
+      return okResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { factoryTools, api } = setupPlugin();
+    contextEnginePlugin.register(api as any);
+    const factory = factoryTools.get("ov_archive_search");
+    expect(factory).toBeDefined();
+    const tool = factory!({ sessionId: "runtime-session", sessionKey: "sk" });
+
+    const result = await tool.execute("tc-archive-search", { query: "sports besides basketball" }) as ToolResult;
+    const text = result.content[0]!.text;
+
+    expect(text).toContain("No relevant matches found");
+    expect(text).toContain("one more search");
+    expect(text).not.toContain("Try synonyms");
+    expect(text).not.toContain("shorter fragments");
+  });
+
+  it("can restore legacy archive search rendering for ablation runs", async () => {
+    vi.stubEnv("OPENVIKING_ARCHIVE_SEARCH_OPT", "0");
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/search/grep")) {
+        return okResponse({
+          matches: [
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 8,
+              content: '        "before": "old career summary"',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 9,
+              content: '        "uri": "viking://user/default/memories/events/career.md"',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/messages.jsonl",
+              line: 10,
+              content: '{"id":"msg_1","role":"user","parts":[{"type":"text","text":"Career plan details"}]}',
+            },
+            {
+              uri: "viking://session/runtime-session/history/archive_001/memory_diff.json",
+              line: 11,
+              content: '        "after": "Summary: Career plan details"',
+            },
+          ],
+          count: 4,
+          match_count: 4,
+          files_scanned: 2,
+        });
+      }
+      return okResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { factoryTools, api } = setupPlugin();
+    contextEnginePlugin.register(api as any);
+    const factory = factoryTools.get("ov_archive_search");
+    expect(factory).toBeDefined();
+    const tool = factory!({ sessionId: "runtime-session", sessionKey: "sk" });
+
+    expect(tool.description).toContain("at least 2");
+
+    const result = await tool.execute("tc-archive-search", { query: "career" }) as ToolResult;
+    const text = result.content[0]!.text;
+
+    expect(text).toContain('Found 4 match(es) for "career"');
+    expect(text).toContain("## Match 1: archive_001 (line 8)");
+    expect(text).toContain('"before"');
+    expect(text).toContain('"uri"');
+    expect(text).not.toContain("source: messages.jsonl");
+    expect(result.details).toMatchObject({
+      query: "career",
+      matchCount: 4,
+    });
   });
 });
 
@@ -546,10 +743,18 @@ describe("OpenViking search command parsing", () => {
 });
 
 describe("Plugin registration", () => {
-  it("registers all 6 tools", () => {
-    const { api } = setupPlugin();
+  it("registers all tools", () => {
+    const { tools, api } = setupPlugin();
     contextEnginePlugin.register(api as any);
-    expect(api.registerTool).toHaveBeenCalledTimes(6);
+    expect([...tools.keys()].sort()).toEqual([
+      "memory_forget",
+      "memory_recall",
+      "memory_store",
+      "ov_archive_expand",
+      "ov_archive_search",
+      "ov_import",
+      "ov_search",
+    ]);
   });
 
   it("registers import and search commands", () => {

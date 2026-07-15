@@ -1,0 +1,27 @@
+# Patch only the OpenViking plugin on top of a previously validated
+# OpenViking eval image. This preserves the base image's eval harness
+# fixes (bridge, entrypoint, archive_session, etc.) and only replaces
+# /opt/openclaw/extensions/openviking with the locally packed plugin.
+FROM ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim
+
+COPY --chown=node:node openclaw-openviking-2026.6.04.tgz /tmp/ov-plugin.tgz
+
+ENV INSTALL_PLUGIN_ID=openviking
+
+USER root
+RUN rm -rf /opt/openclaw/extensions/openviking && \
+    mkdir -p /opt/openclaw/extensions/openviking && \
+    chown -R node:node /opt/openclaw/extensions/openviking
+
+USER node
+RUN cd /opt/openclaw/extensions/openviking && \
+    tar -xf /tmp/ov-plugin.tgz --strip-components=1 && \
+    rm /tmp/ov-plugin.tgz && \
+    npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true && \
+    ls -la /opt/openclaw/extensions/openviking/
+
+USER root
+RUN chown -R root:root /opt/openclaw/extensions/openviking && \
+    chmod -R a+rX /opt/openclaw/extensions/openviking
+
+USER node

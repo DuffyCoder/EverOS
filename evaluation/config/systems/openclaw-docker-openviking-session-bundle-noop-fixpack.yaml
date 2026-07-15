@@ -1,0 +1,207 @@
+# OV-only on LoCoMo via per-session bundle ingest.
+#
+# B2 wiring (noop memory slot, OV owns retrieval):
+#   * memory_mode=noop disables OpenClaw memorySearch; agent has no
+#     memory_search/memory_get tools. All recall goes through the OV
+#     plugin's before_prompt_build hook.
+#   * context_engine_mode=openviking puts the OV plugin in the
+#     contextEngine slot. afterTurn captures every turn into the OV
+#     backend regardless of message content; before_reset triggers
+#     commitOVSession finalization between sessions.
+#
+# Ingest = per-session bundle replay through the bridge. Each session is
+# bundled into a single agent_run call; the OV plugin's afterTurn hook
+# fires and persists the turn in OV. Tail is empty because OV captures
+# unconditionally — no need to cue the agent to write anything.
+#
+# Prerequisites at run time:
+#   * OpenViking server running on the host at port 1933 (or wherever
+#     OPENVIKING_BASE_URL points). The plugin uses
+#     host.docker.internal:1933 inside the container; add_host_gateway
+#     bridges that to the host machine.
+#   * OPENVIKING_API_KEY exported in the host process env when running
+#     the eval CLI; passed through via the agent_llm.env_vars whitelist.
+adapter: "openclaw-docker"
+
+llm:
+  # provider stays "openai" — LLMProvider class only supports "openai"
+  # type (sophnet is reached via base_url override, not a distinct provider).
+  provider: "openai"
+  model: "doubao-seed-2-0-pro-260215"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+  # Within one conv all QAs share ov_session_id and the in-container session
+  # jsonl write lock. answer_stage guards this with a per-conv asyncio.Lock,
+  # so cross-conv work is free to run up to ``max_concurrent``.
+  #
+  # ``auto`` = scan host env for LLM_API_KEY[_<N>] and size concurrency to
+  # the pool, spreading load across independent per-key TPM/RPM limits.
+  #
+  # Explicit int wins over auto. 16 lets full10 (10 conv) run all conv in
+  # parallel — auto would cap at N_keys=4 leaving 6 conv waiting per batch
+  # (Stage 3 needs ceil(10/4)=3 batches × max-per-conv-time ≈ 3× the
+  # parallel-everywhere time). Each conv still serializes its own QAs via
+  # the per-conv asyncio.Lock (openclaw sessionStore constraint), so 16
+  # inflight = up to 16 distinct conv concurrent. Per-key load with 16
+  # spread over 4 keys = ~4 conv/key, ~0.08 RPS/key — well below sophnet
+  # per-key RPM ceilings (one agent_local QA call burns ~50s).
+  # On RAM-tight hosts (each conv container ~1.5GB; OV server ~0.5GB),
+  # set this to fit your box; 377GB host can run 16 easily.
+  max_concurrent: 16
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  backend_mode: "fts_only"            # OV owns retrieval; OpenClaw memorySearch off
+  flush_mode: "session_bundle"
+  answer_mode: "agent_local"
+  memory_mode: "noop"
+  context_engine_mode: "openviking"
+  # 90s was too tight: ~5/1540 QAs hit the cap and returned the openclaw
+  # timeout error string ("increase agents.defaults.timeoutSeconds") or a
+  # truncated mid-tool-use preamble as their "answer" — framework-induced
+  # wrong answers. 240s lets the iterative archive-search agent finish while
+  # still capping runaway loops (bridge hardTimeout=+15s, exec cap=360s).
+  agent_timeout_seconds: 240
+  # Empty tail: agent_run loop is skipped entirely for memory_mode=noop
+  # (see ov_ingest below — OV is populated via direct HTTP, not afterTurn).
+  ingest_session_tail: ""
+  # Direct OV SDK ingest (mirrors openclaw-eval/import_to_ov.py).
+  # Per LoCoMo session: create_session → add_message × N → commit_session
+  # (telemetry=true) → poll task until completed. Bypasses the OV plugin's
+  # afterTurn hook, which has a 20k-token commit threshold the smoke and
+  # often the full conversation never reach. Headers must match the plugin
+  # (OPENVIKING_ACCOUNT_ID + OPENVIKING_USER_ID env vars set on the host
+  # process and forwarded via agent_llm.env_vars) so ingest writes to the
+  # same tenant the plugin reads from at QA time.
+  ov_ingest:
+    base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
+    api_key_env: "OPENVIKING_API_KEY"
+    account_id: "default"
+    # Fix #4: per-conv user_id isolation. Each LoCoMo conv writes to
+    # and reads from ``viking://user/<conv_id>/memories/...``, matching
+    # the official OpenViking benchmark ``import_to_ov.py`` pattern of
+    # ``user_id=str(sample_id)``. Cross-conv name collisions (e.g. "John"
+    # appearing in conv-41/43/47) no longer surface wrong-conv facts at
+    # retrieval time. docker_adapter substitutes ``{conv_id}`` and pipes
+    # it into the container as ``OPENVIKING_USER_ID`` env, which the OV
+    # plugin reads as fallback for cfg.userId (see config.ts:209), so
+    # QA-time queries hit the same tenant we wrote.
+    user_id_template: "{conv_id}"
+    # Fix #4 完整版: agent_id 也 per-conv,对齐官方 import_to_ov.py
+    # (user_id=str(sample_id) AND agent_id=str(sample_id))。OV server
+    # 同时写 user/<conv_id>/memories + agent/<conv_id>/memories。plugin
+    # 端 agent_prefix 不读 env,仍然查 agent/default/memories(返 0 条),
+    # 等同禁用 agent 这一路 — 跟官方实际行为一致。好处:agent/default
+    # namespace 不再被 ingest 写入,跨 conv 的 agent 池彻底干净。
+    agent_id_template: "{conv_id}"
+    # Phase 3 (官方 benchmark/locomo/openclaw/import_to_ov.py 风格):
+    # adapter 改为 conv 内 session 串行 + 每 session wait_for_task 到
+    # status=completed 才进入下一个 session,失败立即 raise。
+    # task_timeout_sec 是 per-session task wait 上限,对齐官方
+    # max_attempts=3600 (1hr per task)。task=completed 在 OV server 内部
+    # 已经包含 phase3 (vectordb embedding + HNSW write),所以串行 wait
+    # 完成 == retrieval 安全,不再需要 /api/v1/system/wait hook。
+    # ingest 全部完成的 barrier 由 pipeline 内 Stage 1 await Stage 2 天然
+    # 提供 (对应官方 shell 里 import_to_ov.py 进程退出 → eval.py qa 启动)。
+    task_timeout_sec: 3600
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    # OpenClaw LLM-streaming idle timeout (seconds). Container default is
+    # 60s (pi-embedded-runner DEFAULT_LLM_IDLE_TIMEOUT_MS). Under cross-conv
+    # parallelism the provider chunk-gap regularly exceeds 60s → idle abort
+    # → runner falls back to lastAssistant in payloads.ts (which, because
+    # openclaw sessionStore aliases all per-QA session-ids to ONE UUID per
+    # conv container, is actually the PRIOR turn's archived assistant
+    # message), emitting prior QA's text as the current QA's reply and
+    # silently polluting accuracy. 180s gives streaming enough headroom
+    # while outer agent_timeout_seconds (90s) still caps per-turn wall
+    # clock — so this is effectively "trust the outer cap, disable inner".
+    idle_timeout_seconds: 180
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+      - "OPENVIKING_BASE_URL"
+      - "OPENVIKING_API_KEY"
+      - "OPENVIKING_ACCOUNT_ID"
+      - "OPENVIKING_USER_ID"
+      # fixpack env knobs (plugin config.ts reads these as overrides)
+      - "OPENVIKING_AUTO_CAPTURE"
+      - "OPENVIKING_RECALL_SCORE_THRESHOLD"
+      - "OPENVIKING_RECALL_LIMIT"
+      - "OPENVIKING_RECALL_MAX_INJECTED_CHARS"
+      - "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT"
+      - "OPENVIKING_ARCHIVE_INDEX_ORDER"
+      - "OPENVIKING_ARCHIVE_SEARCH_OPT"
+      # OPENVIKING_AGENT_PREFIX intentionally NOT forwarded — leaving it
+      # unset makes the plugin's resolveAgentId fall through to "default",
+      # matching the SDK ingest's no-X-OpenViking-Agent header behavior.
+      # Setting a prefix here would shard storage by a synthesized agent
+      # id and break ingest/retrieval alignment.
+    model:
+      id: "doubao-seed-2-0-code-preview-260215"
+      name: "Doubao Seed 2.0 Code Preview (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      # 4096 was fully consumed by a reasoning/thinking block on 1 QA
+      # (locomo_4_qa119, stop=length, empty answer -> judge None). 8192 leaves
+      # room for thinking + the final answer text.
+      max_tokens: 8192
+      # Tier-A provider usage: yaml compat + docker _patch_streaming_usage_compat
+      # (see openclaw/config_patches.py). Without both, metrics fall back to
+      # session-transcript tiktoken (Tier B) in usage_metrics.py.
+      compat:
+        supportsUsageInStreaming: true
+  prompts:
+    memory_mode: "native_compiled"
+    flush_mode: "session_bundle"
+    answer_mode: "shared"
+
+openclaw_docker:
+  # findlast bridge variant: same base image + the committed
+  # openclaw_eval_bridge.mjs that reads the LAST assistant payload (final
+  # answer) instead of payloads[0] (preamble). The plain -slim tag in the
+  # registry still bakes the old payloads[0] bridge, so pin -findlast-slim
+  # explicitly. Rebuild from source: docker build COPYs
+  # openclaw-eval/container/openclaw_eval_bridge.mjs into /eval/.
+  # Pinned by digest (not just tag) for bit-level reproducibility: ghcr tags
+  # are mutable, so a re-push under the same tag could silently change what
+  # teammates pull. The tag is kept only for readability; docker resolves by
+  # the @sha256 digest. Re-pin the digest if the image is ever rebuilt.
+  image: "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim"
+  # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
+  # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
+  # is the bottleneck (single sophnet key for fact-extract), so total
+  # Stage 1 wall time is unchanged from any container count >= N_conv, but
+  # too low (e.g. 4) batches the ingest into ceil(N_conv/max) waves which
+  # adds artificial barriers. Raising to 16 covers full10 (10 conv) plus
+  # headroom for larger datasets. RAM: each container ~1.5GB; OV server
+  # 0.5GB; 16 containers ≈ 24GB, well within the 377GB host budget.
+  max_concurrent_containers: 16
+  mem_limit: ""
+  network: "bridge"
+  per_rpc_timeout_seconds: 360
+  add_host_gateway: true              # OV plugin reaches host:1933
+  # capture_container_logs: true      # default: write docker logs → eval_docker_container.log under each conv workspace before stop
+  remove_container_on_stop: true     # omit docker --rm; after eval, ``docker logs <cid>`` still works until you ``docker rm`` the exited container

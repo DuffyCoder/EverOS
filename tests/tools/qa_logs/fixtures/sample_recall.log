@@ -1,0 +1,11 @@
+2026-05-27 15:57:59,000 - openviking.retrieve.hierarchical_retriever - DEBUG - [VectorSearch] [1] URI: viking://user/noise/memories/outside.md score: 0.99, level: 3
+2026-05-27 15:58:00,001 - openviking.retrieve.hierarchical_retriever - DEBUG - [VectorSearch] [1] URI: viking://user/locomo_9/memories/a.md score: 0.95, level: 2
+2026-05-27 15:58:00,002 - openviking.retrieve.hierarchical_retriever - DEBUG - [VectorSearch] [2] URI: viking://user/locomo_9/memories/b.md score: 0.87, level: 1
+2026-05-27 15:58:00,003 - openviking.retrieve.hierarchical_retriever - DEBUG - [VectorSearch] [3] URI: viking://user/locomo_9/memories/c.md score: 0.73, level: 0
+2026-05-27 15:58:02,329 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/locomo_9/memories/skills/car_restoration.md (score: 0.1596)
+2026-05-27 15:58:02,400 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/locomo_9/memories/food/cooking.md (score: 0.1421)
+2026-05-27 15:58:02,500 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/locomo_9/memories/travel/paris.md (score: 0.1305)
+2026-05-27 15:58:02,600 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/locomo_9/memories/family/father.md (score: 0.1188)
+2026-05-27 15:58:02,700 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/locomo_9/memories/work/job.md (score: 0.1050)
+2026-05-27 15:58:03,000 - openviking.telemetry.execution - INFO - Telemetry summary (id=tm_ac0adc4c33154bd181734bcd605e3911): {'operation': 'search.find', 'status': 'ok', 'duration_ms': 86.155, 'tokens': {}, 'returned': 24, 'vector': {'searches': 2, 'scan_reason': ''}}
+2026-05-27 15:59:00,000 - openviking.retrieve.hierarchical_retriever - DEBUG - [RecursiveSearch] Added initial candidate: viking://user/noise/memories/outside.md (score: 0.9999)

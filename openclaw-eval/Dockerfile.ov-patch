@@ -1,0 +1,29 @@
+# Patch layer: install updated openviking plugin on top of the clean eval-base.
+# No openclaw rebuild needed — the plugin loads via jiti from /opt/openclaw/extensions/.
+FROM ghcr.io/duffycoder/openclaw-eval-base:7da23c3-clean-edf6d4d-slim
+
+COPY --chown=node:node plugins/openviking/openclaw-openviking-2026.6.04.tgz /tmp/ov-plugin.tgz
+COPY --chown=node:node container/openclaw.template.json /etc/openclaw/template.json
+COPY --chown=node:node container/entrypoint.sh /eval/entrypoint.sh
+COPY --chown=node:node container/openclaw_eval_bridge.mjs /eval/openclaw_eval_bridge.mjs
+COPY --chown=node:node container/openclaw_eval_bridge_lib.mjs /eval/openclaw_eval_bridge_lib.mjs
+RUN chmod 755 /eval/entrypoint.sh
+
+USER node
+RUN mkdir -p /opt/openclaw/extensions/openviking && \
+    cd /opt/openclaw/extensions/openviking && \
+    tar -xf /tmp/ov-plugin.tgz --strip-components=1 && \
+    rm /tmp/ov-plugin.tgz && \
+    npm install --omit=dev --omit=optional --no-audit --no-fund --silent || true && \
+    ls -la /opt/openclaw/extensions/openviking/
+
+USER root
+RUN chown -R root:root /opt/openclaw/extensions && \
+    chmod -R a+rX /opt/openclaw/extensions
+
+ENV MEMORY_PLUGIN_ID=noop
+ENV INSTALL_PLUGIN_ID=openviking
+ENV EXTRA_INSTALL_PLUGIN_IDS=
+ENV MEMORY_MODE=memory-core
+
+USER node

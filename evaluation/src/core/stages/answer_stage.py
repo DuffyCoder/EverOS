@@ -2,9 +2,12 @@
 Answer stage - generate answers.
 """
 import asyncio
+import hashlib
+import os
 import time
 from collections import defaultdict
 from itertools import zip_longest
+from pathlib import Path
 from typing import List, Optional
 from logging import Logger
 from tqdm import tqdm
@@ -38,6 +41,41 @@ _TOKEN_ENCODING = None
 
 # yaml sentinel for "size concurrency to the LLM key pool".
 MAX_CONCURRENT_AUTO = "auto"
+
+# AP1 experiment knob (answer-prompt arm): opt-in suffix appended to every
+# question right before adapter.answer(). Unset => byte-identical original
+# behavior. Host-side only: in agent_local/docker mode the suffix travels
+# inside the bridge agent_run "message" field; in shared_llm mode it lands
+# in the prompt's {question} slot — no docker image rebuild required.
+ENV_ANSWER_PROMPT_FILE = "EVAL_ANSWER_PROMPT_FILE"
+ENV_ANSWER_PROMPT_SUFFIX = "EVAL_ANSWER_PROMPT_SUFFIX"
+
+
+def resolve_answer_prompt_suffix() -> str:
+    """Resolve the opt-in answer-prompt suffix from the environment.
+
+    Precedence: EVAL_ANSWER_PROMPT_FILE (path to a UTF-8 text file) wins
+    over EVAL_ANSWER_PROMPT_SUFFIX (inline text). Returns "" when neither
+    is set — the stage then behaves exactly as before.
+
+    Fail-fast: if EVAL_ANSWER_PROMPT_FILE is set but unreadable/empty we
+    raise instead of silently running the baseline prompt — a 10h+ eval
+    arm accidentally running as control is worse than an early crash.
+    """
+    path = os.environ.get(ENV_ANSWER_PROMPT_FILE, "").strip()
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as err:
+            raise RuntimeError(
+                f"{ENV_ANSWER_PROMPT_FILE}={path!r} is set but unreadable: {err}"
+            ) from err
+        if not text:
+            raise RuntimeError(
+                f"{ENV_ANSWER_PROMPT_FILE}={path!r} is set but the file is empty"
+            )
+        return text
+    return os.environ.get(ENV_ANSWER_PROMPT_SUFFIX, "").strip()
 # Fallback when yaml says ``auto`` but no LLM_API_KEY[_<N>] is configured —
 # preserves the historical pre-multi-key default for non-sophnet pipelines.
 _LEGACY_DEFAULT_CONCURRENCY = 50
@@ -158,7 +196,25 @@ async def run_answer_stage(
     # adding keys to .env automatically widens cross-conv parallelism.
     answer_cfg = (getattr(adapter, "config", None) or {}).get("answer") or {}
     MAX_CONCURRENT = _resolve_max_concurrent(answer_cfg)
-    
+
+    # AP1 knob: resolved once per stage (single file read / env lookup);
+    # "" means the knob is off and queries are passed through untouched.
+    answer_prompt_suffix = resolve_answer_prompt_suffix()
+    answer_prompt_suffix_sha1 = ""
+    if answer_prompt_suffix:
+        answer_prompt_suffix_sha1 = hashlib.sha1(
+            answer_prompt_suffix.encode("utf-8")
+        ).hexdigest()[:12]
+        source = (
+            ENV_ANSWER_PROMPT_FILE
+            if os.environ.get(ENV_ANSWER_PROMPT_FILE, "").strip()
+            else ENV_ANSWER_PROMPT_SUFFIX
+        )
+        print(
+            f"  📎 Answer-prompt suffix ACTIVE via {source}: "
+            f"{len(answer_prompt_suffix)} chars, sha1={answer_prompt_suffix_sha1}"
+        )
+
     # Load fine-grained checkpoint
     all_answer_results = {}
     if checkpoint_manager:
@@ -205,16 +261,24 @@ async def run_answer_stage(
     # semaphore's first MAX_CONCURRENT slots fan out to distinct conv ids
     # instead of being monopolized by the first conv's QAs (which would
     # all serialize behind the same per-conv lock and defeat parallelism).
+    # In serial mode (MAX_CONCURRENT == 1) round-robin is a no-op for
+    # concurrency but reorders wall-clock execution from conv-major to
+    # qa_idx-major, which breaks any post-hoc tooling that assumes the
+    # canonical (conv_id, qa_idx) order (e.g. qa_logs annotate.py). Skip it.
     if pending_tasks:
         by_conv: dict[str, list] = defaultdict(list)
         for qa, sr in pending_tasks:
             by_conv[sr.conversation_id].append((qa, sr))
-        pending_tasks = [
-            task
-            for column in zip_longest(*by_conv.values())
-            for task in column
-            if task is not None
-        ]
+        if MAX_CONCURRENT > 1:
+            pending_tasks = [
+                task
+                for column in zip_longest(*by_conv.values())
+                for task in column
+                if task is not None
+            ]
+        else:
+            # serial: conv-major preserves (conv_id, qa_idx) wall-clock order
+            pending_tasks = [task for tasks in by_conv.values() for task in tasks]
 
     if not pending_tasks:
         print(f"✅ All questions already processed!")
@@ -269,6 +333,11 @@ async def run_answer_stage(
         # 1. Grabbing the conv lock first means a slot is only held once the QA
         # can actually run. (Single lock-acquire order everywhere → no cycle.)
         async with conv_locks[search_result.conversation_id], semaphore:
+            # Wall-clock start of the QA's actual run (after lock acquisition).
+            # Pair with answer_latency_ms to reconstruct per-QA wall-clock
+            # windows post-hoc — needed by qa_logs raw_dump when session-bundle
+            # adapters don't write per-qa session jsonl (so user_ts is absent).
+            qa_start_unix_ms = int(time.time() * 1000)
             context = ""
             context_chars = 0
             context_tokens = 0
@@ -294,6 +363,12 @@ OPTIONS:
 {options_text}
 
 IMPORTANT: This is a multiple-choice question. You MUST analyze the context and select the BEST option. In your FINAL ANSWER, return ONLY the option letter like (a), (b), (c), or (d), nothing else."""
+
+                # AP1 knob: append the suffix AFTER any multiple-choice
+                # enhancement so the MC format contract stays adjacent to
+                # the options; the suffix text itself re-affirms it.
+                if answer_prompt_suffix:
+                    query = f"{query}\n\n{answer_prompt_suffix}"
 
                 # Call adapter's answer method with timeout and retry.
                 # Every attempt is recorded to the LatencyRecorder so
@@ -374,6 +449,7 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 final_tokens = context_tokens
             metadata = {
                 **qa.metadata,
+                "qa_start_unix_ms": qa_start_unix_ms,
                 "answer_latency_ms": answer_latency_ms,
                 "final_context_chars": context_chars,
                 "final_context_tokens": final_tokens,
@@ -381,6 +457,12 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 "retrieval_route": retrieval_meta.get("retrieval_route"),
                 "backend_mode": retrieval_meta.get("backend_mode"),
             }
+            if answer_prompt_suffix:
+                # Post-hoc attribution marker: lets results/checkpoints be
+                # identified as an AP arm (and which prompt revision) even
+                # when the launching shell's env is long gone.
+                metadata["answer_prompt_suffix_chars"] = len(answer_prompt_suffix)
+                metadata["answer_prompt_suffix_sha1"] = answer_prompt_suffix_sha1
             for key, value in extra_metrics.items():
                 if key != "final_context_tokens":
                     metadata[key] = value

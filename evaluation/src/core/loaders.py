@@ -5,6 +5,8 @@ Provides loading functionality for different datasets.
 Supports automatic conversion of non-Locomo format datasets.
 """
 import json
+import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -103,7 +105,21 @@ def load_locomo_dataset(data_path: str, dataset_name: str = "locomo", max_conten
         for qa_idx, qa_item in enumerate(qa_data):
             qa_pair = _convert_locomo_qa_pair(qa_item, conv_id, qa_idx)
             qa_pairs.append(qa_pair)
-    
+
+    # fixpack experiments: optional question-level whitelist. Set
+    # EVAL_QID_WHITELIST=/path/to/json ({"qids":[...]}) to run only the
+    # listed question_ids while still ingesting full conversations.
+    _wl_path = os.environ.get("EVAL_QID_WHITELIST")
+    if _wl_path:
+        with open(_wl_path, "r", encoding="utf-8") as _fh:
+            _wl = set(json.load(_fh).get("qids", []))
+        _before = len(qa_pairs)
+        qa_pairs = [q for q in qa_pairs if q.question_id in _wl]
+        logging.getLogger(__name__).info(
+            "EVAL_QID_WHITELIST: filtered qa_pairs %d -> %d (%s)",
+            _before, len(qa_pairs), _wl_path,
+        )
+
     return Dataset(
         dataset_name=dataset_name,
         conversations=conversations,

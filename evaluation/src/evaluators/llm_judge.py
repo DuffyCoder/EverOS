@@ -501,7 +501,14 @@ class LLMJudge(BaseEvaluator):
             # Successful API call — parse content; parse failures are
             # treated as judge-unavailable (None) so a confused/refusing
             # model doesn't silently get scored as WRONG.
-            content = response.choices[0].message.content
+            try:
+                content = response.choices[0].message.content
+            except (AttributeError, IndexError, TypeError) as e:
+                print(
+                    "  ⚠️ LLM Judge: malformed response "
+                    f"({type(response).__name__}): {e}"
+                )
+                return None
 
             if not content:
                 print(f"  ⚠️ LLM Judge: Empty response from model {self.model}")
