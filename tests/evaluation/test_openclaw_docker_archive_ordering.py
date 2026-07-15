@@ -42,7 +42,8 @@ def _make_adapter() -> DockerizedOpenclawAdapter:
 
 
 def _bridge_factory(call_log, agent_resp):
-    async def fake_arun_bridge_via_docker(conv_id, payload, timeout):
+    async def fake_arun_bridge_via_docker(conv_id, payload, timeout, **kwargs):
+        del kwargs
         cmd = payload.get("command")
         if cmd == "agent_run":
             call_log.append("agent_run")
@@ -118,7 +119,8 @@ async def test_archive_failure_does_not_break_answer():
     adapter = _make_adapter()
     call_log: list[str] = []
 
-    async def fake_arun_bridge_via_docker(conv_id, payload, timeout):
+    async def fake_arun_bridge_via_docker(conv_id, payload, timeout, **kwargs):
+        del kwargs
         cmd = payload.get("command")
         if cmd == "agent_run":
             call_log.append("agent_run")

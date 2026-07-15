@@ -144,6 +144,9 @@ openclaw:
       - "OPENVIKING_API_KEY"
       - "OPENVIKING_ACCOUNT_ID"
       - "OPENVIKING_USER_ID"
+      - "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT"
+      - "OPENVIKING_ARCHIVE_INDEX_ORDER"
+      - "OPENVIKING_ARCHIVE_SEARCH_OPT"
       # OPENVIKING_AGENT_PREFIX intentionally NOT forwarded — leaving it
       # unset makes the plugin's resolveAgentId fall through to "default",
       # matching the SDK ingest's no-X-OpenViking-Agent header behavior.
@@ -181,7 +184,7 @@ openclaw_docker:
   # are mutable, so a re-push under the same tag could silently change what
   # teammates pull. The tag is kept only for readability; docker resolves by
   # the @sha256 digest. Re-pin the digest if the image is ever rebuilt.
-  image: "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-on-findlast-slim"
+  image: "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim"
   # Container concurrency for Stage 1 (Add). Each LoCoMo conv spawns one
   # container; 10 conv at max=10 → all 10 ingesting in parallel. OV server
   # is the bottleneck (single sophnet key for fact-extract), so total

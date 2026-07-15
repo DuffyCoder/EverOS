@@ -238,6 +238,44 @@ class TestOvEnvInjection:
 
 
 # ---------------------------------------------------------------------------
+# Runtime config patch tests
+# ---------------------------------------------------------------------------
+
+class TestRuntimeConfigPatch:
+    @pytest.mark.asyncio
+    async def test_patch_agent_llm_runtime_config_applies_yaml_model_and_idle_timeout(self):
+        adapter = _make_adapter(
+            openclaw_cfg={
+                "memory_mode": "noop",
+                "context_engine_mode": "openviking",
+                "agent_llm": {
+                    "model": {
+                        "id": "test-model",
+                        "max_tokens": 8192,
+                    },
+                    "idle_timeout_seconds": 180,
+                },
+            }
+        )
+
+        mock_proc = mock.AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = mock.AsyncMock(return_value=(b"", b""))
+
+        with mock.patch(
+            "evaluation.src.adapters.openclaw_docker_adapter.asyncio.create_subprocess_exec",
+            return_value=mock_proc,
+        ) as mock_exec:
+            await adapter._patch_agent_llm_runtime_config("cid_runtime", "locomo_8")
+
+        cmd = _docker_exec_cmd_from_call(mock_exec)
+        assert cmd[:3] == ["docker", "exec", "cid_runtime"]
+        shell = cmd[-1]
+        assert ".maxTokens = 8192" in shell
+        assert ".agents.defaults.llm.idleTimeoutSeconds = 180" in shell
+
+
+# ---------------------------------------------------------------------------
 # Plugin stdout log capture tests
 # ---------------------------------------------------------------------------
 

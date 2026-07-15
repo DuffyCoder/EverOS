@@ -2,9 +2,12 @@
 Answer stage - generate answers.
 """
 import asyncio
+import hashlib
+import os
 import time
 from collections import defaultdict
 from itertools import zip_longest
+from pathlib import Path
 from typing import List, Optional
 from logging import Logger
 from tqdm import tqdm
@@ -38,6 +41,41 @@ _TOKEN_ENCODING = None
 
 # yaml sentinel for "size concurrency to the LLM key pool".
 MAX_CONCURRENT_AUTO = "auto"
+
+# AP1 experiment knob (answer-prompt arm): opt-in suffix appended to every
+# question right before adapter.answer(). Unset => byte-identical original
+# behavior. Host-side only: in agent_local/docker mode the suffix travels
+# inside the bridge agent_run "message" field; in shared_llm mode it lands
+# in the prompt's {question} slot — no docker image rebuild required.
+ENV_ANSWER_PROMPT_FILE = "EVAL_ANSWER_PROMPT_FILE"
+ENV_ANSWER_PROMPT_SUFFIX = "EVAL_ANSWER_PROMPT_SUFFIX"
+
+
+def resolve_answer_prompt_suffix() -> str:
+    """Resolve the opt-in answer-prompt suffix from the environment.
+
+    Precedence: EVAL_ANSWER_PROMPT_FILE (path to a UTF-8 text file) wins
+    over EVAL_ANSWER_PROMPT_SUFFIX (inline text). Returns "" when neither
+    is set — the stage then behaves exactly as before.
+
+    Fail-fast: if EVAL_ANSWER_PROMPT_FILE is set but unreadable/empty we
+    raise instead of silently running the baseline prompt — a 10h+ eval
+    arm accidentally running as control is worse than an early crash.
+    """
+    path = os.environ.get(ENV_ANSWER_PROMPT_FILE, "").strip()
+    if path:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as err:
+            raise RuntimeError(
+                f"{ENV_ANSWER_PROMPT_FILE}={path!r} is set but unreadable: {err}"
+            ) from err
+        if not text:
+            raise RuntimeError(
+                f"{ENV_ANSWER_PROMPT_FILE}={path!r} is set but the file is empty"
+            )
+        return text
+    return os.environ.get(ENV_ANSWER_PROMPT_SUFFIX, "").strip()
 # Fallback when yaml says ``auto`` but no LLM_API_KEY[_<N>] is configured —
 # preserves the historical pre-multi-key default for non-sophnet pipelines.
 _LEGACY_DEFAULT_CONCURRENCY = 50
@@ -158,7 +196,25 @@ async def run_answer_stage(
     # adding keys to .env automatically widens cross-conv parallelism.
     answer_cfg = (getattr(adapter, "config", None) or {}).get("answer") or {}
     MAX_CONCURRENT = _resolve_max_concurrent(answer_cfg)
-    
+
+    # AP1 knob: resolved once per stage (single file read / env lookup);
+    # "" means the knob is off and queries are passed through untouched.
+    answer_prompt_suffix = resolve_answer_prompt_suffix()
+    answer_prompt_suffix_sha1 = ""
+    if answer_prompt_suffix:
+        answer_prompt_suffix_sha1 = hashlib.sha1(
+            answer_prompt_suffix.encode("utf-8")
+        ).hexdigest()[:12]
+        source = (
+            ENV_ANSWER_PROMPT_FILE
+            if os.environ.get(ENV_ANSWER_PROMPT_FILE, "").strip()
+            else ENV_ANSWER_PROMPT_SUFFIX
+        )
+        print(
+            f"  📎 Answer-prompt suffix ACTIVE via {source}: "
+            f"{len(answer_prompt_suffix)} chars, sha1={answer_prompt_suffix_sha1}"
+        )
+
     # Load fine-grained checkpoint
     all_answer_results = {}
     if checkpoint_manager:
@@ -308,6 +364,12 @@ OPTIONS:
 
 IMPORTANT: This is a multiple-choice question. You MUST analyze the context and select the BEST option. In your FINAL ANSWER, return ONLY the option letter like (a), (b), (c), or (d), nothing else."""
 
+                # AP1 knob: append the suffix AFTER any multiple-choice
+                # enhancement so the MC format contract stays adjacent to
+                # the options; the suffix text itself re-affirms it.
+                if answer_prompt_suffix:
+                    query = f"{query}\n\n{answer_prompt_suffix}"
+
                 # Call adapter's answer method with timeout and retry.
                 # Every attempt is recorded to the LatencyRecorder so
                 # Layer-1 four-view aggregation can distinguish clean
@@ -395,6 +457,12 @@ IMPORTANT: This is a multiple-choice question. You MUST analyze the context and 
                 "retrieval_route": retrieval_meta.get("retrieval_route"),
                 "backend_mode": retrieval_meta.get("backend_mode"),
             }
+            if answer_prompt_suffix:
+                # Post-hoc attribution marker: lets results/checkpoints be
+                # identified as an AP arm (and which prompt revision) even
+                # when the launching shell's env is long gone.
+                metadata["answer_prompt_suffix_chars"] = len(answer_prompt_suffix)
+                metadata["answer_prompt_suffix_sha1"] = answer_prompt_suffix_sha1
             for key, value in extra_metrics.items():
                 if key != "final_context_tokens":
                     metadata[key] = value

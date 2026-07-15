@@ -103,6 +103,244 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         self._plugin_log_procs: dict[str, tuple[subprocess.Popen, Any]] = {}
 
 
+    # ----------------------------------------------------- clean_groups hook
+
+    async def add(
+        self,
+        conversations: List[Conversation],
+        output_dir: Any = None,
+        checkpoint_manager: Any = None,
+        **kwargs,
+    ) -> dict:
+        """Clean OpenViking per-conversation memory namespaces before ingest."""
+        clean_groups = getattr(self, "config", {}).get("clean_groups")
+        if clean_groups and not kwargs.get("resume"):
+            await self._clean_openviking_groups(conversations)
+        elif clean_groups:
+            logger.info(
+                "clean_groups enabled, but resume=True; skipping OpenViking cleanup"
+            )
+        return await super().add(
+            conversations,
+            output_dir=output_dir,
+            checkpoint_manager=checkpoint_manager,
+            **kwargs,
+        )
+
+    def _openviking_cleanup_enabled(self) -> bool:
+        context_engine_mode = str(
+            self._openclaw_cfg.get("context_engine_mode") or ""
+        ).strip()
+        return context_engine_mode == "openviking" or bool(
+            self._openclaw_cfg.get("ov_ingest")
+        )
+
+    def _openviking_cleanup_plan_for_conv(self, conv_id: str) -> dict[str, Any]:
+        """Resolve OpenViking cleanup targets using the ingest tenant config."""
+        from evaluation.src.adapters.openclaw.ov_ingest import OVIngestClient
+
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        base_url = str(
+            cfg.get("base_url") or "http://127.0.0.1:1933"
+        ).rstrip("/")
+        api_key_env = cfg.get("api_key_env") or "OPENVIKING_API_KEY"
+        api_key = os.environ.get(str(api_key_env), "") if api_key_env else ""
+        account_id = cfg.get("account_id") or "default"
+        user_id = self._resolve_ov_tenant_field(
+            cfg, "user_id", "user_id_template", "{conv_id}", conv_id,
+        )
+        agent_id = self._resolve_ov_tenant_field(
+            cfg, "agent_id", "agent_id_template", "", conv_id,
+        ) or None
+
+        client = OVIngestClient(
+            base_url,
+            api_key=api_key,
+            account_id=account_id,
+            user_id=user_id,
+            agent_id=agent_id,
+        )
+        headers = client._headers()
+
+        targets: list[dict[str, Any]] = []
+        if user_id:
+            user_root = f"viking://user/{user_id}"
+            if agent_id and self._openviking_cleanup_bool(
+                cfg, "isolate_user_scope_by_agent", "isolateUserScopeByAgent",
+            ):
+                user_root = f"{user_root}/agent/{agent_id}"
+            targets.append({
+                "scope": "user",
+                "uri": f"{user_root}/memories",
+                "headers": headers,
+            })
+        if agent_id:
+            agent_root = f"viking://agent/{agent_id}"
+            if user_id and self._openviking_cleanup_bool(
+                cfg, "isolate_agent_scope_by_user", "isolateAgentScopeByUser",
+            ):
+                agent_root = f"{agent_root}/user/{user_id}"
+            targets.append({
+                "scope": "agent",
+                "uri": f"{agent_root}/memories",
+                "headers": headers,
+            })
+        return {"base_url": base_url, "targets": targets}
+
+    @staticmethod
+    def _openviking_cleanup_bool(
+        cfg: dict[str, Any],
+        snake_key: str,
+        camel_key: str,
+        default: bool = False,
+    ) -> bool:
+        value = cfg.get(snake_key)
+        if value is None:
+            value = cfg.get(camel_key, default)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    async def _clean_openviking_groups(
+        self,
+        conversations: List[Conversation],
+    ) -> None:
+        """Delete OpenViking memory namespaces for conversations being ingested."""
+        if not self._openviking_cleanup_enabled():
+            logger.info(
+                "clean_groups enabled, but OpenViking is not configured; skipping"
+            )
+            return
+
+        import aiohttp
+
+        deduped: list[tuple[str, dict[str, Any]]] = []
+        seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
+        for conv in conversations:
+            plan = self._openviking_cleanup_plan_for_conv(conv.conversation_id)
+            base_url = plan["base_url"]
+            for target in plan["targets"]:
+                headers = {
+                    str(k): str(v) for k, v in dict(target["headers"]).items()
+                }
+                key = (
+                    base_url,
+                    target["uri"],
+                    tuple(sorted(headers.items())),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append((base_url, {**target, "headers": headers}))
+
+        if not deduped:
+            logger.info("OpenViking clean_groups found no cleanup targets")
+            return
+
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        timeout_sec = float(cfg.get("cleanup_timeout_sec") or 60)
+        print("\nclean_groups enabled, clearing OpenViking memory namespaces...")
+        timeout = aiohttp.ClientTimeout(total=timeout_sec)
+        results: list[dict[str, Any]] = []
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            for base_url, target in deduped:
+                results.append(await self._delete_openviking_uri(
+                    http,
+                    base_url,
+                    target["uri"],
+                    target["headers"],
+                ))
+
+        deleted = sum(1 for item in results if item.get("status") == "deleted")
+        missing = sum(1 for item in results if item.get("status") == "missing")
+        logger.info(
+            "OpenViking clean_groups complete: deleted=%d missing=%d targets=%d",
+            deleted,
+            missing,
+            len(results),
+        )
+        print(
+            "OpenViking cleanup complete: "
+            f"deleted={deleted} missing={missing} targets={len(results)}\n"
+        )
+
+    async def _delete_openviking_uri(
+        self,
+        http: Any,
+        base_url: str,
+        uri: str,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """Delete one OpenViking URI through the filesystem API."""
+        url = f"{base_url.rstrip('/')}/api/v1/fs"
+        params = {"uri": uri, "recursive": "true"}
+        cfg = dict(self._openclaw_cfg.get("ov_ingest") or {})
+        max_retries = int(cfg.get("cleanup_max_retries") or 5)
+        retry_delay = float(cfg.get("cleanup_retry_delay_sec") or 2.0)
+
+        for attempt in range(max_retries + 1):
+            async with http.delete(url, headers=headers, params=params) as resp:
+                text = await resp.text()
+                if resp.status == 404:
+                    return {"uri": uri, "status": "missing", "http_status": 404}
+                if resp.status < 400:
+                    break
+                if (
+                    attempt < max_retries
+                    and resp.status == 409
+                    and self._openviking_cleanup_conflict_retryable(text)
+                ):
+                    logger.info(
+                        "OpenViking cleanup target busy for %s; retrying "
+                        "%d/%d in %.1fs",
+                        uri,
+                        attempt + 1,
+                        max_retries,
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise RuntimeError(
+                    f"OpenViking cleanup failed for {uri}: "
+                    f"HTTP {resp.status} {text[:500]}"
+                )
+
+        body: Any = {}
+        if text.strip():
+            try:
+                body = json.loads(text)
+            except json.JSONDecodeError:
+                body = {"raw": text}
+        if isinstance(body, dict) and body.get("status") == "error":
+            raise RuntimeError(
+                f"OpenViking cleanup failed for {uri}: {str(body)[:500]}"
+            )
+        result = body.get("result") if isinstance(body, dict) else None
+        return {
+            "uri": uri,
+            "status": "deleted",
+            "http_status": resp.status,
+            "result": result if isinstance(result, dict) else body,
+        }
+
+    @staticmethod
+    def _openviking_cleanup_conflict_retryable(text: str) -> bool:
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(body, dict):
+            return False
+        error = body.get("error")
+        if not isinstance(error, dict):
+            return False
+        details = error.get("details")
+        if not isinstance(details, dict):
+            details = {}
+        return bool(details.get("retryable")) or (
+            details.get("conflict_type") == "path_busy"
+        )
+
     # ---------------------------------------------------- container lifecycle
 
     async def _ensure_spawn_sem(self) -> asyncio.Semaphore:
@@ -156,7 +394,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         )
         # Optional host bind-mounts, opt-in via the OPENCLAW_EXTRA_MOUNTS env
         # var (``;``-separated docker ``-v`` specs, e.g.
-        # "/host/plugin:/app/extensions/openviking:ro"). Lets a run inject
+        # "/host/plugin:/opt/openclaw/extensions/openviking:ro"). Lets a run inject
         # local-source code (e.g. the openviking plugin from a fork checkout,
         # loaded in-container via jiti from source) over the baked image
         # without rebuilding it. Unset => no effect; image content is used
@@ -264,6 +502,7 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         # config already has enabled=true.
         await self._patch_memory_flush_enabled(cid, conv_id)
         await self._patch_streaming_usage_compat(cid, conv_id)
+        await self._patch_agent_llm_runtime_config(cid, conv_id)
 
     async def _patch_memory_flush_enabled(self, cid: str, conv_id: str) -> None:
         """Edit both /workspace/openclaw.json and /workspace/openclaw.docker.json
@@ -321,6 +560,38 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         if proc.returncode != 0:
             logger.warning(
                 "streaming usage compat patch failed for %s (cid=%s): %s",
+                conv_id, cid[:12], stderr.decode()[:200],
+            )
+
+    async def _patch_agent_llm_runtime_config(self, cid: str, conv_id: str) -> None:
+        """Patch baked docker config with yaml agent LLM runtime settings."""
+        from evaluation.src.adapters.openclaw.config_patches import (
+            build_agent_llm_runtime_jq,
+            shell_patch_openclaw_configs,
+        )
+
+        agent_llm = self._openclaw_cfg.get("agent_llm") or {}
+        model = agent_llm.get("model") or {}
+        model_max_tokens = model.get("max_tokens")
+        if model_max_tokens is None:
+            model_max_tokens = model.get("maxTokens")
+        jq_filter = build_agent_llm_runtime_jq(
+            model_max_tokens=model_max_tokens,
+            idle_timeout_seconds=agent_llm.get("idle_timeout_seconds"),
+        )
+        if jq_filter == ".":
+            return
+
+        cmd = shell_patch_openclaw_configs(jq_filter)
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", cid, "sh", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                "agent LLM runtime config patch failed for %s (cid=%s): %s",
                 conv_id, cid[:12], stderr.decode()[:200],
             )
 
@@ -560,6 +831,8 @@ class DockerizedOpenclawAdapter(OpenClawAdapter):
         until docker daemon timeout. Same-process leftovers (this PID's
         own containers) are skipped via ``self._docker_handles``.
         """
+        if os.environ.get("EVAL_SKIP_ORPHAN_SWEEP") == "1":
+            return
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker", "ps", "-q",

@@ -108,6 +108,16 @@ async def main():
         help="Ending conversation index to process (exclusive). Default: None (process all remaining)",
     )
     parser.add_argument(
+        "--conv-ids",
+        nargs="+",
+        default=None,
+        help=(
+            "Explicit conversation IDs or numeric suffixes to process, e.g. "
+            "--conv-ids locomo_4 locomo_3 locomo_8 or --conv-ids 4 3 8. "
+            "Takes precedence over --from-conv/--to-conv."
+        ),
+    )
+    parser.add_argument(
         "--run-name",
         type=str,
         default=None,
@@ -382,6 +392,7 @@ async def main():
             smoke_questions=args.smoke_questions,
             from_conv=args.from_conv,
             to_conv=args.to_conv,
+            conv_ids=args.conv_ids,
         )
 
         console.print(f"\n[bold green]✨ Evaluation completed![/bold green]")
