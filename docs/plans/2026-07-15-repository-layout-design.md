@@ -116,4 +116,3 @@ coverage, and a clean checkout. No local source artifact is removed until the
 tracked changes pass these gates and a keep/archive/delete manifest is reviewed.
 Atomic commits provide tracked rollback; archive checksums provide local-data
 rollback evidence.
-

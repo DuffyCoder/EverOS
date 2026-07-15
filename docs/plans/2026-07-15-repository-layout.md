@@ -472,4 +472,3 @@ be unchanged except for the ignored manifest itself.
 
 Do not move environment backups, create large archives, remove worktrees, or
 delete any result until the user approves this concrete manifest.
-
