@@ -408,6 +408,14 @@ Plugin ids and their kinds live in
 are recorded in `evaluation/config/image_manifest.yaml` and used by the
 CLI's image resolver.
 
+The base command used by `--build-missing` is declared per runtime in
+`evaluation/config/runtime_registry.yaml`. The shipped `openclaw-docker`
+entry points to the OpenClaw-owned builder; evaluation renders that argv and
+adds the existing memory-plugin, context-engine, and image-manifest flags.
+This removes the OpenClaw harness path from generic Python code, while the
+adapter and its build flags remain intentionally OpenClaw-specific. It does
+not make the evaluation implementation fully runtime-agnostic.
+
 ## 📄 License
 
 Same as the parent project.

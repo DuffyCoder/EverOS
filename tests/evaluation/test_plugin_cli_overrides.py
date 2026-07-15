@@ -1,6 +1,7 @@
 """Unit tests for evaluation.src.plugins.cli_overrides (PR3)."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -381,6 +382,20 @@ def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
     tests (returncode=0 is enough)."""
     cfg = _baseline_yaml()
     manifest_path = _seeded_manifest(tmp_path)
+    custom_builder = REPO_ROOT / "custom" / "build.py"
+    runtime_registry_path = tmp_path / "runtime_registry.yaml"
+    runtime_registry_path.write_text(
+        yaml.safe_dump(
+            {
+                "openclaw-docker": {
+                    "build_command": [
+                        "{python}",
+                        "{repo_root}/custom/build.py",
+                    ],
+                },
+            }
+        )
+    )
     target_image = "openclaw-eval:7da23c3-evermemos_install-hypercompositor-deadbee-slim"
     captured: dict[str, list[str]] = {}
 
@@ -410,12 +425,14 @@ def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
             image=None,
             build_missing=True,
             registry_path=SHIPPED_REGISTRY,
+            runtime_registry_path=runtime_registry_path,
             manifest_path=manifest_path,
         )
 
     argv = captured["argv"]
-    # First arg = sys.executable; second = build.py path
-    assert argv[1].endswith("build.py")
+    # The base command comes from the runtime registry, not a hard-coded path.
+    assert Path(argv[0]) == Path(sys.executable).absolute()
+    assert Path(argv[1]) == custom_builder
     # Must carry both plugin selections forward to build.py
     assert "--memory-plugin" in argv
     mp_idx = argv.index("--memory-plugin")

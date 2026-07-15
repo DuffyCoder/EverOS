@@ -9,6 +9,21 @@ It is **not** a faithful reproduction of OpenClaw running in production.
 Call it what it is: *OpenClaw retrieval stack embedded in the unified
 benchmark protocol*.
 
+## Runtime ownership boundary
+
+`evaluation/` owns the benchmark protocol, the OpenClaw adapter, and the
+shared plugin/manifest contracts. `openclaw-eval/` owns the container and
+image-build implementation and imports those shared contracts. When
+`--build-missing` is requested, evaluation obtains the `openclaw-docker` base
+argv from `evaluation/config/runtime_registry.yaml` instead of hard-coding the
+harness's internal path in Python, then appends the existing plugin and
+manifest flags.
+
+This is a declarative boundary for build invocation, not a claim that the
+current adapter is runtime-agnostic. The adapter behavior, runtime id, build
+flags, and manifest resolution are still specific to OpenClaw; only the
+builder location is supplied by the registry.
+
 The fidelity/comparability tradeoff is explicit. Three parts:
 
 ## Strictly faithful to OpenClaw

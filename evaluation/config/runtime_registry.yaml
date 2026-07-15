@@ -1,0 +1,10 @@
+# Evaluation runtime integration points.
+#
+# The generic evaluation layer selects a runtime by id and renders this argv;
+# runtime-specific plugin and manifest flags are appended by the caller.
+# Supported placeholders are {python} and {repo_root} only.
+
+openclaw-docker:
+  build_command:
+    - "{python}"
+    - "{repo_root}/openclaw-eval/harness/build.py"
