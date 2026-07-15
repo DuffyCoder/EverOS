@@ -2,6 +2,15 @@
 
 A unified, modular evaluation framework for benchmarking memory systems on standard datasets.
 
+## Repository Ownership
+
+`evaluation/data/` is the authoritative home for benchmark datasets.
+`data/locomo10.json` remains available only as an exact compatibility mirror of
+`evaluation/data/locomo/locomo10.json` for consumers of the legacy path.
+
+Similarly named system YAML files are independent configurations. They may
+diverge intentionally and are not compatibility mirrors.
+
 ## 📖 Overview
 
 ### Evaluation Scope

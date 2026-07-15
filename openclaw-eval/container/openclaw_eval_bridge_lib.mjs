@@ -1,3 +1,6 @@
+// Compatibility mirror. Canonical: openclaw-eval/container/openclaw_eval_bridge_lib.mjs.
+// Exact bytes are enforced by tests/evaluation/test_repository_mirrors.py.
+
 // Helpers extracted from openclaw_eval_bridge.mjs for unit testability.
 // The main bridge script imports these; test harnesses can import them
 // without triggering the bridge's readStdin() top-level CLI behavior.

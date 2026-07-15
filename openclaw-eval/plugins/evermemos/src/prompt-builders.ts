@@ -1,3 +1,6 @@
+// Compatibility mirror. Canonical: openclaw-eval/plugins/evermemos/src/prompt-builders.ts.
+// Exact bytes are enforced by tests/evaluation/test_repository_mirrors.py.
+
 // Pre-baked prompt-section variants for Stage 2 Track B ablation.
 //
 // Each plugin ships ALL THREE prompts so we can swap via env var
