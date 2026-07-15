@@ -112,7 +112,13 @@ python src/bootstrap.py src/devops_scripts/data_fix/mongo_fix_episodic_memory_mi
 
 - **Python 版本**：3.10+
 - **依赖管理**：使用 `uv` 或 `pip` 安装依赖
-- **配置文件**：确保 `config.json` 配置正确
+- **配置来源**：通过 `bootstrap.py --env-file` 加载环境文件（默认 `.env`，
+  变量清单以 `env.template` 为准）。MongoDB、Elasticsearch、Milvus 连接
+  分别由 `src/core/component/mongodb_client_factory.py` 中的
+  `MongoDBConfig.from_env()`、`src/core/component/elasticsearch_client_factory.py`
+  中的 `get_default_es_config()` 和
+  `src/core/component/milvus_client_factory.py` 中的 `get_milvus_config()`
+  解析。根 `config.json` 不参与这些脚本的配置加载。
 
 ### 权限要求
 
@@ -136,7 +142,7 @@ python src/bootstrap.py src/devops_scripts/data_fix/mongo_fix_episodic_memory_mi
 
 1. 检查网络连接（MongoDB、ES、Milvus）
 2. 检查服务是否正常运行
-3. 检查配置文件是否正确
+3. 检查 `--env-file` 指定的环境文件和对应 component config 是否正确
 4. 查看详细日志定位问题
 
 ### 性能问题
@@ -169,4 +175,3 @@ python src/bootstrap.py src/devops_scripts/data_fix/mongo_fix_episodic_memory_mi
 ## 📝 更新日志
 
 - **2025-10-22**: 创建文档，涵盖 ES、Milvus、MongoDB 维护脚本
-

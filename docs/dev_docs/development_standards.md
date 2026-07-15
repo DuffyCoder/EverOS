@@ -205,16 +205,22 @@ New developers joining the project, please follow this process to get configurat
    - Environment needed (development/testing)
    - Specific services to access
 3. **Receive configuration**: Operations lead will provide configuration files or environment variables
-4. **Local configuration**: Place configuration information in project's `config.json` or `.env` file (Note: these files are in `.gitignore`, won't be committed to repository)
+4. **Local configuration**: Put secret environment values in `.env` and use the
+   typed or component-specific runtime configuration owned by the relevant
+   subsystem. Do not add new settings or secrets to root `config.json`.
 
 #### 2. Configuration File Location
 
 ```bash
-# Configuration files in project root (do not commit to git)
-config.json          # Main configuration file
-.env                 # Environment variable configuration
-env.template         # Configuration template (reference, need to fill in real values)
+# Configuration sources in the project root
+.env                 # Local environment values; ignored, never commit
+env.template         # Tracked environment variable template
+config.json          # Tracked deprecated legacy file; compatibility only
 ```
+
+The current configuration sources are `.env`/`env.template` plus typed and
+component runtime configs. Root `config.json` is retained unchanged for legacy
+path compatibility; it is not the primary configuration source.
 
 #### 3. Environment Variable Examples
 
@@ -559,9 +565,26 @@ project_root/
 │   │   └── development_standards.md
 │   ├── architecture/           # Architecture documentation
 │   │   └── system_design.md
+│   ├── evaluation/             # Durable evaluation architecture and policy
+│   │   └── analysis/           # Local ignored reports; README/template tracked
 │   └── guides/                 # User guides
 │       └── getting_started.md
+├── evaluation/docs/            # Evaluation implementation and operations
+└── docs/superpowers/           # Historical plans and phase records
 ```
+
+Repository ownership rules:
+
+- `evaluation/` is the generic evaluation framework; `openclaw-eval/` is the
+  OpenClaw-specific runtime and may depend only on public framework contracts.
+- `evaluation/data/` is authoritative for benchmark datasets. `data/` contains
+  product demo inputs and compatibility mirrors.
+- Use `docs/evaluation/` for durable architecture, policy, and reproducibility;
+  use `evaluation/docs/` for instructions coupled to framework code.
+- Actual reports in `docs/evaluation/analysis/`, raw PDFs, supporting data, and
+  archive manifests in `evaluation/archives/` remain local and ignored.
+- Treat `docs/superpowers/` as historical context, not current policy. Validate
+  its commands and paths against current code before use.
 
 ### Naming Convention
 
@@ -1095,8 +1118,12 @@ The following directories in the project should maintain unified import paths:
 - `src/`: Main business code
 - `tests/`: Test code
 - `unit_test/`: Unit tests
-- `evaluation/`: Evaluation scripts
+- `evaluation/`: Generic evaluation framework imports
 - Other directories needing to be imported (e.g., `demo/`)
+
+`openclaw-eval/` is a component runtime, not a general import root. It may
+depend on public `evaluation/` interfaces; do not make `evaluation/` import
+OpenClaw runtime internals or hard-code that directory's layout.
 
 #### Recommended Practices
 

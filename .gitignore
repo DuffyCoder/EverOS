@@ -1,12 +1,11 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode and native extensions
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
+*.sage.py
 
-# Distribution / packaging
+# Distribution, packaging, and build output
 .Python
 build/
 develop-eggs/
@@ -26,18 +25,15 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+target/
 
-# Installer logs
+# Installer output
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
+# Tests, coverage, and type-checker caches
 htmlcov/
 .tox/
 .nox/
@@ -50,204 +46,151 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
 
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
+# Python environments and local configuration
 .env
+.env.bak*
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+__pypackages__/
+.python-version
+local_settings.py
 
-# Editor / operator backup files
-*.bak
-
-# Spyder project settings
+# Editor, notebook, and operating-system state
+.DS_Store
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
 .spyderproject
 .spyderworkspace
-
-# Rope project settings
 .ropeproject
+.vscode/*
+# Shared repository configuration; other VSCode state stays local.
+!.vscode/launch.json
+!.vscode/settings.json
 
-# mkdocs documentation
+# Documentation build output
+docs/_build/
 /site
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# Generated localization catalogs
+*.mo
+*.pot
 
-# Pyre type checker
-.pyre/
+# Framework and service runtime state
+db.sqlite3
+db.sqlite3-journal
+instance/
+.webassets-cache
+.scrapy
+celerybeat-schedule
+celerybeat.pid
+apollo_config/
 
-# Project specific
-outputs/
-.pytest_cache/
-
-evaluation/static_memory_evaluation/logs/
-evaluation/static_memory_evaluation/retrieval/
-evaluation/static_memory_evaluation/retrieval_bk/
-evaluation/static_memory_evaluation/analysis/
-memory_base/static_memory_base/bm25_index/
-memory_base/static_memory_base/hipporag/
-memory_base/static_memory_base/vector_search/
-
-# Demo related files
-demo/.chat_history
-demo/chat_history/
-demo/memcell_outputs/
-
-# macOS
-.DS_Store
-*.duckdb
-
-
-# Evaluation and memory data files
-evaluation_memory_offline/data/
-evaluation_memory_offline/temporary/
-
-# Dynamic memory files (runtime generated)
-memory_base/dynamic_memory_base/memory/
-# Evaluation results and large files
-evaluation/dynamic_memory_evaluation/locomo_results/*.json
-evaluation/dynamic_memory_evaluation/locomo_results/hipporag_index*/
-evaluation/dynamic_memory_evaluation/locomo_results/vector_index*/
-evaluation/dynamic_memory_evaluation/locomo_results/storages*
-# Large data files
-memory_base/static_memory_base/raw_data/*.json
-*.tar
-*.zip
-
-# Large evaluation files
-evaluation/memory_evaluation/converted_messages_all_from_1_1.jsonl
-evaluation/memory_evaluation/*.jsonl
-evaluation/memory_evaluation/*.json
-
-# LongMemEval datasets — operator-fetched, > 100MB per file. Locomo's
-# small bundled dataset stays tracked at evaluation/data/locomo/locomo10.json.
-evaluation/data/longmemeval/*.json
-evaluation/data/longmemeval/*.jsonl
-!evaluation/data/longmemeval/.gitkeep
-
-# Large log files
+# Logs, reports, and backups
 *.log
 su_ser.log
 service.log
 service_*.log
 nohup.out
-mongodb_backup/
-
-# Log directories
 logs/
 log/
+.runlogs/
+mongodb_backup/
+/reports/qa_logs/
+*.bak
 
-# Apollo config
-apollo_config/
+# Generic local output and archives
+outputs/
+tmp/
+*.duckdb
+*.tar
+*.zip
 
-# Exclude specific files from git tracking
-simple_query_memcell.py
-evaluation/memory_evaluation/extract_room_data.py
-evaluation/memory_evaluation/test.py
+# Runtime-generated memory data and indexes
+evaluation_memory_offline/data/
+evaluation_memory_offline/temporary/
+memory_base/dynamic_memory_base/memory/
+memory_base/static_memory_base/bm25_index/
+memory_base/static_memory_base/hipporag/
+memory_base/static_memory_base/vector_search/
+memory_base/static_memory_base/raw_data/*.json
+
+# Evaluation datasets fetched or generated by operators
+# The small bundled LoCoMo dataset remains tracked at
+# evaluation/data/locomo/locomo10.json.
+evaluation/data/longmemeval/*.json
+evaluation/data/longmemeval/*.jsonl
+!evaluation/data/longmemeval/.gitkeep
+evaluation/memory_evaluation/converted_messages_all_from_1_1.jsonl
+evaluation/memory_evaluation/*.jsonl
+evaluation/memory_evaluation/*.json
+
+# Evaluation results, archives, and local experiment state
 evaluation/results/
 evaluation/archives/
+evaluation/experiments/
+evaluation/static_memory_evaluation/logs/
+evaluation/static_memory_evaluation/retrieval/
+evaluation/static_memory_evaluation/retrieval_bk/
+evaluation/static_memory_evaluation/analysis/
+evaluation/dynamic_memory_evaluation/locomo_results/*.json
+evaluation/dynamic_memory_evaluation/locomo_results/hipporag_index*/
+evaluation/dynamic_memory_evaluation/locomo_results/vector_index*/
+evaluation/dynamic_memory_evaluation/locomo_results/storages*
+evaluation/locomo_evaluation/results/
+evaluation/locomo_evaluation/results_ref/
+*.ovdata.tgz
 
-# Large test files
+# Local evaluation analysis; policy and template remain versioned
+docs/evaluation/analysis/*
+!docs/evaluation/analysis/README.md
+!docs/evaluation/analysis/TEMPLATE.md
+docs/opt_docs
+
+# Demo runtime state
+demo/.chat_history
+demo/chat_history/
+demo/memcell_outputs/
+demo/results/
+
+# Large or generated test fixtures
 unit_test/memcell_outputs/
 unit_test/profile_outputs/
 unit_test/memcell_outputs.zip
 
-#temp test files
+# Legacy local-only helpers and generated files
+simple_query_memcell.py
+evaluation/memory_evaluation/extract_room_data.py
+evaluation/memory_evaluation/test.py
 export_mongodb_data.py
-
-#backup files
 src/memory_layer/memory_extractor/profile_memory_extractor keep llm merge.py
+evaluation/read_ov_search.py
 
-#LLM related
+# Agent and operator tooling
 AGENTS.mk
 docs/api_docs/profile_extraction_fields.md
 .claude/*
-# Routine-consumed files must be tracked; per-user settings stay ignored via .claude/*.
+# Routine-consumed files are shared; per-user state stays denied by default.
 !.claude/skills/
 !.claude/rules/
 !.claude/setup.sh
 !.claude/ROUTINE_PROMPT.md
 !.claude/FIRST_RUN_CHECKLIST.md
 .cursor/*
+.claire/
 
-#tmp_data
-demo/memcell_outputs/
-demo/results/
-evaluation/locomo_evaluation/results/
-evaluation/locomo_evaluation/results_ref/
-tmp/
-evaluation/locomo_evaluation/results_ref/demo/results/
-docs/opt_docs
-
-# i18n translation progress
+# Translation progress
 .translation_progress.json
 .review_progress.json
 
-# Editor
-.vscode/
-# qa_logs tool output
-/reports/qa_logs/
-
-# Local eval experiment scratch (run artifacts, OV data dumps) — not for VCS
-evaluation/experiments/
-*.ovdata.tgz
-# Ad-hoc local debug helper (decode ov_archive_search toolResults)
-evaluation/read_ov_search.py
-# Vendored OpenViking plugin tarball — build artifact, regenerate via `npm pack`
-# (consumed by Dockerfile.ov-patch at build time, see runbooks/openviking-patch-image.md)
+# Vendored OpenViking plugin tarball; regenerate with `npm pack`
 openclaw-eval/plugins/openviking/*.tgz

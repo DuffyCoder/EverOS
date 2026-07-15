@@ -1,13 +1,14 @@
-"""Regression test for .gitignore coverage of operator-fetched datasets.
+"""Regression test for repository-local .gitignore policy.
 
 Background: `evaluation/data/longmemeval/longmemeval_s_locomo_style.json`
 is a 265MB generated dataset that exceeds GitHub's 100MB per-file limit.
 Without an ignore rule, an unwary `git add evaluation/data/...` would
 stage it and the subsequent push would be rejected.
 
-This test exercises `git check-ignore` to confirm the rule is in place
-and is precise: longmemeval json/jsonl is ignored, but the small bundled
-`locomo10.json` and `.gitkeep` placeholders remain trackable.
+This test exercises `git check-ignore` to confirm the rules are in place
+and precise: generated datasets, local reports, logs, and agent scratch
+are ignored while bundled data, policy templates, and shared editor
+configuration remain trackable.
 """
 from __future__ import annotations
 
@@ -26,9 +27,23 @@ _PATHS = [
     "evaluation/data/longmemeval/longmemeval_s_cleaned.json",
     "evaluation/data/longmemeval/some_future_export.json",
     "evaluation/data/longmemeval/another.jsonl",
+    ".env.bak.1778308789",
+    ".claire/worktrees/example/output.py",
+    ".runlogs/eval.log",
+    ".runlogs/session.json",
+    "docs/evaluation/analysis/local-report.md",
+    ".vscode/local.code-workspace",
+    ".claude/private/session.json",
     # Expected NOT ignored:
     "evaluation/data/longmemeval/.gitkeep",
     "evaluation/data/locomo/locomo10.json",
+    "docs/evaluation/analysis/README.md",
+    "docs/evaluation/analysis/TEMPLATE.md",
+    ".vscode/launch.json",
+    ".vscode/settings.json",
+    ".claude/setup.sh",
+    ".claude/rules/example.md",
+    ".claude/skills/example/SKILL.md",
 ]
 
 
@@ -37,13 +52,14 @@ def ignored_map() -> dict[str, bool]:
     """One `git check-ignore` invocation across all paths instead of N
     subprocess starts. `--non-matching --verbose` outputs both ignored
     and non-ignored entries, so we can build a complete map in a single
-    call. A non-matching line is prefixed with '::' (no source rule)."""
+    call. `--no-index` also checks policy for already-tracked paths. A
+    non-matching line is prefixed with '::' (no source rule)."""
     if shutil.which("git") is None:
         pytest.skip("git CLI not available")
     result = subprocess.run(
         [
             "git", "-C", str(REPO_ROOT),
-            "check-ignore", "--verbose", "--non-matching", "--",
+            "check-ignore", "--verbose", "--non-matching", "--no-index", "--",
             *_PATHS,
         ],
         capture_output=True,
@@ -59,7 +75,8 @@ def ignored_map() -> dict[str, bool]:
         if "\t" not in line:
             continue
         prefix, path = line.rsplit("\t", 1)
-        out[path] = not prefix.startswith("::")
+        pattern = prefix.rsplit(":", 1)[-1]
+        out[path] = not prefix.startswith("::") and not pattern.startswith("!")
     return out
 
 
@@ -70,8 +87,22 @@ def ignored_map() -> dict[str, bool]:
         ("evaluation/data/longmemeval/longmemeval_s_cleaned.json", True),
         ("evaluation/data/longmemeval/some_future_export.json", True),
         ("evaluation/data/longmemeval/another.jsonl", True),
+        (".env.bak.1778308789", True),
+        (".claire/worktrees/example/output.py", True),
+        (".runlogs/eval.log", True),
+        (".runlogs/session.json", True),
+        ("docs/evaluation/analysis/local-report.md", True),
+        (".vscode/local.code-workspace", True),
+        (".claude/private/session.json", True),
         ("evaluation/data/longmemeval/.gitkeep", False),
         ("evaluation/data/locomo/locomo10.json", False),
+        ("docs/evaluation/analysis/README.md", False),
+        ("docs/evaluation/analysis/TEMPLATE.md", False),
+        (".vscode/launch.json", False),
+        (".vscode/settings.json", False),
+        (".claude/setup.sh", False),
+        (".claude/rules/example.md", False),
+        (".claude/skills/example/SKILL.md", False),
     ],
     ids=lambda p: p if isinstance(p, str) else None,
 )
@@ -80,10 +111,8 @@ def test_gitignore_coverage(
 ) -> None:
     """Verify each path's tracked/ignored status matches expectation.
 
-    Cases assert: the 265MB dataset and its symlink are ignored;
-    arbitrary future longmemeval json/jsonl artifacts are also ignored;
-    `.gitkeep` placeholder stays trackable; the bundled locomo dataset
-    is unaffected by the longmemeval rule.
+    Cases assert generated and private artifacts are ignored while
+    intentional repository-owned files stay trackable.
     """
     assert path in ignored_map, f"{path} missing from check-ignore output"
     assert ignored_map[path] is expected_ignored
