@@ -51,6 +51,7 @@ policy does not rename or consolidate them.
 
 ## Related Documentation
 
+- [Repository-layout compatibility baseline](compatibility-baseline.md)
 - [Framework operations](../../evaluation/docs/README.md)
 - [Local analysis policy and template](analysis/README.md)
 - [Historical evaluation records](../superpowers/README.md)
