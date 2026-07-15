@@ -151,6 +151,30 @@ type OvSearchInput = {
   limit?: number;
 };
 
+type ArchiveGrepMatch = {
+  line?: number;
+  uri?: string;
+  content?: string;
+};
+
+type ArchiveSearchSource =
+  | "messages.jsonl"
+  | "memory_diff.json"
+  | ".overview.md"
+  | ".abstract.md"
+  | "other";
+
+type ClassifiedArchiveSearchMatch = {
+  archiveTag: string;
+  content: string;
+  field?: string;
+  hidden: boolean;
+  index: number;
+  line: number;
+  source: ArchiveSearchSource;
+  uri: string;
+};
+
 type OpenClawPluginApi = {
   pluginConfig?: unknown;
   logger: PluginLogger;
@@ -181,6 +205,163 @@ type OpenClawPluginApi = {
 
 const DEFAULT_OPENCLAW_AGENT_ID = "main";
 const AUTO_RECALL_TIMEOUT_MS = 30_000;
+const ARCHIVE_SEARCH_OPT_ENV = "OPENVIKING_ARCHIVE_SEARCH_OPT";
+
+function archiveSearchOptEnabled(): boolean {
+  const raw = process.env[ARCHIVE_SEARCH_OPT_ENV]?.trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "legacy");
+}
+
+function archiveTagFromUri(uri: string): string {
+  return uri.match(/archive_\d+/)?.[0] ?? "unknown";
+}
+
+function basenameFromUri(uri: string): string {
+  return uri.split("/").filter(Boolean).at(-1) ?? "";
+}
+
+function classifyArchiveSearchSource(uri: string): ArchiveSearchSource {
+  const basename = basenameFromUri(uri);
+  if (
+    basename === "messages.jsonl" ||
+    basename === "memory_diff.json" ||
+    basename === ".overview.md" ||
+    basename === ".abstract.md"
+  ) {
+    return basename;
+  }
+  return "other";
+}
+
+function classifyMemoryDiffField(content: string): string | undefined {
+  const match = content.match(/^\s*"([^"]+)"\s*:/);
+  return match?.[1];
+}
+
+function classifyArchiveSearchMatch(
+  match: ArchiveGrepMatch,
+  index: number,
+): ClassifiedArchiveSearchMatch {
+  const uri = String(match.uri ?? "");
+  const source = classifyArchiveSearchSource(uri);
+  const content = String(match.content ?? "");
+  const field = source === "memory_diff.json" ? classifyMemoryDiffField(content) : undefined;
+  const hidden =
+    (source === "memory_diff.json" && field !== "after") ||
+    source === "other";
+  return {
+    archiveTag: archiveTagFromUri(uri),
+    content,
+    field,
+    hidden,
+    index,
+    line: Number(match.line ?? 0),
+    source,
+    uri,
+  };
+}
+
+function archiveSearchSourceRank(match: ClassifiedArchiveSearchMatch): number {
+  switch (match.source) {
+    case "messages.jsonl":
+      return 0;
+    case "memory_diff.json":
+      return 1;
+    case ".overview.md":
+      return 2;
+    case ".abstract.md":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function selectArchiveSearchMatches(
+  matches: ClassifiedArchiveSearchMatch[],
+  maxMatches: number,
+): ClassifiedArchiveSearchMatch[] {
+  const sorted = [...matches].sort((a, b) => {
+    const bySource = archiveSearchSourceRank(a) - archiveSearchSourceRank(b);
+    return bySource || a.index - b.index;
+  });
+  const distinctArchives = new Set(sorted.map((match) => match.archiveTag)).size;
+  const perArchiveLimit = distinctArchives > 1 ? 3 : maxMatches;
+  const selected: ClassifiedArchiveSearchMatch[] = [];
+  const selectedIndexes = new Set<number>();
+  const perArchiveCounts = new Map<string, number>();
+
+  for (const match of sorted) {
+    if (selected.length >= maxMatches) {
+      break;
+    }
+    const count = perArchiveCounts.get(match.archiveTag) ?? 0;
+    if (count >= perArchiveLimit) {
+      continue;
+    }
+    selected.push(match);
+    selectedIndexes.add(match.index);
+    perArchiveCounts.set(match.archiveTag, count + 1);
+  }
+
+  for (const match of sorted) {
+    if (selected.length >= maxMatches) {
+      break;
+    }
+    if (selectedIndexes.has(match.index)) {
+      continue;
+    }
+    selected.push(match);
+    selectedIndexes.add(match.index);
+  }
+
+  return selected;
+}
+
+function truncateArchiveSearchContent(content: string, maxLineLen: number): string {
+  return content.length > maxLineLen
+    ? content.slice(0, maxLineLen) + "...(truncated)"
+    : content;
+}
+
+function formatArchiveSearchMatch(
+  match: ClassifiedArchiveSearchMatch,
+  index: number,
+  maxLineLen: number,
+): string {
+  const fieldLine = match.field ? `\nfield: ${match.field}` : "";
+  const body = truncateArchiveSearchContent(match.content, maxLineLen);
+  return `## Match ${index + 1}: ${match.archiveTag}\nsource: ${match.source}${fieldLine}\nline: ${match.line}\n${body}`;
+}
+
+function formatLegacyArchiveSearchMatch(
+  match: ArchiveGrepMatch,
+  index: number,
+  maxLineLen: number,
+): string {
+  const uri = String(match.uri ?? "");
+  const archiveTag = archiveTagFromUri(uri);
+  const line = Number(match.line ?? 0);
+  const content = truncateArchiveSearchContent(String(match.content ?? ""), maxLineLen);
+  return `## Match ${index + 1}: ${archiveTag} (line ${line})\n${content}`;
+}
+
+function legacyArchiveSearchDescription(): string {
+  return "Keyword-grep across all archived original conversation messages of the current session. " +
+    "Use this whenever the [Session History Summary] does not contain the specific detail " +
+    "the user is asking about. Extract 2-3 concrete entity words from the question " +
+    "(names, places, objects, dates) and search each separately. " +
+    "Only conclude information is unavailable after trying at least 2 different keyword variations.";
+}
+
+function optimizedArchiveSearchDescription(): string {
+  return "Keyword-grep across all archived original conversation messages of the current session. " +
+    "Results are source-labeled; stale memory-diff fields such as before/uri are hidden. " +
+    "Use this whenever the [Session History Summary] does not contain the specific detail " +
+    "the user is asking about. Start with one high-signal query using concrete names, " +
+    "places, objects, dates, or distinctive phrases from the question. Avoid broad category " +
+    "words alone. Run one follow-up search only if the first result is empty or inconclusive " +
+    "and you have another concrete entity/date/object to try.";
+}
 
 /**
  * OpenViking `UserIdentifier` allows only [a-zA-Z0-9_-] for agent_id
@@ -1307,12 +1488,9 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
       (ctx: ToolContext) => ({
         name: "ov_archive_search",
         label: "Archive Search (OpenViking)",
-        description:
-          "Keyword-grep across all archived original conversation messages of the current session. " +
-          "Use this whenever the [Session History Summary] does not contain the specific detail " +
-          "the user is asking about. Extract 2-3 concrete entity words from the question " +
-          "(names, places, objects, dates) and search each separately. " +
-          "Only conclude information is unavailable after trying at least 2 different keyword variations.",
+        description: archiveSearchOptEnabled()
+          ? optimizedArchiveSearchDescription()
+          : legacyArchiveSearchDescription(),
         parameters: Type.Object({
           query: Type.String({
             description:
@@ -1361,35 +1539,91 @@ const mergeFindResults = (results: FindResult[]): FindResult => {
               agentId,
             });
 
-            if (!result.matches || result.matches.length === 0) {
+            const rawMatches = result.matches ?? [];
+            const rawMatchCount = result.match_count ?? result.count ?? rawMatches.length;
+            if (!archiveSearchOptEnabled()) {
+              if (rawMatches.length === 0) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: `No matches found for "${query}". Try a different keyword — ` +
+                      "the original conversation may use different wording than the question. " +
+                      "Try synonyms, related terms, or shorter fragments.",
+                  }],
+                  details: { query, matchCount: 0 },
+                };
+              }
+
+              const MAX_MATCHES = 12;
+              const MAX_LINE_LEN = 1500;
+              const shown = rawMatches.slice(0, MAX_MATCHES);
+              const blocks = shown.map((match, index) =>
+                formatLegacyArchiveSearchMatch(match, index, MAX_LINE_LEN),
+              );
+              const header = `Found ${rawMatches.length} match(es) for "${query}"` +
+                (rawMatches.length > MAX_MATCHES ? ` (showing first ${MAX_MATCHES})` : "") + ":";
               return {
-                content: [{
-                  type: "text",
-                  text: `No matches found for "${query}". Try a different keyword — ` +
-                    "the original conversation may use different wording than the question. " +
-                    "Try synonyms, related terms, or shorter fragments.",
-                }],
-                details: { query, matchCount: 0 },
+                content: [{ type: "text", text: header + "\n\n" + blocks.join("\n\n") }],
+                details: { query, matchCount: rawMatches.length },
               };
             }
 
-            const MAX_MATCHES = 12;
-            const MAX_LINE_LEN = 1500;
-            const shown = result.matches.slice(0, MAX_MATCHES);
-            const blocks = shown.map((m, i) => {
-              const archiveTag = m.uri.match(/archive_\d+/)?.[0] ?? "unknown";
-              const truncated = m.content.length > MAX_LINE_LEN
-                ? m.content.slice(0, MAX_LINE_LEN) + "…(truncated)"
-                : m.content;
-              return `## Match ${i + 1}: ${archiveTag} (line ${m.line})\n${truncated}`;
-            });
+            const classifiedMatches = rawMatches.map((match, index) =>
+              classifyArchiveSearchMatch(match, index),
+            );
+            const usableMatches = classifiedMatches.filter((match) => !match.hidden);
+            const hiddenMatchCount = classifiedMatches.length - usableMatches.length;
 
-            const header = `Found ${result.matches.length} match(es) for "${query}"` +
-              (result.matches.length > MAX_MATCHES ? ` (showing first ${MAX_MATCHES})` : "") + ":";
+            if (rawMatches.length === 0 || usableMatches.length === 0) {
+              const staleHint = rawMatches.length > 0
+                ? ` ${hiddenMatchCount} raw match(es) were hidden because they were stale memory-diff fields or metadata.`
+                : "";
+              return {
+                content: [{
+                  type: "text",
+                  text: `No relevant matches found for "${query}".${staleHint} Re-check the ` +
+                    "Session History Summary and run one more search only if you have another " +
+                    "concrete name, date, place, object, or distinctive phrase. Avoid broad " +
+                    "category terms and generic synonym loops.",
+                }],
+                details: {
+                  query,
+                  matchCount: 0,
+                  rawMatchCount,
+                  hiddenMatchCount,
+                  shownMatchCount: 0,
+                },
+              };
+            }
+
+            const MAX_MATCHES = 5;
+            const MAX_LINE_LEN = 700;
+            const shown = selectArchiveSearchMatches(usableMatches, MAX_MATCHES);
+            const blocks = shown.map((match, index) =>
+              formatArchiveSearchMatch(match, index, MAX_LINE_LEN),
+            );
+
+            const hiddenSuffix = hiddenMatchCount > 0
+              ? `; ${hiddenMatchCount} stale/metadata raw match(es) hidden`
+              : "";
+            const header = `Found ${usableMatches.length} relevant match(es) for "${query}"` +
+              ` (${rawMatchCount} raw${hiddenSuffix})` +
+              (usableMatches.length > MAX_MATCHES ? ` (showing first ${MAX_MATCHES})` : "") + ":";
 
             return {
               content: [{ type: "text", text: header + "\n\n" + blocks.join("\n\n") }],
-              details: { query, matchCount: result.matches.length },
+              details: {
+                query,
+                matchCount: usableMatches.length,
+                rawMatchCount,
+                hiddenMatchCount,
+                shownMatchCount: shown.length,
+                sourceCounts: usableMatches.reduce<Record<string, number>>((counts, match) => {
+                  const key = match.field ? `${match.source}:${match.field}` : match.source;
+                  counts[key] = (counts[key] ?? 0) + 1;
+                  return counts;
+                }, {}),
+              },
             };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);

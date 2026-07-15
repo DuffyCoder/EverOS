@@ -142,7 +142,11 @@ const ARCHIVE_BUDGET_RATIO = 0.15;
 const ARCHIVE_BUDGET_CAP = 8_000;
 const RESERVED_MIN = 20_000;
 const RESERVED_RATIO = 0.15;
-const ARCHIVE_INDEX_TRIM_LIMIT = 10;
+const DEFAULT_ARCHIVE_INDEX_TRIM_LIMIT = 20;
+const ARCHIVE_INDEX_TRIM_LIMIT_ENV = "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT";
+const ARCHIVE_INDEX_ORDER_ENV = "OPENVIKING_ARCHIVE_INDEX_ORDER";
+const ARCHIVE_SEARCH_OPT_ENV = "OPENVIKING_ARCHIVE_SEARCH_OPT";
+type ArchiveIndexOrder = "first" | "recent" | "off";
 
 function allocateContextBudget(totalBudget: number, instructionTokens = 0): ContextBudgets {
   const reserveFloor = totalBudget >= RESERVED_MIN * 2 ? RESERVED_MIN : 0;
@@ -151,6 +155,61 @@ function allocateContextBudget(totalBudget: number, instructionTokens = 0): Cont
   const archiveMemory = Math.min(usableBudget * ARCHIVE_BUDGET_RATIO, ARCHIVE_BUDGET_CAP);
   const sessionContext = Math.max(usableBudget - archiveMemory, 0);
   return { archiveMemory, sessionContext, reserved };
+}
+
+function archiveIndexTrimLimit(): number {
+  const raw = process.env[ARCHIVE_INDEX_TRIM_LIMIT_ENV]?.trim();
+  if (!raw) {
+    return DEFAULT_ARCHIVE_INDEX_TRIM_LIMIT;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_ARCHIVE_INDEX_TRIM_LIMIT;
+  }
+  return parsed;
+}
+
+function archiveIndexOrder(): ArchiveIndexOrder {
+  const raw = process.env[ARCHIVE_INDEX_ORDER_ENV]?.trim().toLowerCase();
+  if (raw === "off" || raw === "none" || raw === "disabled") {
+    return "off";
+  }
+  if (raw === "recent" || raw === "latest" || raw === "newest") {
+    return "recent";
+  }
+  return "first";
+}
+
+function archiveSearchOptEnabled(): boolean {
+  const raw = process.env[ARCHIVE_SEARCH_OPT_ENV]?.trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "legacy");
+}
+
+function archiveSequence(archiveId: string, fallback: number): number {
+  const match = archiveId.match(/archive_(\d+)/);
+  if (!match) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function selectArchiveIndexAbstracts(
+  preAbstracts: Array<{ archive_id: string; abstract: string }>,
+): Array<{ archive_id: string; abstract: string }> {
+  const limit = archiveIndexTrimLimit();
+  if (limit === 0 || archiveIndexOrder() === "off") {
+    return [];
+  }
+  if (archiveIndexOrder() !== "recent") {
+    return preAbstracts.slice(0, limit);
+  }
+  return [...preAbstracts]
+    .sort((a, b) =>
+      archiveSequence(String(b.archive_id ?? ""), -1) -
+      archiveSequence(String(a.archive_id ?? ""), -1)
+    )
+    .slice(0, limit);
 }
 
 function estimateTokens(messages: AgentMessage[]): number {
@@ -602,6 +661,25 @@ export function formatMessageFaithful(msg: OVMessage): string {
 }
 
 function buildSystemPromptAddition(): string {
+  const archiveSearchRules = archiveSearchOptEnabled()
+    ? [
+      "- If the Summary mentions a topic but lacks the specific detail asked,",
+      "  use the `ov_archive_search` tool once with one high-signal query made from",
+      "  concrete names, dates, places, objects, or distinctive phrases. Avoid broad",
+      "  category words alone, such as sport, hobby, thing, place, or activity.",
+      "- Run at most one follow-up archive search only when the first result is",
+      "  empty or inconclusive and you have another concrete entity/date/object from",
+      "  the question or Archive Index. Do not loop through generic synonyms.",
+      "- Conclude information is unavailable after carefully checking the Summary",
+      "  and those bounded archive searches.",
+    ]
+    : [
+      "- If the Summary mentions a topic but lacks the specific detail asked,",
+      "  use the `ov_archive_search` tool to grep the original archived messages",
+      "  for the exact detail. Try 2-3 different keywords extracted from the question.",
+      "- Only conclude information is unavailable AFTER both checking the Summary",
+      "  thoroughly AND searching the archives with at least 2 keyword variations.",
+    ];
   return [
     "## Session Context Guide",
     "",
@@ -623,11 +701,7 @@ function buildSystemPromptAddition(): string {
     "  you MUST carefully re-read EVERY section of the [Session History Summary].",
     "  The answer may be expressed with different wording than the question.",
     "  Look for synonyms, related facts, and indirect references.**",
-    "- If the Summary mentions a topic but lacks the specific detail asked,",
-    "  use the `ov_archive_search` tool to grep the original archived messages",
-    "  for the exact detail. Try 2-3 different keywords extracted from the question.",
-    "- Only conclude information is unavailable AFTER both checking the Summary",
-    "  thoroughly AND searching the archives with at least 2 keyword variations.",
+    ...archiveSearchRules,
   ].join("\n");
 }
 
@@ -638,7 +712,7 @@ function buildInstructionPrompt(): { text: string; tokens: number } {
 
 function buildArchiveMemory(
   archiveOverview: string | undefined,
-  _preAbstracts: Array<{ archive_id: string; abstract: string }>,
+  preAbstracts: Array<{ archive_id: string; abstract: string }>,
   _budget: number,
 ): { messages: AgentMessage[]; tokens: number } {
   const messages: AgentMessage[] = [];
@@ -647,6 +721,24 @@ function buildArchiveMemory(
     messages.push({
       role: "user",
       content: `[Session History Summary]\n${archiveOverview}`,
+    });
+  }
+
+  const archiveIndexLines = selectArchiveIndexAbstracts(preAbstracts)
+    .map((entry) => {
+      const archiveId = String(entry.archive_id ?? "").trim();
+      const abstract = String(entry.abstract ?? "").replace(/\s+/g, " ").trim();
+      if (!archiveId || !abstract) {
+        return "";
+      }
+      return `${archiveId}: ${abstract}`;
+    })
+    .filter((line) => line.length > 0);
+
+  if (archiveIndexLines.length > 0) {
+    messages.push({
+      role: "user",
+      content: `[Archive Index]\n${archiveIndexLines.join("\n")}`,
     });
   }
 
