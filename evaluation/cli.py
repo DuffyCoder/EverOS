@@ -7,10 +7,11 @@ Usage:
     python -m evaluation.cli --dataset locomo --system evermemos --stages search answer evaluate
 """
 
-import asyncio
 import argparse
+import asyncio
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 # Environment initialization - must be done before importing EverMemOS components
@@ -29,40 +30,23 @@ from common_utils.load_env import setup_environment
 
 setup_environment(load_env_file_name=".env", check_env_var="MONGODB_HOST")
 
+from evaluation.src.adapters.registry import create_adapter
+from evaluation.src.config.cli_support import (
+    default_result_dir,
+    prepare_system_config_for_cli,
+    resolve_system_for_cli,
+    system_cli_warnings,
+)
+from evaluation.src.config.system_metadata import write_resolved_system_metadata
 from evaluation.src.core.loaders import load_dataset
 from evaluation.src.core.pipeline import Pipeline
-from evaluation.src.adapters.registry import create_adapter
 from evaluation.src.evaluators.registry import create_evaluator
-from evaluation.src.plugins.cli_overrides import apply_plugin_overrides
 from evaluation.src.utils.config import load_yaml
 from evaluation.src.utils.logger import get_console
-
 from memory_layer.llm.llm_provider import LLMProvider
 
 
-def deep_merge_config(base: dict, override: dict) -> dict:
-    """
-    Deep merge configuration dictionaries.
-
-    Args:
-        base: Base configuration
-        override: Override configuration
-
-    Returns:
-        Merged configuration
-    """
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            # Recursively merge nested dictionaries
-            result[key] = deep_merge_config(result[key], value)
-        else:
-            # Direct override
-            result[key] = value
-    return result
-
-
-async def main():
+async def main(argv: Sequence[str] | None = None):
     """Main function."""
     parser = argparse.ArgumentParser(description="Memory System Evaluation Framework")
 
@@ -133,7 +117,7 @@ async def main():
         "--clean-groups",
         action="store_true",
         help="Before Add stage, clear database data for the groups (group_id=conversation_id) involved in this run. "
-             "Useful for debugging to avoid polluted data.",
+        "Useful for debugging to avoid polluted data.",
     )
     # Phase 2 latency-alignment controls. See docs/latency-alignment.md.
     parser.add_argument(
@@ -206,7 +190,16 @@ async def main():
             "minute docker builds during eval."
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--adopt-legacy-result-dir",
+        action="store_true",
+        help=(
+            "One-time acknowledgement for resuming a pre-metadata result "
+            "directory that contains recognized checkpoint/progress artifacts. "
+            "The old checkpoint remains explicitly unverified."
+        ),
+    )
+    args = parser.parse_args(argv)
 
     console = get_console()
 
@@ -221,7 +214,7 @@ async def main():
     )
     if not dataset_config_path.exists():
         console.print(f"[red]❌ Dataset config not found: {dataset_config_path}[/red]")
-        return
+        raise SystemExit(2)
 
     dataset_config = load_yaml(str(dataset_config_path))
     console.print(f"  ✅ Loaded dataset config: {args.dataset}")
@@ -233,52 +226,70 @@ async def main():
             f"  🌐 Memory language: {dataset_config['memory_language']} (from dataset config)"
         )
 
-    # Load system configuration
-    system_config_path = evaluation_root / "config" / "systems" / f"{args.system}.yaml"
-    if not system_config_path.exists():
-        console.print(f"[red]❌ System config not found: {system_config_path}[/red]")
-        return
-
-    system_config = load_yaml(str(system_config_path))
+    systems_root = evaluation_root / "config" / "systems"
+    resolution = resolve_system_for_cli(args.system, systems_root=systems_root)
     console.print(f"  ✅ Loaded system config: {args.system}")
-
-    # Apply dataset-specific configuration overrides
-    if (
-        "dataset_overrides" in system_config
-        and args.dataset in system_config["dataset_overrides"]
-    ):
-        overrides = system_config["dataset_overrides"][args.dataset]
-        # Deep merge override configurations (supports nested field overrides)
-        system_config = deep_merge_config(system_config, overrides)
+    if resolution.requested_id != resolution.canonical_id:
         console.print(
-            f"  🔧 Applied dataset overrides for {args.dataset}: {list(overrides.keys())}"
+            f"  ↪ Resolved system: {resolution.requested_id} → "
+            f"{resolution.canonical_id}"
+        )
+    for warning in system_cli_warnings(resolution):
+        console.print(f"  [yellow]⚠️  {warning}[/yellow]")
+
+    selected_override = None
+    dataset_overrides = resolution.config.get("dataset_overrides")
+    if isinstance(dataset_overrides, dict):
+        candidate = dataset_overrides.get(args.dataset)
+        if isinstance(candidate, dict):
+            selected_override = candidate
+    if selected_override is not None:
+        console.print(
+            f"  🔧 Applied dataset overrides for {args.dataset}: "
+            f"{list(selected_override.keys())}"
         )
 
-    # Apply CLI plugin overrides. When any of --memory-plugin /
-    # --context-engine / --image is passed, override
-    # the corresponding yaml fields. Image is auto-resolved from
-    # image_manifest.yaml when plugin overrides are passed.
-    plugin_override = apply_plugin_overrides(
-        system_config,
+    prepared = prepare_system_config_for_cli(
+        resolution,
+        dataset_id=args.dataset,
+        clean_groups=bool(args.clean_groups),
         memory_plugin=args.memory_plugin,
         context_engine=args.context_engine,
         image=args.image,
         build_missing=args.build_missing,
     )
-    if plugin_override.memory_mode_applied is not None:
+    for warning in prepared.warnings:
+        console.print(f"  [yellow]⚠️  {warning}[/yellow]")
+    for finding in prepared.runtime_policy_findings:
         console.print(
-            f"  🔧 CLI override: openclaw.memory_mode = "
-            f"{plugin_override.memory_mode_applied!r}"
+            f"  [yellow]⚠️  Legacy runtime policy finding "
+            f"{finding.pointer or '<root>'} [{finding.code}]: "
+            f"{finding.message}[/yellow]"
         )
-    if plugin_override.context_engine_mode_applied is not None:
-        ce_display = plugin_override.context_engine_mode_applied or "(unset)"
+
+    plugin_override = prepared.plugin_override
+    system_config = prepared.config
+    if plugin_override is None:
+        plugin_override_memory = None
+        plugin_override_context = None
+        plugin_override_image = None
+    else:
+        plugin_override_memory = plugin_override.memory_mode_applied
+        plugin_override_context = plugin_override.context_engine_mode_applied
+        plugin_override_image = plugin_override.image_resolved
+    if plugin_override_memory is not None:
+        console.print(
+            f"  🔧 CLI override: openclaw.memory_mode = {plugin_override_memory!r}"
+        )
+    if plugin_override_context is not None:
+        ce_display = plugin_override_context or "(unset)"
         console.print(
             f"  🔧 CLI override: openclaw.context_engine_mode = {ce_display!r}"
         )
-    if plugin_override.image_resolved:
+    if plugin_override_image:
         console.print(
             f"  🔧 CLI override: openclaw_docker.image = "
-            f"{plugin_override.image_resolved!r}"
+            f"{plugin_override_image!r}"
             + (" (built on demand)" if plugin_override.triggered_build else "")
         )
 
@@ -301,7 +312,7 @@ async def main():
             console.print(
                 f"[red]❌ Data not found in evaluation/data/ or project root data/[/red]"
             )
-            return
+            raise SystemExit(2)
 
     # Get max_content_length from dataset config (if specified)
     max_content_length = dataset_config.get("data", {}).get("max_content_length", None)
@@ -321,29 +332,34 @@ async def main():
     if args.output_dir:
         output_dir = Path(args.output_dir)
     else:
-        # Generate output directory name based on run_name presence
-        if args.run_name:
-            output_dir = (
-                evaluation_root
-                / "results"
-                / f"{args.dataset}-{args.system}-{args.run_name}"
-            )
-        else:
-            output_dir = evaluation_root / "results" / f"{args.dataset}-{args.system}"
+        output_dir = default_result_dir(
+            evaluation_root,
+            dataset_id=args.dataset,
+            requested_system_id=args.system,
+            run_name=args.run_name,
+        )
 
     # Create components
     console.print(f"\n[bold cyan]Initializing components...[/bold cyan]")
 
-    # Add dataset_name to system_config for adapter initialization
-    # (Used to determine num_workers based on adapter + dataset combination)
-    system_config["dataset_name"] = args.dataset
-    # Pass CLI switch down to adapter via config (adapters can opt-in)
-    system_config["clean_groups"] = bool(args.clean_groups)
+    metadata_result = write_resolved_system_metadata(
+        resolution,
+        system_config,
+        prepared.runtime_context,
+        output_dir,
+        args.dataset,
+        systems_root=systems_root,
+        adopt_legacy=bool(args.adopt_legacy_result_dir),
+    )
+    if metadata_result.warning:
+        console.print(f"  [bold yellow]⚠️  {metadata_result.warning}[/bold yellow]")
+
+    # Transient context is deliberately injected only after final validation
+    # and provenance verification, immediately before adapter construction.
+    adapter_config = prepared.adapter_config()
 
     # Create adapter (pass output_dir for persistence)
-    adapter = create_adapter(
-        system_config["adapter"], system_config, output_dir=output_dir
-    )
+    adapter = create_adapter(resolution.adapter, adapter_config, output_dir=output_dir)
     console.print(f"  ✅ Created adapter: {adapter.get_system_info()['name']}")
 
     # Create evaluator
@@ -353,7 +369,7 @@ async def main():
     console.print(f"  ✅ Created evaluator: {evaluator.get_name()}")
 
     # Create LLM Provider for answer generation
-    llm_config = system_config.get("llm", {})
+    llm_config = adapter_config.get("llm", {})
     llm_provider = LLMProvider(
         provider_type=llm_config.get("provider", "openai"),
         model=llm_config.get("model"),

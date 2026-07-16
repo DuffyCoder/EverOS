@@ -421,6 +421,7 @@ def _make_archive_plan_fixture(tmp_path: Path) -> Path:
         "content-overlap.json",
         "resolved_config.yaml",
         "config/resolved-config.json",
+        "resolved-system-config.json",
         "report.md",
         "report-details.txt",
         "run.log",
@@ -487,6 +488,7 @@ def test_plan_archive_includes_compact_evidence_and_explains_every_exclusion(
         "content-overlap.json",
         "resolved_config.yaml",
         "config/resolved-config.json",
+        "resolved-system-config.json",
         "report.md",
         "report-details.txt",
         "run.log",
@@ -500,6 +502,7 @@ def test_plan_archive_includes_compact_evidence_and_explains_every_exclusion(
     }
     assert set(included) == expected_included
     assert all(entry["size"] > 0 and entry["reason"] for entry in included.values())
+    assert included["resolved-system-config.json"]["reason"] == "resolved_config"
 
     excluded = {entry["path"]: entry["reason"] for entry in plan["excluded"]}
     assert excluded["random.bin"] == "not_compact_evidence"

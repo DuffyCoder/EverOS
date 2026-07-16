@@ -8,8 +8,14 @@ A unified, modular evaluation framework for benchmarking memory systems on stand
 `data/locomo10.json` remains available only as an exact compatibility mirror of
 `evaluation/data/locomo/locomo10.json` for consumers of the legacy path.
 
-Similarly named system YAML files are independent configurations. They may
-diverge intentionally and are not compatibility mirrors.
+Public system ids are registered in
+`evaluation/config/systems/index.yaml`. The CLI resolves aliases and
+inheritance through that registry instead of assuming that every id has a
+same-named flat YAML file. Alias runs retain the requested id in their result
+directory (for example, `openclaw-hybrid` still writes under
+`locomo-openclaw-hybrid`) while run metadata records the canonical target.
+Unknown or invalid ids exit non-zero; unknown-id errors include close matches,
+and experimental or deprecated entries emit a visible warning.
 
 ## 📖 Overview
 
@@ -246,10 +252,26 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name e
 uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name 20241107
 
 # Resume from checkpoint if interrupted (automatic)
-# Just re-run the same command - it will detect and resume from checkpoint
+# Matching resolved-system metadata is verified before the adapter starts.
+# Just re-run the same command to resume a verified checkpoint.
 uv run python -m evaluation.cli --dataset locomo --system evermemos
 
+# One-time migration for a pre-metadata result directory. This is accepted
+# only when a recognized checkpoint/progress artifact exists, and the old
+# checkpoint is permanently marked adopted-legacy-unverified.
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
+    --adopt-legacy-result-dir
+
 ```
+
+Every new result directory contains `resolved-system-config.json`. It records
+the requested and canonical ids, source chain, redacted configuration,
+environment-variable names, and deterministic redacted hashes. Resume is
+refused before adapter construction if this provenance does not match the
+current dataset, source/alias chain, configuration, or runtime context. A
+non-empty pre-migration directory without metadata is also refused unless the
+one-time adoption flag above is supplied; arbitrary files are not sufficient
+evidence for adoption.
 
 ### View Results
 
@@ -272,6 +294,7 @@ cat evaluation/results/locomo-evermemos/pipeline.log
 - `answer_results.json` - Generated answers and retrieved context
 - `search_results.json` - Retrieved memories for each question
 - `pipeline.log` - Detailed execution logs
+- `resolved-system-config.json` - Redacted configuration and resume provenance
 
 ## 📊 Understanding Results
 
@@ -358,12 +381,17 @@ If you have already done search, and you want to do it again, please remove the 
 
 ### Custom Configuration
 
-Modify system or dataset configurations:
+Custom system configurations must be registered; an unindexed YAML filename is
+not a selectable public id:
 
 ```bash
 # Copy and edit configuration
 cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_custom.yaml
 # Edit evermemos_custom.yaml with your changes
+# Add an evermemos_custom entry with path: evermemos_custom.yaml to
+# evaluation/config/systems/index.yaml
+# Repository maintainers must also update the locked public-id contract in
+# evaluation/src/config/system_index.py and its index/baseline tests.
 
 # Run with custom config
 uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
@@ -385,7 +413,7 @@ context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
 > `--build-missing` flags are honored by the
 > `openclaw-docker` adapter only. Other adapters (mem0, memos, zep,
 > evermemos online API, …) do not consume these flags; pass them and
-> the eval will run, but the flags will have no effect on those
+> the eval will run with one concise warning, but the flags will have no effect on those
 > systems. The image_resolver also only applies to openclaw-docker.
 
 ```bash

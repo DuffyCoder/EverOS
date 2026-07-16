@@ -11,9 +11,12 @@ from types import ModuleType
 import pytest
 import yaml
 
+from evaluation.src.config.cli_support import default_result_dir
+from evaluation.src.config.system_index import load_system_index
+from evaluation.src.config.system_loader import resolve_system_config
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = Path(__file__).resolve().parent
-SYSTEMS_DIR = REPO_ROOT / "evaluation" / "config" / "systems"
 FIXTURES_DIR = TESTS_DIR / "fixtures"
 BASELINE_PATH = FIXTURES_DIR / "system_configs_before_cleanup.json"
 APPROVED_DELTAS_PATH = FIXTURES_DIR / "system_config_approved_deltas.yaml"
@@ -58,6 +61,26 @@ EXPECTED_SYSTEM_IDS = {
 }
 
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
+FAKE_ENVIRONMENT = {
+    "EVERMEMOS_API_KEY": "evermemos-key",
+    "EVERMEMOS_API_URL": "https://memory.example/api/v1/memories",
+    "HERMES_REPO_PATH": "/tmp/hermes",
+    "LLM_API_KEY": "llm-key",
+    "LLM_BASE_URL": "https://llm.example/v1",
+    "LLM_MODEL": "test-model",
+    "MEM0_API_KEY": "mem0-key",
+    "MEMOS_KEY": "memos-key",
+    "MEMU_API_KEY": "memu-key",
+    "OPENCLAW_EMBED_MODEL": "embedding-model",
+    "OPENCLAW_EMBED_PROVIDER": "test-provider",
+    "OPENCLAW_REPO_PATH": "/tmp/openclaw",
+    "OPENVIKING_API_KEY": "openviking-key",
+    "OPENVIKING_INGEST_URL": "http://127.0.0.1:1933",
+    "SOPH_API_KEY": "embed-key",
+    "SOPH_EMBED_EASYLLM_ID": "deployment",
+    "SOPH_EMBED_URL": "https://embed.example/v1",
+    "ZEP_API_KEY": "zep-key",
+}
 
 
 def _load_test_module(name: str) -> ModuleType:
@@ -74,9 +97,11 @@ def _load_test_module(name: str) -> ModuleType:
 
 
 def test_legacy_system_id_surface_is_locked() -> None:
-    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    index = load_system_index()
 
-    assert legacy.legacy_system_ids(REPO_ROOT) == EXPECTED_SYSTEM_IDS
+    assert set(baseline) == EXPECTED_SYSTEM_IDS
+    assert set(index.systems) == EXPECTED_SYSTEM_IDS
 
 
 def test_normalized_raw_config_preserves_environment_markers(
@@ -300,11 +325,36 @@ def test_json_pointer_differences_are_exact_and_escaped() -> None:
 def test_fixture_captures_the_locked_surface_without_expanding_secrets() -> None:
     legacy = _load_test_module("system_config_legacy")
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
 
     assert set(baseline) == EXPECTED_SYSTEM_IDS
-    assert yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8")) == {
-        "deltas": {}
-    }
+    assert isinstance(approved_document, dict)
+    assert set(approved_document) == {"deltas"}
+    assert isinstance(approved_document["deltas"], dict)
+    for system_id, entries in approved_document["deltas"].items():
+        assert system_id in EXPECTED_SYSTEM_IDS
+        assert isinstance(entries, list)
+        seen: set[tuple[str, str]] = set()
+        for entry in entries:
+            assert isinstance(entry, dict)
+            assert set(entry) in (
+                {"pointer", "classification", "rationale"},
+                {"pointer", "classification", "rationale", "surface"},
+            )
+            assert isinstance(entry["pointer"], str)
+            assert entry["pointer"] == "" or entry["pointer"].startswith("/")
+            assert entry["classification"] in {
+                "structure-only",
+                "security-fix",
+                "behavior-fix",
+            }
+            assert isinstance(entry["rationale"], str)
+            assert entry["rationale"].strip()
+            surface = entry.get("surface", "raw")
+            assert surface in {"raw", "effective"}
+            key = (surface, entry["pointer"])
+            assert key not in seen
+            seen.add(key)
 
     registered_adapters = set(
         __import__(
@@ -338,31 +388,71 @@ def test_fixture_captures_the_locked_surface_without_expanding_secrets() -> None
     assert "machine-local-baseline-secret" not in serialized
 
 
-def test_every_legacy_yaml_is_a_mapping_with_a_registered_adapter() -> None:
+def test_every_legacy_id_resolves_with_a_registered_adapter() -> None:
     legacy = _load_test_module("system_config_legacy")
     from evaluation.src.adapters.registry import list_adapters
 
     registered_adapters = set(list_adapters())
-    for path in sorted(SYSTEMS_DIR.glob("*.yaml")):
-        if path.name == "index.yaml":
-            continue
-        raw = legacy.normalized_raw_config(path)
-        assert "adapter" in raw, path
-        assert raw["adapter"] in registered_adapters, path
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+    approved = approved_document["deltas"]
+
+    for system_id, expected in baseline.items():
+        resolved = resolve_system_config(
+            system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
+        )
+        assert resolved.adapter in registered_adapters
+        assert resolved.adapter == expected["adapter"]
+        assert resolved.canonical_id == expected["canonical_id"]
+        assert (
+            default_result_dir(
+                REPO_ROOT / "evaluation",
+                dataset_id="locomo",
+                requested_system_id=resolved.requested_id,
+                run_name=None,
+            ).name
+            == expected["default_result_suffix"]
+        )
+
+        raw_differences = legacy.json_pointer_differences(
+            expected["raw_config"], resolved.raw_config
+        )
+        allowed_raw = {
+            item["pointer"]
+            for item in approved.get(system_id, [])
+            if item["classification"]
+            in {"structure-only", "security-fix", "behavior-fix"}
+            and item.get("surface", "raw") == "raw"
+        }
+        assert raw_differences == allowed_raw, (
+            system_id,
+            sorted(raw_differences ^ allowed_raw),
+        )
+        if not raw_differences:
+            assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+
+        effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+        effective_differences = legacy.json_pointer_differences(
+            expected["effective_config"], effective
+        )
+        allowed_effective = {
+            item["pointer"]
+            for item in approved.get(system_id, [])
+            if item["classification"] in {"security-fix", "behavior-fix"}
+            and item.get("surface") == "effective"
+        }
+        assert effective_differences == allowed_effective, (
+            system_id,
+            sorted(effective_differences ^ allowed_effective),
+        )
+        if not effective_differences:
+            assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(
     tmp_path: Path,
 ) -> None:
     generator = _load_test_module("generate_system_config_baseline")
-    first = generator.build_baseline(REPO_ROOT)
-    second = generator.build_baseline(REPO_ROOT)
-
-    assert first == second
-    assert first == json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    assert list(first) == sorted(first)
-    assert "index" not in first
-
     temporary_repo = tmp_path / "repo"
     temporary_systems = temporary_repo / "evaluation" / "config" / "systems"
     temporary_systems.mkdir(parents=True)
@@ -370,8 +460,17 @@ def test_generator_build_is_deterministic_and_rejects_reserved_index(
     (temporary_systems / "example.yaml").write_text(
         "adapter: evermemos\n", encoding="utf-8"
     )
+    (temporary_systems / "alpha.yaml").write_text(
+        "adapter: mem0\napi_key: ${MEM0_API_KEY}\n", encoding="utf-8"
+    )
 
-    assert set(generator.build_baseline(temporary_repo)) == {"example"}
+    first = generator.build_baseline(temporary_repo)
+    second = generator.build_baseline(temporary_repo)
+
+    assert first == second
+    assert list(first) == ["alpha", "example"]
+    assert "index" not in first
+    assert first["alpha"]["raw_config"]["api_key"] == "${MEM0_API_KEY}"
 
 
 def test_generator_default_creation_does_not_probe_target(
