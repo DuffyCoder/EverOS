@@ -1,0 +1,4048 @@
+{
+  "evermemos": {
+    "adapter": "evermemos",
+    "canonical_id": "evermemos",
+    "default_result_suffix": "locomo-evermemos",
+    "effective_config": {
+      "adapter": "evermemos",
+      "description": "EverMemOS",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 16384,
+        "model": "${LLM_MODEL}",
+        "provider": "openai"
+      },
+      "name": "evermemos",
+      "search": {
+        "mode": "agentic"
+      },
+      "version": "1.0"
+    },
+    "effective_sha256": "4f14a65a1ebbe3369243f37d4e25e60ff31f02784ecca4e0ec5d2502db175166",
+    "raw_config": {
+      "adapter": "evermemos",
+      "description": "EverMemOS",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 16384,
+        "model": "${LLM_MODEL}",
+        "provider": "openai"
+      },
+      "name": "evermemos",
+      "search": {
+        "mode": "agentic"
+      },
+      "version": "1.0"
+    },
+    "raw_sha256": "4f14a65a1ebbe3369243f37d4e25e60ff31f02784ecca4e0ec5d2502db175166"
+  },
+  "evermemos_cloud_api": {
+    "adapter": "evermemos_api",
+    "canonical_id": "evermemos_cloud_api",
+    "default_result_suffix": "locomo-evermemos_cloud_api",
+    "effective_config": {
+      "adapter": "evermemos_api",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${EVERMEMOS_API_KEY}",
+      "base_url": "${EVERMEMOS_API_URL:https://api.evermind.ai/api/v1/memories}",
+      "description": "EverMemOS via HTTP Memory API",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 3,
+      "name": "evermemos_api",
+      "num_workers": 10,
+      "request_interval": 0.0,
+      "search": {
+        "memory_types": [
+          "episodic_memory"
+        ],
+        "num_workers": 10,
+        "retrieve_method": "agentic",
+        "scope": "group",
+        "top_k": 10
+      },
+      "sync_mode": true,
+      "timeout_seconds": 60,
+      "version": "1.0"
+    },
+    "effective_sha256": "f679f467d91f4711546dba56ea1439503775ff1a5b22aa7c08b55406f49e713e",
+    "raw_config": {
+      "adapter": "evermemos_api",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${EVERMEMOS_API_KEY}",
+      "base_url": "${EVERMEMOS_API_URL:https://api.evermind.ai/api/v1/memories}",
+      "description": "EverMemOS via HTTP Memory API",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 3,
+      "name": "evermemos_api",
+      "num_workers": 10,
+      "request_interval": 0.0,
+      "search": {
+        "memory_types": [
+          "episodic_memory"
+        ],
+        "num_workers": 10,
+        "retrieve_method": "agentic",
+        "scope": "group",
+        "timeout_seconds": 300,
+        "top_k": 10
+      },
+      "sync_mode": true,
+      "timeout_seconds": 60,
+      "version": "1.0"
+    },
+    "raw_sha256": "01846ee6368de7df2927d5e794cbfb0562fad42062ee0f839f78673d79fb044f"
+  },
+  "evermemos_local_api": {
+    "adapter": "evermemos_api",
+    "canonical_id": "evermemos_local_api",
+    "default_result_suffix": "locomo-evermemos_local_api",
+    "effective_config": {
+      "adapter": "evermemos_api",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "",
+      "base_url": "http://localhost:1995",
+      "description": "EverMemOS via LOCAL HTTP Memory API (no hosted auth)",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 16000,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 3,
+      "name": "evermemos_local_api",
+      "num_workers": 10,
+      "request_interval": 0.0,
+      "search": {
+        "memory_types": [
+          "episodic_memory"
+        ],
+        "num_workers": 20,
+        "retrieve_method": "agentic",
+        "scope": "group",
+        "top_k": 10
+      },
+      "sync_mode": true,
+      "timeout_seconds": 60,
+      "version": "1.0"
+    },
+    "effective_sha256": "e8673e6784001c6571649e2ec10946aa2f38fcd8f3a45017c67c21eeb9460354",
+    "raw_config": {
+      "adapter": "evermemos_api",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "",
+      "base_url": "http://localhost:1995",
+      "description": "EverMemOS via LOCAL HTTP Memory API (no hosted auth)",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 16000,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 3,
+      "name": "evermemos_local_api",
+      "num_workers": 10,
+      "request_interval": 0.0,
+      "search": {
+        "memory_types": [
+          "episodic_memory"
+        ],
+        "num_workers": 20,
+        "retrieve_method": "agentic",
+        "scope": "group",
+        "top_k": 10
+      },
+      "sync_mode": true,
+      "timeout_seconds": 60,
+      "version": "1.0"
+    },
+    "raw_sha256": "e8673e6784001c6571649e2ec10946aa2f38fcd8f3a45017c67c21eeb9460354"
+  },
+  "hermes": {
+    "adapter": "hermes",
+    "canonical_id": "hermes-holographic",
+    "default_result_suffix": "locomo-hermes",
+    "effective_config": {
+      "adapter": "hermes",
+      "answer": {},
+      "hermes": {
+        "ingest_strategy": "session_end",
+        "plugin": "holographic",
+        "plugin_config": {
+          "auto_extract": true,
+          "default_trust": 0.5,
+          "hrr_dim": 1024
+        },
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "febd756aa1edd315a0c8fc286ff3f76f3e556a815fadf542171fd298852389b1",
+    "raw_config": {
+      "adapter": "hermes",
+      "answer": {
+        "max_retries": 3
+      },
+      "hermes": {
+        "ingest_strategy": "session_end",
+        "plugin": "holographic",
+        "plugin_config": {
+          "auto_extract": true,
+          "default_trust": 0.5,
+          "hrr_dim": 1024
+        },
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "a9ca17eb82dddba22e903c5b5ca42eef41af631792d7999a0070f561987502e8"
+  },
+  "hermes-hindsight": {
+    "adapter": "hermes",
+    "canonical_id": "hermes-hindsight",
+    "default_result_suffix": "locomo-hermes-hindsight",
+    "effective_config": {
+      "adapter": "hermes",
+      "answer": {},
+      "hermes": {
+        "ingest_strategy": "sync_per_turn",
+        "plugin": "hindsight",
+        "plugin_config": {},
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "1c5e8a9cd70cb9545d468d3b9d2073f6d453f1e6daba8175d4d428f5b84546c7",
+    "raw_config": {
+      "adapter": "hermes",
+      "answer": {
+        "max_retries": 3
+      },
+      "hermes": {
+        "ingest_strategy": "sync_per_turn",
+        "plugin": "hindsight",
+        "plugin_config": {},
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "7c2e7a4f8822f291c6da0c4d1662714b7802e363f900966b596b4adda1549cd0"
+  },
+  "hermes-holographic": {
+    "adapter": "hermes",
+    "canonical_id": "hermes-holographic",
+    "default_result_suffix": "locomo-hermes-holographic",
+    "effective_config": {
+      "adapter": "hermes",
+      "answer": {},
+      "hermes": {
+        "ingest_strategy": "session_end",
+        "plugin": "holographic",
+        "plugin_config": {
+          "auto_extract": true,
+          "default_trust": 0.5,
+          "hrr_dim": 1024
+        },
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "febd756aa1edd315a0c8fc286ff3f76f3e556a815fadf542171fd298852389b1",
+    "raw_config": {
+      "adapter": "hermes",
+      "answer": {
+        "max_retries": 3
+      },
+      "hermes": {
+        "ingest_strategy": "session_end",
+        "plugin": "holographic",
+        "plugin_config": {
+          "auto_extract": true,
+          "default_trust": 0.5,
+          "hrr_dim": 1024
+        },
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "a9ca17eb82dddba22e903c5b5ca42eef41af631792d7999a0070f561987502e8"
+  },
+  "hermes-honcho": {
+    "adapter": "hermes",
+    "canonical_id": "hermes-honcho",
+    "default_result_suffix": "locomo-hermes-honcho",
+    "effective_config": {
+      "adapter": "hermes",
+      "answer": {},
+      "hermes": {
+        "ingest_strategy": "sync_per_turn",
+        "plugin": "honcho",
+        "plugin_config": {},
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "0b73a3284e066f0bf08ccfcc2d4266ecff504837071a4f3a647b661840e0fc98",
+    "raw_config": {
+      "adapter": "hermes",
+      "answer": {
+        "max_retries": 3
+      },
+      "hermes": {
+        "ingest_strategy": "sync_per_turn",
+        "plugin": "honcho",
+        "plugin_config": {},
+        "prompts": {
+          "answer_mode": "shared"
+        },
+        "repo_path": "${HERMES_REPO_PATH}"
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "cf2c84ba23227f5ea5629c4e4e40f91a808b2613dbe7e25a448086ab7e71e550"
+  },
+  "mem0": {
+    "adapter": "mem0",
+    "canonical_id": "mem0",
+    "default_result_suffix": "locomo-mem0",
+    "effective_config": {
+      "adapter": "mem0",
+      "add_interval": 0.5,
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEM0_API_KEY}",
+      "batch_size": 5,
+      "description": "Mem0",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_content_length": 8000,
+      "max_retries": 5,
+      "name": "mem0",
+      "num_workers": 5,
+      "post_add_wait_seconds": 180,
+      "search": {
+        "search_interval": 0.5,
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "effective_sha256": "7c32af5302169d4259f9ed2ef19a886dbdda8d0d5db71ed787c56e9da2c7eb77",
+    "raw_config": {
+      "adapter": "mem0",
+      "add_interval": 0.5,
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEM0_API_KEY}",
+      "batch_size": 5,
+      "description": "Mem0",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_content_length": 8000,
+      "max_retries": 5,
+      "name": "mem0",
+      "num_workers": 5,
+      "post_add_wait_seconds": 180,
+      "search": {
+        "search_interval": 0.5,
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "raw_sha256": "7c32af5302169d4259f9ed2ef19a886dbdda8d0d5db71ed787c56e9da2c7eb77"
+  },
+  "memos": {
+    "adapter": "memos",
+    "canonical_id": "memos",
+    "default_result_suffix": "locomo-memos",
+    "effective_config": {
+      "adapter": "memos",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEMOS_KEY}",
+      "api_url": "https://memos.memtensor.cn/api/openmem/v1",
+      "batch_size": 10,
+      "dataset_overrides": {
+        "longmemeval": {
+          "batch_size": 6
+        }
+      },
+      "description": "Memos",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 5,
+      "name": "memos",
+      "num_workers": 1,
+      "post_add_wait_seconds": 180,
+      "search": {
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "effective_sha256": "9169aa51b436d7a7edbb0a2b3f2c8aaac5fa3e39475fb652c224fcc268377893",
+    "raw_config": {
+      "adapter": "memos",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEMOS_KEY}",
+      "api_url": "https://memos.memtensor.cn/api/openmem/v1",
+      "batch_size": 10,
+      "dataset_overrides": {
+        "longmemeval": {
+          "batch_size": 6
+        }
+      },
+      "description": "Memos",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 5,
+      "name": "memos",
+      "num_workers": 1,
+      "post_add_wait_seconds": 180,
+      "request_interval": 0.1,
+      "search": {
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "raw_sha256": "902241b28387e78574be3eb1b28255630d06747f228a4777a585987e17e955ff"
+  },
+  "memu": {
+    "adapter": "memu",
+    "canonical_id": "memu",
+    "default_result_suffix": "locomo-memu",
+    "effective_config": {
+      "adapter": "memu",
+      "agent_id": "evaluation_agent_04",
+      "agent_name": "Memory Evaluation Assistant",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEMU_API_KEY}",
+      "base_url": "https://api.memu.so",
+      "dataset_overrides": {
+        "locomo": {
+          "num_workers": 1
+        }
+      },
+      "description": "Memu Memory Management System",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 5,
+      "name": "memu",
+      "num_workers": 1,
+      "search": {
+        "top_k": 20
+      },
+      "task_check_interval": 15,
+      "task_timeout": 4800,
+      "version": "1.0"
+    },
+    "effective_sha256": "5622023757935f6b147c3362a862df94b3965fe61a86a48d6e33bc890a4899ce",
+    "raw_config": {
+      "adapter": "memu",
+      "agent_id": "evaluation_agent_04",
+      "agent_name": "Memory Evaluation Assistant",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${MEMU_API_KEY}",
+      "base_url": "https://api.memu.so",
+      "dataset_overrides": {
+        "locomo": {
+          "num_workers": 1
+        }
+      },
+      "description": "Memu Memory Management System",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "max_retries": 5,
+      "min_similarity": 0.3,
+      "name": "memu",
+      "num_workers": 1,
+      "search": {
+        "top_k": 20
+      },
+      "task_check_interval": 15,
+      "task_timeout": 4800,
+      "version": "1.0"
+    },
+    "raw_sha256": "66deca79f5ade62f68104c2dcc6d129456951dbfcb703e6a8e6f907b7978a72b"
+  },
+  "openclaw": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw",
+    "default_result_suffix": "locomo-openclaw",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "fcdd89075ee988e743271e4415e458b4ee2070eb5130684326c46e386a670cad",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "447e10d548245d46d4cac607e414b6aace3d543dd4c2817fe5fd92bcb4c6b182"
+  },
+  "openclaw-agent-local": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-agent-local",
+    "default_result_suffix": "locomo-openclaw-agent-local",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "827c1c6525fffbc58e1151fd7fdc058f9373ff71de7c69921b20cf1f1db1d8a3",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "100dded084a558305d6d02b26b39c8112efe15373b5841a73d72afaf13d98649"
+  },
+  "openclaw-docker": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker",
+    "default_result_suffix": "locomo-openclaw-docker",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:memory-core-baseline-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 210
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "a84798071ecb02207c98b869b0bdcf35b8dbffb65531bedbb0ec5a2e75a1071b",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:memory-core-baseline-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 210
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "bd3dca1d539f733465cd826c3bd44265a679ab379e45c5c978b346e73b5408ef"
+  },
+  "openclaw-docker-evermemos": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-evermemos",
+    "default_result_suffix": "locomo-openclaw-docker-evermemos",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "EVERMEMOS_API_URL",
+            "EVERMEMOS_API_KEY",
+            "EVERMEMOS_GROUP_ID",
+            "OPENCLAW_PROMPT_STYLE"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "memory_mode": "evermemos",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval:7da23c3-evermemos-74363c1-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 210
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "ac55479429af9856a0eaca34bee767c4d20d0cfbc9ddc94c137c4710ca08d80b",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "EVERMEMOS_API_URL",
+            "EVERMEMOS_API_KEY",
+            "EVERMEMOS_GROUP_ID",
+            "OPENCLAW_PROMPT_STYLE"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "memory_mode": "evermemos",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "disabled",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval:7da23c3-evermemos-74363c1-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 210
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "6371d62f0176e297daf49ebaac5800d21c1bdcdec74fa4c74176c7789bd7860d"
+  },
+  "openclaw-docker-hypercompositor": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-hypercompositor",
+    "default_result_suffix": "locomo-openclaw-docker-hypercompositor",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 2
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "hypercompositor",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-install-hypercompositor-5bace1f-slim",
+        "max_concurrent_containers": 2,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 120
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 2,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "52b4f8028c580e289c6e3d28e75ced970f5b417d9b693533f6cb3839ae6825f1",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 2,
+        "max_retries": 2
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "hypercompositor",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-install-hypercompositor-5bace1f-slim",
+        "max_concurrent_containers": 2,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 120
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 2,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "49a500ca9b7c89fa0f93a9f20929bb0a26362d0329d781f158010a4216d2a2e7"
+  },
+  "openclaw-docker-mem0": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-mem0",
+    "default_result_suffix": "locomo-openclaw-docker-mem0",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "OPENCLAW_PROMPT_STYLE"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "memory_mode": "mem0",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-mem0-46c0029-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "3g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 240
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "a8919ce7a3848df577dca9ab4daeca7d907ce263091c7661fe93538bd19946b2",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "OPENCLAW_PROMPT_STYLE"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "memory_mode": "mem0",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "disabled",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-mem0-46c0029-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "3g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 240
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "dbf0a2aa04470ef8c333b9650de626d3bc30f10816a536e91a8d6ebd17f9d99a"
+  },
+  "openclaw-docker-memclaw": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-memclaw",
+    "default_result_suffix": "locomo-openclaw-docker-memclaw",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 2
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "memclaw-context-engine",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-install-memclaw-context-engine-bb444b9-slim",
+        "max_concurrent_containers": 2,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 120
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 2,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "3721cf7748928bdd247e1e2c4d72c790e9a5c950d000e446fe3f21f732031d2a",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 2,
+        "max_retries": 2
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "memclaw-context-engine",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-install-memclaw-context-engine-bb444b9-slim",
+        "max_concurrent_containers": 2,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 120
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 2,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "e34f2bd84fe4cb41ae0d1dbe994480cb020533ac4b9dbedafaa51f28663a472c"
+  },
+  "openclaw-docker-memcore-session-bundle": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-memcore-session-bundle",
+    "default_result_suffix": "locomo-openclaw-docker-memcore-session-bundle",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "bc698fc6d8d66ab25a0369f0f3995bfe62009baf603fa11cbd93570467a8454f",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "7246b9715aec2b155216f33b7b6c68d6f107c14d3a410e3b9a23f4cb07341cb0"
+  },
+  "openclaw-docker-memcore-session-bundle-emptytail": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-memcore-session-bundle-emptytail",
+    "default_result_suffix": "locomo-openclaw-docker-memcore-session-bundle-emptytail",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "d4bd9bfebf344f270de8769c3dd0ca40e4482856bc2b5d4aab040bb68b1ced68",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "b7bb0f070997df79909431b5f4e21ac699e36386e756bff0aa005ac07e3ddced"
+  },
+  "openclaw-docker-memcore-session-bundle-weaktail": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-memcore-session-bundle-weaktail",
+    "default_result_suffix": "locomo-openclaw-docker-memcore-session-bundle-weaktail",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[remember what's said, keep existing memory]",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "9af0373038ed94ed479c025eb33e56374a20f4643ae054304f23990b18ab1f6c",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[remember what's said, keep existing memory]",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-memory-core-0000000-slim",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "0de914f471686833a0f8e7c7b501736b4fb2ba68dae829b40d5e559f9f9b1f41"
+  },
+  "openclaw-docker-openviking-session-bundle-memcore": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-openviking-session-bundle-memcore",
+    "default_result_suffix": "locomo-openclaw-docker-openviking-session-bundle-memcore",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "openviking",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]",
+        "memory_mode": "memory-core",
+        "ov_ingest": {
+          "account_id": "default",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 600,
+          "user_id": "eval-1"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "ghcr.io/duffycoder/openclaw-eval-plugins@sha256:d972aad0ccb3c1495f451b0cdb467a6b7bec782625ce3374e2fdb343793e45d2",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "fa5edbe4c61f5ace4c82b43fa29edb6aff63cb278700303ec4934c9ebf3d9568",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 4,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-code-preview-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 90,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "openviking",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]",
+        "memory_mode": "memory-core",
+        "ov_ingest": {
+          "account_id": "default",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 600,
+          "user_id": "eval-1"
+        },
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "ghcr.io/duffycoder/openclaw-eval-plugins@sha256:d972aad0ccb3c1495f451b0cdb467a6b7bec782625ce3374e2fdb343793e45d2",
+        "max_concurrent_containers": 4,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "f44be4767773b89f2ca1a64885c25001c67116719d5b2c44eed28500e123baf4"
+  },
+  "openclaw-docker-openviking-session-bundle-noop": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-openviking-session-bundle-noop",
+    "default_result_suffix": "locomo-openclaw-docker-openviking-session-bundle-noop",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 16
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": true
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "01de9a62c075d4b142c81bb1a170674e19f27eb0d7f31fbe13f7609edaa89653",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 16,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": true
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "08d0ecff047bddd7f7e57fe6fc84182ac911441895d485cf13fbc16ac1dae5b5"
+  },
+  "openclaw-docker-openviking-session-bundle-noop-fixpack": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-openviking-session-bundle-noop-fixpack",
+    "default_result_suffix": "locomo-openclaw-docker-openviking-session-bundle-noop-fixpack",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 16
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_AUTO_CAPTURE",
+            "OPENVIKING_RECALL_SCORE_THRESHOLD",
+            "OPENVIKING_RECALL_LIMIT",
+            "OPENVIKING_RECALL_MAX_INJECTED_CHARS",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": true
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "da22488e25208197ed2dfcec70475c01089a51af8dda94e880a63f0f688bf41d",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 16,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_AUTO_CAPTURE",
+            "OPENVIKING_RECALL_SCORE_THRESHOLD",
+            "OPENVIKING_RECALL_LIMIT",
+            "OPENVIKING_RECALL_MAX_INJECTED_CHARS",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": true
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "f349e5bdc3a6f2b95777d1f03a79ccb5df7f323be439e916bdea95b776b7da67"
+  },
+  "openclaw-docker-openviking-session-bundle-noop-serial": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-openviking-session-bundle-noop-serial",
+    "default_result_suffix": "locomo-openclaw-docker-openviking-session-bundle-noop-serial",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 1
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "cleanup_max_retries": 60,
+          "cleanup_retry_delay_sec": 2,
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": false
+      },
+      "post_add_wait_seconds": 600,
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 1,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "c31c0c720714b8912cd2e7959c0e09078730a2209a100b2232b230220036b499",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 1,
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "doubao-seed-2-0-pro-260215",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID",
+            "OPENVIKING_BASE_URL",
+            "OPENVIKING_API_KEY",
+            "OPENVIKING_ACCOUNT_ID",
+            "OPENVIKING_USER_ID",
+            "OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT",
+            "OPENVIKING_ARCHIVE_INDEX_ORDER",
+            "OPENVIKING_ARCHIVE_SEARCH_OPT"
+          ],
+          "idle_timeout_seconds": 180,
+          "model": {
+            "compat": {
+              "supportsUsageInStreaming": true
+            },
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "doubao-seed-2-0-code-preview-260215",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 8192,
+            "name": "Doubao Seed 2.0 Code Preview (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 240,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "context_engine_mode": "openviking",
+        "flush_mode": "session_bundle",
+        "ingest_session_tail": "",
+        "memory_mode": "noop",
+        "ov_ingest": {
+          "account_id": "default",
+          "agent_id_template": "{conv_id}",
+          "api_key_env": "OPENVIKING_API_KEY",
+          "base_url": "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}",
+          "cleanup_max_retries": 60,
+          "cleanup_retry_delay_sec": 2,
+          "task_timeout_sec": 3600,
+          "user_id_template": "{conv_id}"
+        },
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "session_bundle",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "add_host_gateway": true,
+        "image": "openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim",
+        "max_concurrent_containers": 16,
+        "mem_limit": "",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 360,
+        "remove_container_on_stop": false
+      },
+      "post_add_wait_seconds": 600,
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 1,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "b2027db28a6bfc1eee9a72605400c0064b40792840f83b27693a2ab9f1c8256f"
+  },
+  "openclaw-docker-stub": {
+    "adapter": "openclaw-docker",
+    "canonical_id": "openclaw-docker-stub",
+    "default_result_suffix": "locomo-openclaw-docker-stub",
+    "effective_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 1
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 60,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "memory_mode": "stub",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim",
+        "max_concurrent_containers": 1,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 60
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 1,
+        "response_top_k": 1,
+        "top_k": 1
+      }
+    },
+    "effective_sha256": "f4a22f8302ba1b2f3a000f2fbec8ebd9c64ab9d8946ec0ab82bae41f607088ee",
+    "raw_config": {
+      "adapter": "openclaw-docker",
+      "answer": {
+        "max_concurrent": 1,
+        "max_retries": 1
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 60,
+        "answer_mode": "agent_local",
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "memory_mode": "stub",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "openclaw_docker": {
+        "image": "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim",
+        "max_concurrent_containers": 1,
+        "mem_limit": "2g",
+        "network": "bridge",
+        "per_rpc_timeout_seconds": 60
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 1,
+        "response_top_k": 1,
+        "top_k": 1
+      }
+    },
+    "raw_sha256": "5712e941420def8602a58d01713fa589a7876535d4c22ef7c748a0da9286b0a4"
+  },
+  "openclaw-fts": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-fts",
+    "default_result_suffix": "locomo-openclaw-fts",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_only",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "17951288ed70f259ebe381f0ad324dfa3c63374dfc38fecc1c7182c4bda67e36",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_only",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "abfee06f564ef59aa2ccba23b9a801699cbf4af8f64d7a802d48216482126ebe"
+  },
+  "openclaw-fts-noflush": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-fts-noflush",
+    "default_result_suffix": "locomo-openclaw-fts-noflush",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_only",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "1aad036cebd03692656a8df866458cfa3459292c41635f25c69c5378e1a1e2eb",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "disabled",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "disabled",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_only",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "d552250ae533ae9a4c9eda378e449ef7226a5f7a517bbf1d52258242da403862"
+  },
+  "openclaw-hybrid": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw",
+    "default_result_suffix": "locomo-openclaw-hybrid",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "fcdd89075ee988e743271e4415e458b4ee2070eb5130684326c46e386a670cad",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "447e10d548245d46d4cac607e414b6aace3d543dd4c2817fe5fd92bcb4c6b182"
+  },
+  "openclaw-hybrid-noflush": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-hybrid-noflush",
+    "default_result_suffix": "locomo-openclaw-hybrid-noflush",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "disabled",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "c3227ffdf1591c2db9722f89d86d76382752ee5dd052ba9ef21f171e70e64700",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "disabled",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "disabled",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "99fac9e30347d6ffc0ae360782ce0c0164f8ddb184abe33406adb6affd97cad1"
+  },
+  "openclaw-hypercompositor": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-hypercompositor",
+    "default_result_suffix": "locomo-openclaw-hypercompositor",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "hypercompositor",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "cce8ca594c33e7c8d5ef48c1a17d2c0293690e5d3533084c4f31126c21b028e2",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "context_engine_mode": "hypercompositor",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "memory-core",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "d38e3d2dc865348a8eccc3ff5fef74702fe4bdce0dc2d68ffe2b8aad9de00ddc"
+  },
+  "openclaw-native-embed": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-native-embed",
+    "default_result_suffix": "locomo-openclaw-native-embed",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "honor_silent_token": false,
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "88d84ad9416b34a22325e0761f87ae3e93f5508a7193568bf0569a1446a93827",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "honor_silent_token": false,
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "native",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "b733ae03ad15b034635fb7b30aa0ec9de50ad6ed738366e12c30f9d62c7fe4c6"
+  },
+  "openclaw-native-noembed": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-native-noembed",
+    "default_result_suffix": "locomo-openclaw-native-noembed",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "honor_silent_token": false,
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "ab5ba20e32fa3d86ab541b1caeba5d2e11bd3f76fe120bada1b36604214bd0a3",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "fts_only",
+        "flush_mode": "shared_llm",
+        "honor_silent_token": false,
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "native",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "ddc0488a0a899950a7cd7114ce3dbefb64bfb1069e70e9041694da3ac7d92d45"
+  },
+  "openclaw-noop": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-noop",
+    "default_result_suffix": "locomo-openclaw-noop",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "noop",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "44ae1c8af5e4f8c110ad953ac1e355f06ff8fcdaf5ad9a27d2269aee0aabbfdd",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "gpt-4o-mini",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "agent_llm": {
+          "api": "openai-completions",
+          "api_key_env": "LLM_API_KEY",
+          "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+          "env_vars": [
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "SOPH_API_KEY",
+            "SOPH_EMBED_URL",
+            "SOPH_EMBED_EASYLLM_ID"
+          ],
+          "model": {
+            "context_window": 128000,
+            "cost": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "input": 0,
+              "output": 0
+            },
+            "id": "gpt-4.1-mini",
+            "input": [
+              "text"
+            ],
+            "max_tokens": 4096,
+            "name": "GPT 4.1 Mini (sophnet)",
+            "reasoning": false
+          },
+          "provider_id": "sophnet"
+        },
+        "agent_timeout_seconds": 180,
+        "answer_mode": "agent_local",
+        "backend_mode": "hybrid",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "memory_mode": "noop",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "1c034daed05b9452057fc31731e77e3c87226b2ffb90b76bfb738ddd1b672906"
+  },
+  "openclaw-vector": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-vector",
+    "default_result_suffix": "locomo-openclaw-vector",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "vector",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "ab58bb0573242ee815c8b5afdc966b61844f3f6acc863f96d796c87dbd9bc4ea",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "vector",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "shared_llm",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "shared_llm",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "70dc8f9cd2cc65db39df889118018aa9b5ea1d177e4911ae866d7129541d0736"
+  },
+  "openclaw-vector-noflush": {
+    "adapter": "openclaw",
+    "canonical_id": "openclaw-vector-noflush",
+    "default_result_suffix": "locomo-openclaw-vector-noflush",
+    "effective_config": {
+      "adapter": "openclaw",
+      "answer": {},
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "vector",
+        "embedding": {
+          "api_key_env": "SOPH_API_KEY",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "disabled",
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "effective_sha256": "2299221de2eacce02f58d353d663290e5774e0d3dc3fef1b2a6d0afabf8d9277",
+    "raw_config": {
+      "adapter": "openclaw",
+      "answer": {
+        "max_retries": 3
+      },
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+        "max_tokens": 1024,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0.0
+      },
+      "openclaw": {
+        "backend_mode": "vector",
+        "embedding": {
+          "api_key": "${SOPH_API_KEY}",
+          "base_url": "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}",
+          "easyllm_id": "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}",
+          "model": "${OPENCLAW_EMBED_MODEL:text-embeddings}",
+          "output_dimensionality": 1024,
+          "provider": "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+        },
+        "flush_mode": "disabled",
+        "prompts": {
+          "answer_mode": "shared",
+          "flush_mode": "disabled",
+          "memory_mode": "native_compiled"
+        },
+        "repo_path": "${OPENCLAW_REPO_PATH}",
+        "retrieval_route": "search_then_get",
+        "visibility_mode": "settled"
+      },
+      "search": {
+        "max_inflight_queries_per_conversation": 1,
+        "num_workers": 5,
+        "response_top_k": 5,
+        "top_k": 6
+      }
+    },
+    "raw_sha256": "387b046ac6955dcce2b6ab3273ae148f9cb9ebce0deed507645242917d6f8a79"
+  },
+  "zep": {
+    "adapter": "zep",
+    "canonical_id": "zep",
+    "default_result_suffix": "locomo-zep",
+    "effective_config": {
+      "adapter": "zep",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${ZEP_API_KEY}",
+      "description": "Zep - Knowledge Graph Architecture for Agent Memory",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "name": "zep",
+      "num_workers": 1,
+      "poll_interval": 5,
+      "post_add_wait_seconds": 0,
+      "search": {
+        "reranker_edges": "cross_encoder",
+        "reranker_nodes": "rrf",
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "effective_sha256": "0baec7cb4d952ae04357f0d8ed9a753ad638d7db9342386043dc7e5aa85739df",
+    "raw_config": {
+      "adapter": "zep",
+      "answer": {
+        "max_retries": 3
+      },
+      "api_key": "${ZEP_API_KEY}",
+      "description": "Zep - Knowledge Graph Architecture for Agent Memory",
+      "llm": {
+        "api_key": "${LLM_API_KEY}",
+        "base_url": "${LLM_BASE_URL:https://openrouter.ai/api/v1}",
+        "max_tokens": 32768,
+        "model": "${LLM_MODEL}",
+        "provider": "openai",
+        "temperature": 0
+      },
+      "name": "zep",
+      "num_workers": 1,
+      "poll_interval": 5,
+      "post_add_wait_seconds": 0,
+      "search": {
+        "reranker_edges": "cross_encoder",
+        "reranker_nodes": "rrf",
+        "top_k": 20
+      },
+      "version": "1.0"
+    },
+    "raw_sha256": "0baec7cb4d952ae04357f0d8ed9a753ad638d7db9342386043dc7e5aa85739df"
+  }
+}
