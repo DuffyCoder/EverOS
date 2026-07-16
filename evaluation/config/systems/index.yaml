@@ -1,0 +1,218 @@
+schema_version: 1
+systems:
+  evermemos:
+    adapter: evermemos
+    category: canonical
+    status: active
+    path: evermemos.yaml
+    description: In-process EverMemOS benchmark preset.
+  evermemos_cloud_api:
+    adapter: evermemos_api
+    category: canonical
+    status: active
+    path: evermemos_cloud_api.yaml
+    description: EverMemOS cloud API benchmark preset.
+  evermemos_local_api:
+    adapter: evermemos_api
+    category: canonical
+    status: active
+    path: evermemos_local_api.yaml
+    description: EverMemOS local API benchmark preset.
+  mem0:
+    adapter: mem0
+    category: canonical
+    status: active
+    path: mem0.yaml
+    description: Mem0 API benchmark preset.
+  memos:
+    adapter: memos
+    category: canonical
+    status: active
+    path: memos.yaml
+    description: MemOS API benchmark preset.
+  memu:
+    adapter: memu
+    category: canonical
+    status: active
+    path: memu.yaml
+    description: MemU API benchmark preset.
+  zep:
+    adapter: zep
+    category: canonical
+    status: active
+    path: zep.yaml
+    description: Zep API benchmark preset.
+  hermes-holographic:
+    adapter: hermes
+    category: canonical
+    status: active
+    path: hermes-holographic.yaml
+    description: Hermes holographic-memory benchmark preset.
+  hermes-honcho:
+    adapter: hermes
+    category: canonical
+    status: active
+    path: hermes-honcho.yaml
+    description: Hermes Honcho-backed benchmark preset.
+  hermes-hindsight:
+    adapter: hermes
+    category: canonical
+    status: active
+    path: hermes-hindsight.yaml
+    description: Hermes Hindsight-backed benchmark preset.
+  openclaw:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw.yaml
+    description: Default hybrid OpenClaw benchmark preset.
+  openclaw-fts:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw-fts.yaml
+    description: OpenClaw full-text retrieval preset.
+  openclaw-fts-noflush:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw-fts-noflush.yaml
+    description: OpenClaw full-text preset without explicit flushes.
+  openclaw-hybrid-noflush:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw-hybrid-noflush.yaml
+    description: OpenClaw hybrid preset without explicit flushes.
+  openclaw-vector:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw-vector.yaml
+    description: OpenClaw vector retrieval preset.
+  openclaw-vector-noflush:
+    adapter: openclaw
+    category: canonical
+    status: active
+    path: openclaw-vector-noflush.yaml
+    description: OpenClaw vector preset without explicit flushes.
+  openclaw-docker:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker.yaml
+    description: Default containerized OpenClaw benchmark preset.
+  openclaw-docker-evermemos:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker-evermemos.yaml
+    description: Containerized OpenClaw with the EverMemOS plugin.
+  openclaw-docker-mem0:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker-mem0.yaml
+    description: Containerized OpenClaw with the Mem0 plugin.
+  openclaw-docker-memcore-session-bundle:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker-memcore-session-bundle.yaml
+    description: Containerized OpenClaw Memcore session-bundle preset.
+  openclaw-docker-openviking-session-bundle-memcore:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker-openviking-session-bundle-memcore.yaml
+    description: OpenViking session bundle with Memcore retrieval.
+  openclaw-docker-openviking-session-bundle-noop:
+    adapter: openclaw-docker
+    category: canonical
+    status: active
+    path: openclaw-docker-openviking-session-bundle-noop.yaml
+    description: OpenViking session bundle with no-op memory retrieval.
+  hermes:
+    adapter: hermes
+    category: alias
+    status: compatibility
+    alias_of: hermes-holographic
+    description: Compatibility alias for Hermes holographic memory.
+  openclaw-hybrid:
+    adapter: openclaw
+    category: alias
+    status: compatibility
+    alias_of: openclaw
+    description: Compatibility alias for the default hybrid OpenClaw preset.
+  openclaw-agent-local:
+    adapter: openclaw
+    category: experiment
+    status: experimental
+    path: openclaw-agent-local.yaml
+    description: Experimental agent-local OpenClaw retrieval preset.
+  openclaw-hypercompositor:
+    adapter: openclaw
+    category: experiment
+    status: experimental
+    path: openclaw-hypercompositor.yaml
+    description: Experimental OpenClaw HyperCompositor preset.
+  openclaw-native-embed:
+    adapter: openclaw
+    category: experiment
+    status: experimental
+    path: openclaw-native-embed.yaml
+    description: Experimental native OpenClaw embedding preset.
+  openclaw-native-noembed:
+    adapter: openclaw
+    category: experiment
+    status: experimental
+    path: openclaw-native-noembed.yaml
+    description: Experimental native OpenClaw preset without embeddings.
+  openclaw-noop:
+    adapter: openclaw
+    category: experiment
+    status: experimental
+    path: openclaw-noop.yaml
+    description: Experimental no-op OpenClaw memory preset.
+  openclaw-docker-hypercompositor:
+    adapter: openclaw-docker
+    category: experiment
+    status: experimental
+    path: openclaw-docker-hypercompositor.yaml
+    description: Experimental containerized HyperCompositor preset.
+  openclaw-docker-memclaw:
+    adapter: openclaw-docker
+    category: experiment
+    status: experimental
+    path: openclaw-docker-memclaw.yaml
+    description: Experimental containerized MemClaw preset.
+  openclaw-docker-stub:
+    adapter: openclaw-docker
+    category: experiment
+    status: experimental
+    path: openclaw-docker-stub.yaml
+    description: Experimental containerized stub-memory preset.
+  openclaw-docker-memcore-session-bundle-emptytail:
+    adapter: openclaw-docker
+    category: ablation
+    status: experimental
+    path: openclaw-docker-memcore-session-bundle-emptytail.yaml
+    description: Memcore session-bundle empty-tail ablation.
+  openclaw-docker-memcore-session-bundle-weaktail:
+    adapter: openclaw-docker
+    category: ablation
+    status: experimental
+    path: openclaw-docker-memcore-session-bundle-weaktail.yaml
+    description: Memcore session-bundle weak-tail ablation.
+  openclaw-docker-openviking-session-bundle-noop-fixpack:
+    adapter: openclaw-docker
+    category: ablation
+    status: experimental
+    path: openclaw-docker-openviking-session-bundle-noop-fixpack.yaml
+    description: OpenViking no-op session-bundle fix-pack ablation.
+  openclaw-docker-openviking-session-bundle-noop-serial:
+    adapter: openclaw-docker
+    category: tooling
+    status: experimental
+    path: openclaw-docker-openviking-session-bundle-noop-serial.yaml
+    description: Serialized OpenViking no-op preset for QA attribution.
