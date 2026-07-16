@@ -20,6 +20,15 @@ from evaluation.src.config.system_index import (
     load_system_index,
     resolve_alias,
 )
+from evaluation.src.config.system_policy import (
+    PolicyFinding,
+    SystemPolicyError,
+    validate_raw_system_policy,
+)
+from evaluation.src.config.system_schema import (
+    SystemSchemaError,
+    validate_system_config,
+)
 from evaluation.src.config.yaml_loader import strict_safe_load
 
 _ENV_MARKER = re.compile(r"\$\{([^:}]+)(?::([^}]*))?\}")
@@ -40,6 +49,7 @@ class ResolvedSystemConfig:
     raw_config: dict[str, Any]
     source_paths: tuple[Path, ...]
     alias_chain: tuple[str, ...]
+    policy_findings: tuple[PolicyFinding, ...]
     warning: str | None
 
 
@@ -63,6 +73,7 @@ def resolve_system_config(
     index_path: Path = DEFAULT_SYSTEM_INDEX_PATH,
     systems_root: Path | None = None,
     environ: Mapping[str, str] | None = None,
+    allow_legacy: bool = False,
 ) -> ResolvedSystemConfig:
     """Resolve aliases, inheritance, and environment markers for a public id."""
     resolved_index_path = Path(index_path)
@@ -87,20 +98,24 @@ def resolve_system_config(
         canonical_entry.path, systems_root=root, alias_paths=alias_paths, stack=()
     )
 
-    adapter = raw_config.get("adapter")
-    if not isinstance(adapter, str) or not adapter.strip():
-        raise SystemConfigError(
-            f"resolved config for system {canonical_id!r} field 'adapter' must "
-            "be a non-empty string"
+    adapter = canonical_entry.adapter
+    try:
+        policy_findings = validate_raw_system_policy(
+            adapter, raw_config, canonical_id=canonical_id, allow_legacy=allow_legacy
         )
-    if adapter != canonical_entry.adapter:
+    except SystemPolicyError as exc:
         raise SystemConfigError(
-            f"resolved config for system {canonical_id!r} adapter {adapter!r} "
-            f"does not match index adapter {canonical_entry.adapter!r}"
-        )
+            f"resolved config for system {canonical_id!r} violates raw policy: {exc}"
+        ) from exc
 
     environment = os.environ if environ is None else environ
     config = _replace_env_markers(raw_config, environment)
+    try:
+        validate_system_config(adapter, config)
+    except SystemSchemaError as exc:
+        raise SystemConfigError(
+            f"resolved config for system {canonical_id!r} violates schema: {exc}"
+        ) from exc
     return ResolvedSystemConfig(
         requested_id=system_id,
         canonical_id=canonical_id,
@@ -111,6 +126,7 @@ def resolve_system_config(
         raw_config=raw_config,
         source_paths=source_paths,
         alias_chain=alias_chain,
+        policy_findings=policy_findings,
         warning=_deprecation_warning(system_id, alias_chain, index.systems),
     )
 

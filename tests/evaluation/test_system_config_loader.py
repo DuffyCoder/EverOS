@@ -65,6 +65,56 @@ def _configure_path(
     entry["path"] = relative_path
 
 
+def _minimal_openclaw_config() -> dict[str, Any]:
+    """Schema-valid raw config used by loader-only synthetic scenarios."""
+    return {
+        "adapter": "openclaw",
+        "llm": {
+            "provider": "openai",
+            "model": "test-model",
+            "api_key": "${LLM_API_KEY}",
+            "base_url": "https://llm.example/v1",
+            "temperature": 0,
+            "max_tokens": 1024,
+        },
+        "search": {
+            "top_k": 6,
+            "response_top_k": 5,
+            "num_workers": 2,
+            "max_inflight_queries_per_conversation": 1,
+        },
+        "answer": {"max_retries": 3},
+        "openclaw": {
+            "repo_path": "/tmp/openclaw",
+            "visibility_mode": "settled",
+            "retrieval_route": "search_then_get",
+            "backend_mode": "fts_only",
+            "flush_mode": "shared_llm",
+            "memory_mode": "memory-core",
+            "agent_llm": {
+                "provider_id": "test-provider",
+                "base_url": "https://llm.example/v1",
+                "api": "openai-completions",
+                "api_key_env": "LLM_API_KEY",
+                "env_vars": ["LLM_API_KEY"],
+                "model": {
+                    "id": "test-model",
+                    "name": "Test model",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "context_window": 128000,
+                    "max_tokens": 4096,
+                },
+            },
+        },
+    }
+
+
+def _compat_payload(config: dict[str, Any]) -> dict[str, Any]:
+    return config["openclaw"]["agent_llm"]["model"]["compat"]
+
+
 def _simple_openclaw_root(
     tmp_path: Path,
     config: object,
@@ -75,7 +125,12 @@ def _simple_openclaw_root(
     systems_root = tmp_path / "systems"
     index_document = _index_document() if document is None else document
     _configure_path(index_document, "openclaw", relative_path)
-    config_path = _write_config(systems_root, relative_path, config)
+    document_to_write = (
+        deep_merge_config(_minimal_openclaw_config(), config)
+        if isinstance(config, dict)
+        else config
+    )
+    config_path = _write_config(systems_root, relative_path, document_to_write)
     index_path = _write_index(systems_root, index_document)
     return systems_root, index_path, config_path
 
@@ -124,26 +179,30 @@ def test_one_parent_inheritance_merges_from_the_systems_root(tmp_path: Path) -> 
     systems_root = tmp_path / "systems"
     document = _index_document()
     _configure_path(document, "openclaw", "children/leaf.yaml")
-    base_path = _write_config(
-        systems_root,
-        "_bases/base.yaml",
-        {
-            "adapter": "openclaw",
-            "nested": {
-                "kept": {"value": 1},
-                "changed": {"base": True, "winner": "base"},
-                "items": ["base"],
-            },
-            "scalar": "base",
-        },
-    )
+    base = _minimal_openclaw_config()
+    base["openclaw"]["agent_llm"]["model"]["compat"] = {
+        "kept": {"value": 1},
+        "changed": {"base": True, "winner": "base"},
+        "items": ["base"],
+    }
+    base["openclaw"]["status_timeout_seconds"] = 60
+    base_path = _write_config(systems_root, "_bases/base.yaml", base)
     leaf_path = _write_config(
         systems_root,
         "children/leaf.yaml",
         {
             "extends": "_bases/base.yaml",
-            "nested": {"changed": {"leaf": True, "winner": "leaf"}, "items": ["leaf"]},
-            "scalar": 7,
+            "openclaw": {
+                "agent_llm": {
+                    "model": {
+                        "compat": {
+                            "changed": {"leaf": True, "winner": "leaf"},
+                            "items": ["leaf"],
+                        }
+                    }
+                },
+                "status_timeout_seconds": 7,
+            },
         },
     )
     index_path = _write_index(systems_root, document)
@@ -152,15 +211,12 @@ def test_one_parent_inheritance_merges_from_the_systems_root(tmp_path: Path) -> 
         "openclaw", index_path=index_path, systems_root=systems_root, environ={}
     )
 
-    assert resolved.raw_config == {
-        "adapter": "openclaw",
-        "nested": {
-            "kept": {"value": 1},
-            "changed": {"base": True, "leaf": True, "winner": "leaf"},
-            "items": ["leaf"],
-        },
-        "scalar": 7,
+    assert _compat_payload(resolved.raw_config) == {
+        "kept": {"value": 1},
+        "changed": {"base": True, "leaf": True, "winner": "leaf"},
+        "items": ["leaf"],
     }
+    assert resolved.raw_config["openclaw"]["status_timeout_seconds"] == 7
     assert "extends" not in resolved.raw_config
     assert resolved.source_paths == (base_path.resolve(), leaf_path.resolve())
     assert resolved.requested_id == "openclaw"
@@ -178,20 +234,28 @@ def test_multilevel_inheritance_has_deterministic_base_to_leaf_sources(
     systems_root = tmp_path / "systems"
     document = _index_document()
     _configure_path(document, "openclaw", "leaf.yaml")
-    base_path = _write_config(
-        systems_root,
-        "base.yaml",
-        {"adapter": "openclaw", "level": "base", "nested": {"base": True}},
-    )
+    base = _minimal_openclaw_config()
+    base["openclaw"]["agent_llm"]["model"]["compat"] = {"level": "base", "base": True}
+    base_path = _write_config(systems_root, "base.yaml", base)
     middle_path = _write_config(
         systems_root,
         "middle.yaml",
-        {"extends": "base.yaml", "level": "middle", "nested": {"middle": True}},
+        {
+            "extends": "base.yaml",
+            "openclaw": {
+                "agent_llm": {"model": {"compat": {"level": "middle", "middle": True}}}
+            },
+        },
     )
     leaf_path = _write_config(
         systems_root,
         "leaf.yaml",
-        {"extends": "middle.yaml", "level": "leaf", "nested": {"leaf": True}},
+        {
+            "extends": "middle.yaml",
+            "openclaw": {
+                "agent_llm": {"model": {"compat": {"level": "leaf", "leaf": True}}}
+            },
+        },
     )
     index_path = _write_index(systems_root, document)
 
@@ -199,8 +263,12 @@ def test_multilevel_inheritance_has_deterministic_base_to_leaf_sources(
         "openclaw", index_path=index_path, systems_root=systems_root, environ={}
     )
 
-    assert resolved.raw_config["level"] == "leaf"
-    assert resolved.raw_config["nested"] == {"base": True, "middle": True, "leaf": True}
+    assert _compat_payload(resolved.raw_config) == {
+        "level": "leaf",
+        "base": True,
+        "middle": True,
+        "leaf": True,
+    }
     assert resolved.source_paths == (
         base_path.resolve(),
         middle_path.resolve(),
@@ -370,17 +438,19 @@ def test_alias_legacy_yaml_cannot_be_used_as_an_inheritance_target(
 
 def test_nested_base_can_share_an_alias_basename(tmp_path: Path) -> None:
     systems_root, index_path, _ = _simple_openclaw_root(
-        tmp_path, {"extends": "_bases/hermes.yaml", "leaf": True}
+        tmp_path, {"extends": "_bases/hermes.yaml", "description": "leaf"}
     )
-    base_path = _write_config(
-        systems_root, "_bases/hermes.yaml", {"adapter": "openclaw", "base": True}
-    )
+    base = _minimal_openclaw_config()
+    base["description"] = "base"
+    base["openclaw"]["status_timeout_seconds"] = 60
+    base_path = _write_config(systems_root, "_bases/hermes.yaml", base)
 
     resolved = resolve_system_config(
         "openclaw", index_path=index_path, systems_root=systems_root, environ={}
     )
 
-    assert resolved.raw_config == {"adapter": "openclaw", "base": True, "leaf": True}
+    assert resolved.raw_config["description"] == "leaf"
+    assert resolved.raw_config["openclaw"]["status_timeout_seconds"] == 60
     assert resolved.source_paths[0] == base_path.resolve()
 
 
@@ -394,7 +464,7 @@ def test_alias_to_alias_chain_preserves_requested_metadata(tmp_path: Path) -> No
     intermediate["alias_of"] = "openclaw"
     systems["openclaw-hybrid"]["alias_of"] = "openclaw-agent-local"
     systems_root, index_path, _ = _simple_openclaw_root(
-        tmp_path, {"adapter": "openclaw", "value": "canonical"}, document=document
+        tmp_path, {"adapter": "openclaw", "description": "canonical"}, document=document
     )
 
     resolved = resolve_system_config(
@@ -411,7 +481,7 @@ def test_alias_to_alias_chain_preserves_requested_metadata(tmp_path: Path) -> No
     assert resolved.category == "alias"
     assert resolved.status == "compatibility"
     assert resolved.adapter == "openclaw"
-    assert resolved.raw_config["value"] == "canonical"
+    assert resolved.raw_config["description"] == "canonical"
 
 
 def test_alias_cycle_from_the_strict_36_id_index_is_a_domain_error(
@@ -447,15 +517,24 @@ def test_environment_substitution_matches_existing_compatibility_semantics(
         tmp_path,
         {
             "adapter": "openclaw",
-            "environment": {
-                "set": "${SET_VALUE:loser}",
-                "set_to_empty": "${EMPTY_VALUE:fallback}",
-                "default": "${MISSING:fallback}",
-                "empty_default": "${MISSING:}",
-                "required_unset": "${MISSING}",
-                "explicit_mapping_only": "${ONLY_IN_HOST:fallback}",
-                "multiple": "before-${SET_VALUE}-${MISSING:after}",
-                "nested": ["${SET_VALUE}", {"value": "${MISSING:fallback}"}],
+            "openclaw": {
+                "agent_llm": {
+                    "model": {
+                        "compat": {
+                            "set": "${SET_VALUE:loser}",
+                            "set_to_empty": "${EMPTY_VALUE:fallback}",
+                            "default": "${MISSING:fallback}",
+                            "empty_default": "${MISSING:}",
+                            "required_unset": "${MISSING}",
+                            "explicit_mapping_only": "${ONLY_IN_HOST:fallback}",
+                            "multiple": "before-${SET_VALUE}-${MISSING:after}",
+                            "nested": [
+                                "${SET_VALUE}",
+                                {"value": "${MISSING:fallback}"},
+                            ],
+                        }
+                    }
+                }
             },
         },
     )
@@ -467,7 +546,7 @@ def test_environment_substitution_matches_existing_compatibility_semantics(
         environ={"SET_VALUE": "provided", "EMPTY_VALUE": ""},
     )
 
-    assert resolved.raw_config["environment"] == {
+    assert _compat_payload(resolved.raw_config) == {
         "set": "${SET_VALUE:loser}",
         "set_to_empty": "${EMPTY_VALUE:fallback}",
         "default": "${MISSING:fallback}",
@@ -477,7 +556,7 @@ def test_environment_substitution_matches_existing_compatibility_semantics(
         "multiple": "before-${SET_VALUE}-${MISSING:after}",
         "nested": ["${SET_VALUE}", {"value": "${MISSING:fallback}"}],
     }
-    assert resolved.config["environment"] == {
+    assert _compat_payload(resolved.config) == {
         "set": "provided",
         "set_to_empty": "",
         "default": "fallback",
@@ -488,8 +567,8 @@ def test_environment_substitution_matches_existing_compatibility_semantics(
         "nested": ["provided", {"value": "fallback"}],
     }
 
-    resolved.config["environment"]["nested"][1]["value"] = "changed"
-    assert resolved.raw_config["environment"]["nested"][1]["value"] == (
+    _compat_payload(resolved.config)["nested"][1]["value"] = "changed"
+    assert _compat_payload(resolved.raw_config)["nested"][1]["value"] == (
         "${MISSING:fallback}"
     )
 
@@ -499,15 +578,16 @@ def test_environ_none_reads_os_environ(
 ) -> None:
     monkeypatch.setenv("LOADER_TEST_VALUE", "from-os")
     systems_root, index_path, _ = _simple_openclaw_root(
-        tmp_path, {"adapter": "openclaw", "value": "${LOADER_TEST_VALUE:fallback}"}
+        tmp_path,
+        {"adapter": "openclaw", "llm": {"model": "${LOADER_TEST_VALUE:fallback}"}},
     )
 
     resolved = resolve_system_config(
         "openclaw", index_path=index_path, systems_root=systems_root
     )
 
-    assert resolved.config["value"] == "from-os"
-    assert resolved.raw_config["value"] == "${LOADER_TEST_VALUE:fallback}"
+    assert resolved.config["llm"]["model"] == "from-os"
+    assert resolved.raw_config["llm"]["model"] == "${LOADER_TEST_VALUE:fallback}"
 
 
 @pytest.mark.parametrize("adapter", [None, "", "   ", 7, "mem0"])
@@ -677,7 +757,16 @@ def test_result_is_frozen_and_raw_and_expanded_configs_do_not_alias(
         tmp_path,
         {
             "adapter": "openclaw",
-            "nested": {"marker": "${VALUE:default}", "items": [{"value": 1}]},
+            "openclaw": {
+                "agent_llm": {
+                    "model": {
+                        "compat": {
+                            "marker": "${VALUE:default}",
+                            "items": [{"value": 1}],
+                        }
+                    }
+                }
+            },
         },
     )
 
@@ -691,13 +780,14 @@ def test_result_is_frozen_and_raw_and_expanded_configs_do_not_alias(
     with pytest.raises(FrozenInstanceError):
         resolved.requested_id = "changed"  # type: ignore[misc]
     assert resolved.raw_config is not resolved.config
-    assert resolved.raw_config["nested"] is not resolved.config["nested"]
+    assert _compat_payload(resolved.raw_config) is not _compat_payload(resolved.config)
     assert (
-        resolved.raw_config["nested"]["items"] is not resolved.config["nested"]["items"]
+        _compat_payload(resolved.raw_config)["items"]
+        is not _compat_payload(resolved.config)["items"]
     )
 
-    resolved.config["nested"]["items"][0]["value"] = 99
-    assert resolved.raw_config["nested"]["items"][0]["value"] == 1
+    _compat_payload(resolved.config)["items"][0]["value"] = 99
+    assert _compat_payload(resolved.raw_config)["items"][0]["value"] == 1
 
 
 @pytest.mark.parametrize(
@@ -760,10 +850,23 @@ def test_deprecation_warning_includes_an_intermediate_alias(tmp_path: Path) -> N
 
 
 def test_real_aliases_resolve_to_their_canonical_raw_configs() -> None:
-    openclaw_alias = resolve_system_config("openclaw-hybrid", environ={})
-    openclaw_canonical = resolve_system_config("openclaw", environ={})
-    hermes_alias = resolve_system_config("hermes", environ={})
-    hermes_canonical = resolve_system_config("hermes-holographic", environ={})
+    environ = {
+        "HERMES_REPO_PATH": "/tmp/hermes",
+        "LLM_API_KEY": "llm-key",
+        "LLM_MODEL": "test-model",
+        "OPENCLAW_REPO_PATH": "/tmp/openclaw",
+        "SOPH_API_KEY": "embed-key",
+    }
+    openclaw_alias = resolve_system_config(
+        "openclaw-hybrid", environ=environ, allow_legacy=True
+    )
+    openclaw_canonical = resolve_system_config(
+        "openclaw", environ=environ, allow_legacy=True
+    )
+    hermes_alias = resolve_system_config("hermes", environ=environ, allow_legacy=True)
+    hermes_canonical = resolve_system_config(
+        "hermes-holographic", environ=environ, allow_legacy=True
+    )
 
     assert openclaw_alias.raw_config == openclaw_canonical.raw_config
     assert openclaw_alias.canonical_id == "openclaw"
