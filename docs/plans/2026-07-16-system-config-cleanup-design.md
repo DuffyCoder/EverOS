@@ -186,7 +186,9 @@ Confirmed behavior-affecting defects are handled later in separate commits:
   `requests_per_second` setting;
 - `memu.min_similarity` not being read from system configuration;
 - `evermemos_cloud_api.search.timeout_seconds` not being consumed; and
-- retry settings whose actual owner is the pipeline retry policy.
+- `answer.max_retries` entries on non-online adapters, where the field has no
+  consumer. Online API adapters retain it for inner LLM-call retries, which
+  remain distinct from the pipeline's outer retry policy.
 
 Fields proven to have no consumer, including current
 `openclaw.prompts.{memory_mode,flush_mode,answer_mode}`, are removed during
