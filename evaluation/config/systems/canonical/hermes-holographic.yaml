@@ -1,0 +1,9 @@
+extends: "_bases/hermes.yaml"
+
+hermes:
+  plugin: "holographic"
+  ingest_strategy: "session_end"
+  plugin_config:
+    auto_extract: true
+    default_trust: 0.5
+    hrr_dim: 1024

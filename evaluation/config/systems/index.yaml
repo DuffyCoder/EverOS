@@ -46,19 +46,19 @@ systems:
     adapter: hermes
     category: canonical
     status: active
-    path: hermes-holographic.yaml
+    path: canonical/hermes-holographic.yaml
     description: Hermes holographic-memory benchmark preset.
   hermes-honcho:
     adapter: hermes
     category: canonical
     status: active
-    path: hermes-honcho.yaml
+    path: canonical/hermes-honcho.yaml
     description: Hermes Honcho-backed benchmark preset.
   hermes-hindsight:
     adapter: hermes
     category: canonical
     status: active
-    path: hermes-hindsight.yaml
+    path: canonical/hermes-hindsight.yaml
     description: Hermes Hindsight-backed benchmark preset.
   openclaw:
     adapter: openclaw

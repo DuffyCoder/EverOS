@@ -70,6 +70,13 @@ PUBLIC_ONLINE_SYSTEM_IDS = (
     "zep",
 )
 
+HERMES_SYSTEM_IDS = (
+    "hermes",
+    "hermes-holographic",
+    "hermes-honcho",
+    "hermes-hindsight",
+)
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -489,6 +496,40 @@ def test_public_online_system_configs_live_only_in_canonical_directory(
     assert index.systems[system_id].path.as_posix() == f"canonical/{system_id}.yaml"
     assert (systems_root / "canonical" / f"{system_id}.yaml").is_file()
     assert not (systems_root / f"{system_id}.yaml").exists()
+
+
+@pytest.mark.parametrize("system_id", HERMES_SYSTEM_IDS)
+def test_hermes_family_migration_preserves_immutable_baseline(system_id: str) -> None:
+    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]
+
+    resolved = resolve_system_config(
+        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
+    )
+    effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+
+    assert resolved.raw_config == expected["raw_config"]
+    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+    assert effective == expected["effective_config"]
+    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_hermes_family_uses_canonical_leaves_and_alias_only() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    index = load_system_index()
+
+    assert (systems_root / "_bases" / "hermes.yaml").is_file()
+    for system_id in HERMES_SYSTEM_IDS[1:]:
+        expected_path = f"canonical/{system_id}.yaml"
+        assert index.systems[system_id].path is not None
+        assert index.systems[system_id].path.as_posix() == expected_path
+        assert (systems_root / expected_path).is_file()
+
+    assert index.systems["hermes"].path is None
+    assert index.systems["hermes"].alias_of == "hermes-holographic"
+    for system_id in HERMES_SYSTEM_IDS:
+        assert not (systems_root / f"{system_id}.yaml").exists()
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

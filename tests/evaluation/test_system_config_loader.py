@@ -19,6 +19,30 @@ from evaluation.src.config.system_loader import (
     resolve_system_config,
 )
 
+SYSTEMS_ROOT = DEFAULT_SYSTEM_INDEX_PATH.parent
+HERMES_VARIANTS = {
+    "hermes-holographic": {
+        "plugin": "holographic",
+        "ingest_strategy": "session_end",
+        "plugin_config": {"auto_extract": True, "default_trust": 0.5, "hrr_dim": 1024},
+    },
+    "hermes-honcho": {
+        "plugin": "honcho",
+        "ingest_strategy": "sync_per_turn",
+        "plugin_config": {},
+    },
+    "hermes-hindsight": {
+        "plugin": "hindsight",
+        "ingest_strategy": "sync_per_turn",
+        "plugin_config": {},
+    },
+}
+HERMES_ENVIRONMENT = {
+    "HERMES_REPO_PATH": "/tmp/hermes",
+    "LLM_API_KEY": "llm-key",
+    "LLM_MODEL": "test-model",
+}
+
 
 def _index_document() -> dict[str, Any]:
     document = yaml.safe_load(DEFAULT_SYSTEM_INDEX_PATH.read_text(encoding="utf-8"))
@@ -876,3 +900,59 @@ def test_real_aliases_resolve_to_their_canonical_raw_configs() -> None:
     assert hermes_alias.raw_config == hermes_canonical.raw_config
     assert hermes_alias.canonical_id == "hermes-holographic"
     assert hermes_alias.alias_chain == ("hermes", "hermes-holographic")
+    assert tuple(
+        path.relative_to(SYSTEMS_ROOT).as_posix() for path in hermes_alias.source_paths
+    ) == ("_bases/hermes.yaml", "canonical/hermes-holographic.yaml")
+
+
+def test_real_hermes_base_contains_only_shared_sections() -> None:
+    base_path = SYSTEMS_ROOT / "_bases" / "hermes.yaml"
+
+    assert base_path.is_file()
+    base = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+
+    assert set(base) == {"adapter", "llm", "search", "answer", "hermes"}
+    assert set(base["hermes"]) == {"repo_path", "prompts"}
+
+
+@pytest.mark.parametrize(("system_id", "variant"), HERMES_VARIANTS.items())
+def test_real_hermes_variant_files_contain_only_plugin_axis(
+    system_id: str, variant: dict[str, Any]
+) -> None:
+    leaf_path = SYSTEMS_ROOT / "canonical" / f"{system_id}.yaml"
+
+    assert leaf_path.is_file()
+    leaf = yaml.safe_load(leaf_path.read_text(encoding="utf-8"))
+
+    assert leaf == {"extends": "_bases/hermes.yaml", "hermes": variant}
+
+
+@pytest.mark.parametrize("system_id", HERMES_VARIANTS)
+def test_real_hermes_variants_source_from_shared_base(system_id: str) -> None:
+    resolved = resolve_system_config(
+        system_id, environ=HERMES_ENVIRONMENT, allow_legacy=True
+    )
+
+    assert tuple(
+        path.relative_to(SYSTEMS_ROOT).as_posix() for path in resolved.source_paths
+    ) == ("_bases/hermes.yaml", f"canonical/{system_id}.yaml")
+
+
+def test_real_hermes_variants_differ_only_on_plugin_axis() -> None:
+    shared_configs = []
+
+    for system_id, expected_variant in HERMES_VARIANTS.items():
+        raw_config = resolve_system_config(
+            system_id, environ=HERMES_ENVIRONMENT, allow_legacy=True
+        ).raw_config
+        assert {
+            key: raw_config["hermes"][key]
+            for key in ("plugin", "ingest_strategy", "plugin_config")
+        } == expected_variant
+
+        shared_config = deepcopy(raw_config)
+        for key in ("plugin", "ingest_strategy", "plugin_config"):
+            shared_config["hermes"].pop(key)
+        shared_configs.append(shared_config)
+
+    assert shared_configs[1:] == [shared_configs[0]] * (len(shared_configs) - 1)

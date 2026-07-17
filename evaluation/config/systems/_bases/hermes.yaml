@@ -19,9 +19,5 @@ answer:
 
 hermes:
   repo_path: "${HERMES_REPO_PATH}"
-  plugin: "honcho"
-  ingest_strategy: "sync_per_turn"
-  # Honcho reads HONCHO_API_KEY from the process env — do not duplicate here.
-  plugin_config: {}
   prompts:
     answer_mode: "shared"
