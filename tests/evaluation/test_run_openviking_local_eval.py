@@ -39,9 +39,22 @@ def _valid_mock_runner_environment(
 
     command_bodies = {
         "ss": "printf '%s' \"${FAKE_SS_OUTPUT:-}\"\nexit \"${FAKE_SS_STATUS:-0}\"\n",
-        "kill": "exit \"${FAKE_KILL_STATUS:-0}\"\n",
+        "kill": (
+            'if [[ -n "${FAKE_KILL_WAIT_FOR_FILE:-}" ]]; then\n'
+            "  for _ in {1..1000}; do\n"
+            '    [[ -e "$FAKE_KILL_WAIT_FOR_FILE" ]] && break\n'
+            "    /bin/sleep 0.001\n"
+            "  done\n"
+            "fi\n"
+            'exit "${FAKE_KILL_STATUS:-0}"\n'
+        ),
         "curl": "printf '%s\\n' \"${FAKE_CURL_OUTPUT:-{\\\"status\\\":\\\"ok\\\"}}\"\nexit \"${FAKE_CURL_STATUS:-0}\"\n",
-        "setsid": "exit \"${FAKE_SETSID_STATUS:-0}\"\n",
+        "setsid": (
+            'if [[ -n "${FAKE_SETSID_STARTED_FILE:-}" ]]; then\n'
+            '  : > "$FAKE_SETSID_STARTED_FILE"\n'
+            "fi\n"
+            'exit "${FAKE_SETSID_STATUS:-0}"\n'
+        ),
         "git": "[[ \"$*\" == *rev-parse* ]] && echo abc123 || echo main\nexit 0\n",
     }
     for command in (*EXTERNAL_COMMANDS, "kill"):
@@ -49,9 +62,11 @@ def _valid_mock_runner_environment(
         body = command_bodies.get(command, "exit 0\n")
         executable.write_text(
             "#!/usr/bin/env bash\n"
-            f"printf '{command}' >> \"$FAKE_COMMAND_LOG\"\n"
-            "printf ' <%s>' \"$@\" >> \"$FAKE_COMMAND_LOG\"\n"
-            "printf '\\n' >> \"$FAKE_COMMAND_LOG\"\n"
+            f"command_line='{command}'\n"
+            'for argument in "$@"; do\n'
+            "  printf -v command_line '%s <%s>' \"$command_line\" \"$argument\"\n"
+            "done\n"
+            "printf '%s\\n' \"$command_line\" >> \"$FAKE_COMMAND_LOG\"\n"
             + body,
             encoding="utf-8",
         )
@@ -691,12 +706,15 @@ def test_exited_server_process_cannot_be_mistaken_for_healthy_endpoint(
     tmp_path: Path,
 ) -> None:
     env, paths = _valid_mock_runner_environment(tmp_path)
+    server_started = tmp_path / "setsid-started"
     env.update(
         {
             "FAKE_SS_OUTPUT": "",
             "FAKE_KILL_STATUS": "1",
+            "FAKE_KILL_WAIT_FOR_FILE": str(server_started),
             "FAKE_CURL_STATUS": "0",
             "FAKE_SETSID_STATUS": "17",
+            "FAKE_SETSID_STARTED_FILE": str(server_started),
         }
     )
 
