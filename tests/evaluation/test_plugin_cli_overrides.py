@@ -136,7 +136,7 @@ def test_plugin_overrides_preserve_shipped_preset_operational_tuning(
     system_id: str,
 ) -> None:
     config = resolve_system_config(
-        system_id, environ=SHIPPED_CONFIG_ENVIRONMENT, allow_legacy=True
+        system_id, environ=SHIPPED_CONFIG_ENVIRONMENT
     ).config
     expected = deepcopy(config)
 

@@ -74,20 +74,8 @@ _STRUCTURED_SECRET_KEYS = frozenset(
     {"authorization", "proxy_authorization", "credential", "credentials"}
 )
 _STRUCTURED_SECRET_KEY_SUFFIXES = ("_credential", "_credentials")
-_LEGACY_EMBEDDING_CANONICAL_IDS = frozenset(
-    {
-        "openclaw",
-        "openclaw-hybrid-noflush",
-        "openclaw-native-embed",
-        "openclaw-vector",
-        "openclaw-vector-noflush",
-    }
-)
-_LEGACY_EMBEDDING_POINTER = "/openclaw/embedding/api_key"
-_LEGACY_EMBEDDING_VALUE = "${SOPH_API_KEY}"
-_LEGACY_STUB_ID = "openclaw-docker-stub"
-_LEGACY_STUB_POINTER = "/openclaw_docker/image"
-_LEGACY_STUB_IMAGE = "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"
+_FORBIDDEN_EMBEDDING_POINTER = "/openclaw/embedding/api_key"
+_DOCKER_IMAGE_POINTER = "/openclaw_docker/image"
 
 
 @dataclass(frozen=True)
@@ -112,13 +100,10 @@ class SystemPolicyError(ValueError):
 
 
 def validate_raw_system_policy(
-    adapter: str,
-    config: Mapping[str, Any],
-    *,
-    canonical_id: str,
-    allow_legacy: bool = False,
+    adapter: str, config: Mapping[str, Any], *, canonical_id: str
 ) -> tuple[PolicyFinding, ...]:
-    """Validate merged, unexpanded YAML and return visible legacy findings."""
+    """Validate merged, unexpanded YAML against the strict source policy."""
+    del canonical_id
     if not isinstance(config, Mapping):
         raise SystemPolicyError(
             (
@@ -131,29 +116,17 @@ def validate_raw_system_policy(
         )
 
     violations: list[PolicyFinding] = []
-    legacy: list[PolicyFinding] = []
-    _inspect_raw(
-        config,
-        pointer="",
-        adapter=adapter,
-        canonical_id=canonical_id,
-        allow_legacy=allow_legacy,
-        violations=violations,
-        legacy=legacy,
-    )
+    _inspect_raw(config, pointer="", adapter=adapter, violations=violations)
     if violations:
         raise SystemPolicyError(tuple(violations))
-    return tuple(sorted(legacy, key=lambda finding: (finding.pointer, finding.code)))
+    return ()
 
 
 def validate_runtime_system_policy(
-    adapter: str,
-    config: Mapping[str, Any],
-    *,
-    canonical_id: str,
-    allow_legacy: bool = False,
+    adapter: str, config: Mapping[str, Any], *, canonical_id: str
 ) -> tuple[PolicyFinding, ...]:
     """Validate runtime-safe non-secret policy, currently Docker images."""
+    del adapter, canonical_id
     if not isinstance(config, Mapping):
         raise SystemPolicyError(
             (
@@ -166,18 +139,10 @@ def validate_runtime_system_policy(
         )
 
     violations: list[PolicyFinding] = []
-    legacy: list[PolicyFinding] = []
-    _inspect_docker_image(
-        config,
-        adapter=adapter,
-        canonical_id=canonical_id,
-        allow_legacy=allow_legacy,
-        violations=violations,
-        legacy=legacy,
-    )
+    _inspect_docker_image(config, violations=violations)
     if violations:
         raise SystemPolicyError(tuple(violations))
-    return tuple(sorted(legacy, key=lambda finding: (finding.pointer, finding.code)))
+    return ()
 
 
 def _inspect_env_var_names(
@@ -242,14 +207,7 @@ def _inspect_secret_list(
 
 
 def _inspect_raw(
-    value: Any,
-    *,
-    pointer: str,
-    adapter: str,
-    canonical_id: str,
-    allow_legacy: bool,
-    violations: list[PolicyFinding],
-    legacy: list[PolicyFinding],
+    value: Any, *, pointer: str, adapter: str, violations: list[PolicyFinding]
 ) -> None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
@@ -271,42 +229,17 @@ def _inspect_raw(
                             message=_env_name_message(nested_pointer),
                         )
                     )
-            elif nested_pointer.endswith(_LEGACY_EMBEDDING_POINTER):
-                if (
-                    nested_pointer == _LEGACY_EMBEDDING_POINTER
-                    and adapter == "openclaw"
-                    and canonical_id in _LEGACY_EMBEDDING_CANONICAL_IDS
-                    and nested == _LEGACY_EMBEDDING_VALUE
-                ):
-                    finding = PolicyFinding(
-                        code="legacy-embedding-api-key",
+            elif nested_pointer.endswith(_FORBIDDEN_EMBEDDING_POINTER):
+                violations.append(
+                    PolicyFinding(
+                        code="forbidden-embedding-api-key",
                         pointer=nested_pointer,
-                        message=(
-                            "legacy embedding api_key marker must migrate to "
-                            "api_key_env"
-                        ),
+                        message="embedding credentials must use api_key_env",
                     )
-                    if allow_legacy:
-                        legacy.append(finding)
-                    else:
-                        violations.append(finding)
-                else:
-                    violations.append(
-                        PolicyFinding(
-                            code="forbidden-embedding-api-key",
-                            pointer=nested_pointer,
-                            message=("embedding credentials must use api_key_env"),
-                        )
-                    )
-            elif nested_pointer.endswith(_LEGACY_STUB_POINTER):
+                )
+            elif nested_pointer.endswith(_DOCKER_IMAGE_POINTER):
                 _inspect_docker_image_value(
-                    nested,
-                    pointer=nested_pointer,
-                    adapter=adapter,
-                    canonical_id=canonical_id,
-                    allow_legacy=allow_legacy,
-                    violations=violations,
-                    legacy=legacy,
+                    nested, pointer=nested_pointer, violations=violations
                 )
             elif _is_secret_key(normalized_segment):
                 if _is_loopback_empty_key_exception(
@@ -335,13 +268,7 @@ def _inspect_raw(
                         )
                     )
             _inspect_raw(
-                nested,
-                pointer=nested_pointer,
-                adapter=adapter,
-                canonical_id=canonical_id,
-                allow_legacy=allow_legacy,
-                violations=violations,
-                legacy=legacy,
+                nested, pointer=nested_pointer, adapter=adapter, violations=violations
             )
         return
     if isinstance(value, list):
@@ -350,10 +277,7 @@ def _inspect_raw(
                 nested,
                 pointer=f"{pointer}/{index}",
                 adapter=adapter,
-                canonical_id=canonical_id,
-                allow_legacy=allow_legacy,
                 violations=violations,
-                legacy=legacy,
             )
         return
     if not isinstance(value, str):
@@ -377,64 +301,31 @@ def _inspect_raw(
 
 
 def _inspect_docker_image(
-    config: Mapping[str, Any],
-    *,
-    adapter: str,
-    canonical_id: str,
-    allow_legacy: bool,
-    violations: list[PolicyFinding],
-    legacy: list[PolicyFinding],
+    config: Mapping[str, Any], *, violations: list[PolicyFinding]
 ) -> None:
     docker = config.get("openclaw_docker")
     if not isinstance(docker, Mapping):
         return
     image = docker.get("image")
     _inspect_docker_image_value(
-        image,
-        pointer=_LEGACY_STUB_POINTER,
-        adapter=adapter,
-        canonical_id=canonical_id,
-        allow_legacy=allow_legacy,
-        violations=violations,
-        legacy=legacy,
+        image, pointer=_DOCKER_IMAGE_POINTER, violations=violations
     )
 
 
 def _inspect_docker_image_value(
-    image: Any,
-    *,
-    pointer: str,
-    adapter: str,
-    canonical_id: str,
-    allow_legacy: bool,
-    violations: list[PolicyFinding],
-    legacy: list[PolicyFinding],
+    image: Any, *, pointer: str, violations: list[PolicyFinding]
 ) -> None:
     if not isinstance(image, str) or not (
         "PLUGIN_REV" in image or "TODO" in image or _UNRESOLVED_MARKER.search(image)
     ):
         return
-    finding = PolicyFinding(
-        code="docker-image-placeholder",
-        pointer=pointer,
-        message="Docker image must not contain build or environment placeholders",
-    )
-    if (
-        pointer == _LEGACY_STUB_POINTER
-        and allow_legacy
-        and adapter == "openclaw-docker"
-        and canonical_id == _LEGACY_STUB_ID
-        and image == _LEGACY_STUB_IMAGE
-    ):
-        legacy.append(
-            PolicyFinding(
-                code="legacy-docker-image-placeholder",
-                pointer=_LEGACY_STUB_POINTER,
-                message="legacy stub image placeholder must migrate to a real image",
-            )
+    violations.append(
+        PolicyFinding(
+            code="docker-image-placeholder",
+            pointer=pointer,
+            message="Docker image must not contain build or environment placeholders",
         )
-    else:
-        violations.append(finding)
+    )
 
 
 def _is_loopback_empty_key_exception(

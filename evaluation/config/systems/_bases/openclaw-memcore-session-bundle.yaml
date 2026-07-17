@@ -58,10 +58,6 @@ openclaw:
     base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
     easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
     output_dimensionality: 1024
-  prompts:
-    memory_mode: native_compiled
-    flush_mode: session_bundle
-    answer_mode: shared
 
 openclaw_docker:
   image: openclaw-eval:7da23c3-memory-core-0000000-slim

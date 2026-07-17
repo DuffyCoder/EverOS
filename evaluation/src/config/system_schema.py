@@ -269,17 +269,10 @@ class AgentLLMConfig(_StrictModel):
 class EmbeddingConfig(_StrictModel):
     provider: NonEmptyStr
     model: NonEmptyStr
-    api_key: NonEmptyStr | None = None
-    api_key_env: OpenClawBridgeEnvName | None = None
+    api_key_env: OpenClawBridgeEnvName
     base_url: NonEmptyStr
     easyllm_id: NonEmptyStr | None = None
     output_dimensionality: PositiveInt
-
-    @model_validator(mode="after")
-    def _require_credential_reference(self) -> "EmbeddingConfig":
-        if self.api_key is None and self.api_key_env is None:
-            raise ValueError("embedding requires api_key or api_key_env")
-        return self
 
 
 class OVIngestConfig(_StrictModel):
@@ -300,12 +293,6 @@ class OVIngestConfig(_StrictModel):
     isolateAgentScopeByUser: bool | None = None
 
 
-class OpenClawPromptsConfig(_StrictModel):
-    memory_mode: Literal["native_compiled"]
-    flush_mode: Literal["disabled", "shared_llm", "session_bundle", "native"]
-    answer_mode: Literal["shared"]
-
-
 class OpenClawConfig(_StrictModel):
     repo_path: NonEmptyStr
     visibility_mode: Literal["settled", "eventual"]
@@ -318,7 +305,6 @@ class OpenClawConfig(_StrictModel):
     agent_timeout_seconds: PositiveInt | None = None
     agent_llm: AgentLLMConfig | None = None
     embedding: EmbeddingConfig | None = None
-    prompts: OpenClawPromptsConfig | None = None
     ov_ingest: OVIngestConfig | None = None
     honor_silent_token: bool | None = None
     ingest_session_tail: str | None = None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -38,9 +38,7 @@ FAKE_ENVIRONMENT = {
     "SOPH_EMBED_URL": "https://embed.example/v1",
     "ZEP_API_KEY": "zep-key",
 }
-
-LEGACY_EMBEDDING_REQUESTED_IDS: set[str] = set()
-LEGACY_REQUESTED_IDS: set[str] = set()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _raw_config(**updates: Any) -> dict[str, Any]:
@@ -368,82 +366,54 @@ def test_recursive_env_var_lists_require_bare_valid_names(bad_value: object) -> 
     assert error.value.findings[0].pointer == "/openclaw/agent_llm/env_vars/1"
 
 
-def test_strict_mode_rejects_embedding_api_key_even_when_it_is_a_marker() -> None:
-    config = _raw_config(
-        adapter="openclaw", openclaw={"embedding": {"api_key": "${SOPH_API_KEY}"}}
-    )
-
-    with pytest.raises(SystemPolicyError) as error:
-        validate_raw_system_policy("openclaw", config, canonical_id="openclaw")
-
-    assert len(error.value.findings) == 1
-    assert error.value.findings[0].code == "legacy-embedding-api-key"
-    assert error.value.findings[0].pointer == "/openclaw/embedding/api_key"
-
-
 @pytest.mark.parametrize(
-    "canonical_id",
+    ("adapter", "canonical_id", "value"),
     [
-        "openclaw",
-        "openclaw-hybrid-noflush",
-        "openclaw-native-embed",
-        "openclaw-vector",
-        "openclaw-vector-noflush",
+        ("openclaw", "openclaw", "${SOPH_API_KEY}"),
+        ("openclaw", "openclaw-vector", "${OTHER_API_KEY}"),
+        ("openclaw", "openclaw-native-embed", "${SOPH_API_KEY:}"),
+        ("openclaw", "openclaw-hybrid-noflush", "plaintext-secret"),
+        ("mem0", "openclaw", "${SOPH_API_KEY}"),
     ],
 )
-def test_legacy_mode_allows_only_the_exact_known_embedding_marker(
-    canonical_id: str,
-) -> None:
-    config = _raw_config(
-        adapter="openclaw", openclaw={"embedding": {"api_key": "${SOPH_API_KEY}"}}
-    )
-
-    findings = validate_raw_system_policy(
-        "openclaw", config, canonical_id=canonical_id, allow_legacy=True
-    )
-
-    assert len(findings) == 1
-    assert findings[0].code == "legacy-embedding-api-key"
-    assert findings[0].pointer == "/openclaw/embedding/api_key"
-
-
-@pytest.mark.parametrize(
-    ("canonical_id", "value"),
-    [
-        ("openclaw-fts", "${SOPH_API_KEY}"),
-        ("openclaw", "${OTHER_API_KEY}"),
-        ("openclaw", "plaintext-secret"),
-        ("openclaw", "${SOPH_API_KEY:}"),
-    ],
-)
-def test_legacy_mode_does_not_broaden_the_embedding_exception(
-    canonical_id: str, value: str
+def test_embedding_api_key_is_always_rejected(
+    adapter: str, canonical_id: str, value: str
 ) -> None:
     config = _raw_config(adapter="openclaw", openclaw={"embedding": {"api_key": value}})
 
-    with pytest.raises(SystemPolicyError):
-        validate_raw_system_policy(
-            "openclaw", config, canonical_id=canonical_id, allow_legacy=True
-        )
+    with pytest.raises(SystemPolicyError) as error:
+        validate_raw_system_policy(adapter, config, canonical_id=canonical_id)
+
+    assert len(error.value.findings) == 1
+    assert error.value.findings[0].code == "forbidden-embedding-api-key"
+    assert error.value.findings[0].pointer == "/openclaw/embedding/api_key"
 
 
-def test_legacy_embedding_exception_requires_the_openclaw_adapter() -> None:
-    config = _raw_config(
-        adapter="openclaw", openclaw={"embedding": {"api_key": "${SOPH_API_KEY}"}}
+def test_policy_and_loader_entrypoints_expose_no_legacy_bypass() -> None:
+    for entrypoint in (
+        validate_raw_system_policy,
+        validate_runtime_system_policy,
+        resolve_system_config,
+    ):
+        assert "allow_legacy" not in signature(entrypoint).parameters
+
+
+def test_active_config_sources_have_no_legacy_bypass_or_warning_wording() -> None:
+    source_paths = (
+        REPO_ROOT / "evaluation" / "src" / "config" / "system_policy.py",
+        REPO_ROOT / "evaluation" / "src" / "config" / "system_loader.py",
+        REPO_ROOT / "evaluation" / "src" / "config" / "cli_support.py",
+        REPO_ROOT / "evaluation" / "cli.py",
     )
 
-    with pytest.raises(SystemPolicyError) as error:
-        validate_raw_system_policy(
-            "mem0", config, canonical_id="openclaw", allow_legacy=True
-        )
+    for path in source_paths:
+        source = path.read_text(encoding="utf-8")
+        assert "allow_legacy" not in source
+        assert "Legacy runtime policy finding" not in source
+        assert "legacy system-config policy finding" not in source
 
-    assert error.value.findings[0].code == "forbidden-embedding-api-key"
 
-
-@pytest.mark.parametrize("allow_legacy", [False, True])
-def test_dataset_override_embedding_api_key_never_uses_the_legacy_exception(
-    allow_legacy: bool,
-) -> None:
+def test_dataset_override_embedding_api_key_is_always_rejected() -> None:
     config = _raw_config(
         adapter="openclaw",
         dataset_overrides={
@@ -454,9 +424,7 @@ def test_dataset_override_embedding_api_key_never_uses_the_legacy_exception(
     )
 
     with pytest.raises(SystemPolicyError) as error:
-        validate_raw_system_policy(
-            "openclaw", config, canonical_id="openclaw", allow_legacy=allow_legacy
-        )
+        validate_raw_system_policy("openclaw", config, canonical_id="openclaw")
 
     assert len(error.value.findings) == 1
     assert error.value.findings[0].code == "forbidden-embedding-api-key"
@@ -497,53 +465,29 @@ def test_docker_image_policy_rejects_build_placeholders(image: str) -> None:
     assert error.value.findings[0].pointer == "/openclaw_docker/image"
 
 
-def test_stub_image_legacy_exception_is_exact() -> None:
-    exact = _raw_config(
-        adapter="openclaw-docker",
-        openclaw_docker={"image": "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"},
-    )
-    findings = validate_raw_system_policy(
-        "openclaw-docker", exact, canonical_id="openclaw-docker-stub", allow_legacy=True
-    )
-    assert len(findings) == 1
-    assert findings[0].code == "legacy-docker-image-placeholder"
+@pytest.mark.parametrize(
+    "image",
+    [
+        "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim",
+        "openclaw-eval:other-PLUGIN_REV",
+        "openclaw:TODO",
+        "openclaw:${IMAGE_TAG}",
+    ],
+)
+@pytest.mark.parametrize(
+    "validator", [validate_raw_system_policy, validate_runtime_system_policy]
+)
+def test_docker_image_placeholders_are_always_rejected(
+    image: str, validator: Any
+) -> None:
+    config = _raw_config(adapter="openclaw-docker", openclaw_docker={"image": image})
 
-    changed = deepcopy(exact)
-    changed["openclaw_docker"]["image"] = "openclaw-eval:other-PLUGIN_REV"
-    with pytest.raises(SystemPolicyError):
-        validate_raw_system_policy(
-            "openclaw-docker",
-            changed,
-            canonical_id="openclaw-docker-stub",
-            allow_legacy=True,
-        )
+    with pytest.raises(SystemPolicyError) as error:
+        validator("openclaw-docker", config, canonical_id="openclaw-docker-stub")
 
-
-def test_runtime_stub_image_legacy_exception_is_exact() -> None:
-    exact = _raw_config(
-        adapter="openclaw-docker",
-        openclaw_docker={"image": "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"},
-    )
-
-    with pytest.raises(SystemPolicyError):
-        validate_runtime_system_policy(
-            "openclaw-docker", exact, canonical_id="openclaw-docker-stub"
-        )
-
-    findings = validate_runtime_system_policy(
-        "openclaw-docker", exact, canonical_id="openclaw-docker-stub", allow_legacy=True
-    )
-    assert len(findings) == 1
-    assert findings[0].code == "legacy-docker-image-placeholder"
-
-    with pytest.raises(SystemPolicyError):
-        validate_runtime_system_policy(
-            "openclaw-docker", exact, canonical_id="another-system", allow_legacy=True
-        )
-    with pytest.raises(SystemPolicyError):
-        validate_runtime_system_policy(
-            "openclaw", exact, canonical_id="openclaw-docker-stub", allow_legacy=True
-        )
+    assert len(error.value.findings) == 1
+    assert error.value.findings[0].code == "docker-image-placeholder"
+    assert error.value.findings[0].pointer == "/openclaw_docker/image"
 
 
 def test_runtime_policy_nonmapping_config_is_a_structured_domain_error() -> None:
@@ -564,7 +508,6 @@ def test_runtime_policy_nonmapping_config_is_a_structured_domain_error() -> None
     assert config[0] not in str(error.value)
 
 
-@pytest.mark.parametrize("allow_legacy", [False, True])
 @pytest.mark.parametrize(
     "image",
     [
@@ -573,8 +516,8 @@ def test_runtime_policy_nonmapping_config_is_a_structured_domain_error() -> None
         "openclaw:${IMAGE_TAG}",
     ],
 )
-def test_dataset_override_docker_image_placeholders_never_use_the_legacy_exception(
-    image: str, allow_legacy: bool
+def test_dataset_override_docker_image_placeholders_are_always_rejected(
+    image: str,
 ) -> None:
     config = _raw_config(
         adapter="openclaw-docker",
@@ -583,10 +526,7 @@ def test_dataset_override_docker_image_placeholders_never_use_the_legacy_excepti
 
     with pytest.raises(SystemPolicyError) as error:
         validate_raw_system_policy(
-            "openclaw-docker",
-            config,
-            canonical_id="openclaw-docker-stub",
-            allow_legacy=allow_legacy,
+            "openclaw-docker", config, canonical_id="openclaw-docker-stub"
         )
 
     assert len(error.value.findings) == 1
@@ -710,35 +650,12 @@ def test_findings_are_sorted_stable_and_redacted() -> None:
     )
 
 
-def test_all_shipped_systems_have_the_exact_legacy_policy_surface() -> None:
-    index = load_system_index(DEFAULT_SYSTEM_INDEX_PATH)
-    seen_findings: dict[str, tuple[PolicyFinding, ...]] = {}
-
-    for system_id in sorted(index.systems):
-        resolved = resolve_system_config(
-            system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-        )
-        seen_findings[system_id] = resolved.policy_findings
-        assert resolved.config["adapter"] == resolved.adapter
-
-    assert set(seen_findings) == set(index.systems)
-    assert {
-        system_id for system_id, findings in seen_findings.items() if findings
-    } == LEGACY_REQUESTED_IDS
-    assert all(len(findings) == 1 for findings in seen_findings.values() if findings)
-    assert {
-        system_id
-        for system_id, findings in seen_findings.items()
-        if findings and findings[0].code == "legacy-embedding-api-key"
-    } == LEGACY_EMBEDDING_REQUESTED_IDS
-    assert all(not findings for findings in seen_findings.values())
-
-
-def test_strict_loader_accepts_all_shipped_ids() -> None:
+def test_all_shipped_systems_have_no_policy_findings() -> None:
     index = load_system_index(DEFAULT_SYSTEM_INDEX_PATH)
 
     for system_id in sorted(index.systems):
         resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+        assert resolved.config["adapter"] == resolved.adapter
         assert resolved.policy_findings == ()
 
 

@@ -42,10 +42,6 @@ openclaw:
         cacheRead: 0
         cacheWrite: 0
       context_window: 128000
-  prompts:
-    memory_mode: native_compiled
-    flush_mode: session_bundle
-    answer_mode: shared
 
 openclaw_docker:
   network: bridge

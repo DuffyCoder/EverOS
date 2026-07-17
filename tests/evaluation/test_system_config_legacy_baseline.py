@@ -520,9 +520,7 @@ def test_every_legacy_id_resolves_with_a_registered_adapter() -> None:
     approved = approved_document["deltas"]
 
     for system_id, expected in baseline.items():
-        resolved = resolve_system_config(
-            system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-        )
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
         assert resolved.adapter in registered_adapters
         assert resolved.adapter == expected["adapter"]
         assert resolved.canonical_id == expected["canonical_id"]
@@ -579,9 +577,7 @@ def test_public_online_system_migration_preserves_immutable_baseline(
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected = baseline[system_id]
 
-    resolved = resolve_system_config(
-        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-    )
+    resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
 
     assert resolved.raw_config == expected["raw_config"]
@@ -609,9 +605,7 @@ def test_hermes_family_migration_preserves_immutable_baseline(system_id: str) ->
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected = baseline[system_id]
 
-    resolved = resolve_system_config(
-        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-    )
+    resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
 
     assert resolved.raw_config == expected["raw_config"]
@@ -757,9 +751,7 @@ def test_docker_plugin_migration_preserves_effective_legacy_semantics(
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected = baseline[system_id]
 
-    resolved = resolve_system_config(
-        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-    )
+    resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
 
     assert resolved.adapter == expected["adapter"] == "openclaw-docker"
     assert resolved.canonical_id == expected["canonical_id"] == system_id
@@ -847,9 +839,7 @@ def test_docker_plugin_family_uses_categorized_leaves_and_no_flat_files() -> Non
         assert entry.path.as_posix() == expected_path
         assert (systems_root / expected_path).is_file()
 
-        resolved = resolve_system_config(
-            system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
-        )
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
         assert tuple(
             path.relative_to(resolved_root).as_posix() for path in resolved.source_paths
         ) == ("_bases/openclaw-docker.yaml", expected_path)
@@ -876,7 +866,7 @@ def test_docker_plugin_approved_deltas_are_exact() -> None:
 
 
 @pytest.mark.parametrize("system_id", SESSION_BUNDLE_SYSTEM_IDS)
-def test_session_bundle_migration_preserves_exact_immutable_baseline(
+def test_session_bundle_migration_preserves_effective_immutable_baseline(
     system_id: str,
 ) -> None:
     legacy = _load_test_module("system_config_legacy")
@@ -886,10 +876,23 @@ def test_session_bundle_migration_preserves_exact_immutable_baseline(
     resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
 
-    assert resolved.raw_config == expected["raw_config"]
-    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+    assert legacy.json_pointer_differences(
+        expected["raw_config"], resolved.raw_config
+    ) == {"/openclaw/prompts"}
+    assert "prompts" not in resolved.raw_config["openclaw"]
     assert effective == expected["effective_config"]
     assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_session_bundle_approved_raw_deltas_are_exact() -> None:
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+
+    for system_id in SESSION_BUNDLE_SYSTEM_IDS:
+        actual = {
+            (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
+            for entry in approved_document["deltas"].get(system_id, [])
+        }
+        assert actual == {("/openclaw/prompts", "structure-only", "raw")}
 
 
 def test_memcore_session_bundle_base_and_leaves_are_exactly_minimal() -> None:
@@ -897,6 +900,7 @@ def test_memcore_session_bundle_base_and_leaves_are_exactly_minimal() -> None:
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected_base = deepcopy(baseline[MEMCORE_SESSION_BUNDLE_IDS[0]]["raw_config"])
     expected_base["openclaw"].pop("ingest_session_tail")
+    expected_base["openclaw"].pop("prompts")
 
     base_path = systems_root / "_bases" / "openclaw-memcore-session-bundle.yaml"
     assert yaml.safe_load(base_path.read_text(encoding="utf-8")) == expected_base
@@ -919,8 +923,11 @@ def test_openviking_session_bundle_base_and_leaves_are_exactly_minimal() -> None
     systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     raw_configs = [
-        baseline[system_id]["raw_config"] for system_id in OPENVIKING_SESSION_BUNDLE_IDS
+        deepcopy(baseline[system_id]["raw_config"])
+        for system_id in OPENVIKING_SESSION_BUNDLE_IDS
     ]
+    for raw_config in raw_configs:
+        raw_config["openclaw"].pop("prompts")
     expected_base = _common_mapping(raw_configs)
 
     base_path = systems_root / "_bases" / "openclaw-openviking.yaml"

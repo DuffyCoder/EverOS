@@ -74,7 +74,7 @@ def resolve_system_for_cli(
     systems_root: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> ResolvedSystemConfig:
-    """Resolve a public id in compatibility mode or exit like argparse."""
+    """Resolve a public registry id strictly or exit like argparse."""
     try:
         index = load_system_index(Path(index_path))
     except SystemIndexError as exc:
@@ -91,11 +91,6 @@ def resolve_system_for_cli(
             index_path=Path(index_path),
             systems_root=systems_root,
             environ=environ,
-            # The source tree still contains the seven audited legacy policy
-            # exceptions. Later migration tasks remove them; until then the
-            # CLI keeps every locked public id runnable and makes findings
-            # visible as warnings.
-            allow_legacy=True,
         )
     except (SystemConfigError, SystemIndexError) as exc:
         _exit_two(f"invalid system configuration for {system_id!r}: {exc}")
@@ -116,17 +111,12 @@ def default_result_dir(
 
 
 def system_cli_warnings(resolution: ResolvedSystemConfig) -> tuple[str, ...]:
-    """Return deterministic deprecation, experiment, and legacy warnings."""
+    """Return deterministic deprecation and experiment warnings."""
     warnings: list[str] = []
     if resolution.warning:
         warnings.append(resolution.warning)
     if resolution.status == "experimental":
         warnings.append(f"system {resolution.requested_id!r} is experimental")
-    for finding in resolution.policy_findings:
-        warnings.append(
-            f"legacy system-config policy finding "
-            f"{finding.pointer or '<root>'} [{finding.code}]: {finding.message}"
-        )
     return tuple(warnings)
 
 
@@ -220,10 +210,7 @@ def prepare_system_config_for_cli(
     try:
         validate_system_config(resolution.adapter, config)
         runtime_findings = validate_runtime_system_policy(
-            resolution.adapter,
-            config,
-            canonical_id=resolution.canonical_id,
-            allow_legacy=True,
+            resolution.adapter, config, canonical_id=resolution.canonical_id
         )
     except SystemSchemaError as exc:
         _exit_two(f"final system configuration violates schema: {exc}")

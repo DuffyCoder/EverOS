@@ -75,13 +75,6 @@ def _openclaw_block() -> dict[str, Any]:
         "backend_mode": "fts_only",
         "flush_mode": "shared_llm",
         "memory_mode": "memory-core",
-        "prompts": {
-            # The adapter audit found this legacy field under openclaw.prompts;
-            # openclaw_docker.environment is not read by the adapter.
-            "memory_mode": "native_compiled",
-            "flush_mode": "shared_llm",
-            "answer_mode": "shared",
-        },
     }
 
 
@@ -581,23 +574,15 @@ def test_openclaw_runtime_enum_value_sets(field: str, values: list[str]) -> None
         validate_system_config("openclaw", config)
 
 
-@pytest.mark.parametrize(
-    ("field", "values"),
-    [
-        ("memory_mode", ["native_compiled"]),
-        ("flush_mode", ["disabled", "shared_llm", "session_bundle", "native"]),
-        ("answer_mode", ["shared"]),
-    ],
-)
-def test_legacy_prompt_enum_value_sets(field: str, values: list[str]) -> None:
-    for value in values:
-        config = deepcopy(VALID_CONFIGS["openclaw"])
-        config["openclaw"]["prompts"][field] = value
-        assert validate_system_config("openclaw", config) is config
-
+def test_openclaw_prompts_are_rejected_as_adapter_unused_configuration() -> None:
     config = deepcopy(VALID_CONFIGS["openclaw"])
-    config["openclaw"]["prompts"][field] = "typo"
-    with pytest.raises(SystemSchemaError, match=rf"prompts\.{field}"):
+    config["openclaw"]["prompts"] = {
+        "memory_mode": "native_compiled",
+        "flush_mode": "shared_llm",
+        "answer_mode": "shared",
+    }
+
+    with pytest.raises(SystemSchemaError, match=r"openclaw\.prompts"):
         validate_system_config("openclaw", config)
 
 
@@ -670,17 +655,19 @@ def test_ov_ingest_requires_the_openviking_context_engine() -> None:
     assert validate_system_config("openclaw-docker", config) is config
 
 
-def test_embedding_requires_api_key_or_api_key_env() -> None:
+def test_embedding_requires_api_key_env_and_rejects_api_key() -> None:
     config = deepcopy(VALID_CONFIGS["openclaw"])
     config["openclaw"]["backend_mode"] = "vector"
     config["openclaw"]["embedding"] = _embedding()
     del config["openclaw"]["embedding"]["api_key_env"]
 
-    with pytest.raises(SystemSchemaError, match="api_key"):
+    with pytest.raises(SystemSchemaError, match="api_key_env"):
         validate_system_config("openclaw", config)
 
+    config["openclaw"]["embedding"]["api_key_env"] = "SOPH_API_KEY"
     config["openclaw"]["embedding"]["api_key"] = "runtime-secret"
-    assert validate_system_config("openclaw", config) is config
+    with pytest.raises(SystemSchemaError, match=r"embedding\.api_key"):
+        validate_system_config("openclaw", config)
 
 
 @pytest.mark.parametrize(

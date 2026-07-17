@@ -215,4 +215,4 @@ systems:
     category: tooling
     status: experimental
     path: tooling/openclaw-docker-openviking-session-bundle-noop-serial.yaml
-    description: Serialized OpenViking no-op preset for QA attribution.
+    description: Diagnostic-only serialized OpenViking no-op preset; not suitable for benchmark scoring.

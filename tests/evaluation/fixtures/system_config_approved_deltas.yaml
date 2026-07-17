@@ -145,3 +145,38 @@ deltas:
       classification: behavior-fix
       surface: effective
       rationale: The runnable stub image now uses the content-derived plugin revision.
+  openclaw-docker-memcore-session-bundle:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memcore-session-bundle-emptytail:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memcore-session-bundle-weaktail:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-memcore:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop-fixpack:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop-serial:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.

@@ -260,12 +260,6 @@ async def main(argv: Sequence[str] | None = None):
     )
     for warning in prepared.warnings:
         console.print(f"  [yellow]⚠️  {warning}[/yellow]")
-    for finding in prepared.runtime_policy_findings:
-        console.print(
-            f"  [yellow]⚠️  Legacy runtime policy finding "
-            f"{finding.pointer or '<root>'} [{finding.code}]: "
-            f"{finding.message}[/yellow]"
-        )
 
     plugin_override = prepared.plugin_override
     system_config = prepared.config

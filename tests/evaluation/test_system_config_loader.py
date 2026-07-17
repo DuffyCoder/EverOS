@@ -881,16 +881,10 @@ def test_real_aliases_resolve_to_their_canonical_raw_configs() -> None:
         "OPENCLAW_REPO_PATH": "/tmp/openclaw",
         "SOPH_API_KEY": "embed-key",
     }
-    openclaw_alias = resolve_system_config(
-        "openclaw-hybrid", environ=environ, allow_legacy=True
-    )
-    openclaw_canonical = resolve_system_config(
-        "openclaw", environ=environ, allow_legacy=True
-    )
-    hermes_alias = resolve_system_config("hermes", environ=environ, allow_legacy=True)
-    hermes_canonical = resolve_system_config(
-        "hermes-holographic", environ=environ, allow_legacy=True
-    )
+    openclaw_alias = resolve_system_config("openclaw-hybrid", environ=environ)
+    openclaw_canonical = resolve_system_config("openclaw", environ=environ)
+    hermes_alias = resolve_system_config("hermes", environ=environ)
+    hermes_canonical = resolve_system_config("hermes-holographic", environ=environ)
 
     assert openclaw_alias.raw_config == openclaw_canonical.raw_config
     assert openclaw_alias.canonical_id == "openclaw"
@@ -929,9 +923,7 @@ def test_real_hermes_variant_files_contain_only_plugin_axis(
 
 @pytest.mark.parametrize("system_id", HERMES_VARIANTS)
 def test_real_hermes_variants_source_from_shared_base(system_id: str) -> None:
-    resolved = resolve_system_config(
-        system_id, environ=HERMES_ENVIRONMENT, allow_legacy=True
-    )
+    resolved = resolve_system_config(system_id, environ=HERMES_ENVIRONMENT)
 
     assert tuple(
         path.relative_to(SYSTEMS_ROOT).as_posix() for path in resolved.source_paths
@@ -943,7 +935,7 @@ def test_real_hermes_variants_differ_only_on_plugin_axis() -> None:
 
     for system_id, expected_variant in HERMES_VARIANTS.items():
         raw_config = resolve_system_config(
-            system_id, environ=HERMES_ENVIRONMENT, allow_legacy=True
+            system_id, environ=HERMES_ENVIRONMENT
         ).raw_config
         assert {
             key: raw_config["hermes"][key]

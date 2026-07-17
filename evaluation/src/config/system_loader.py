@@ -73,7 +73,6 @@ def resolve_system_config(
     index_path: Path = DEFAULT_SYSTEM_INDEX_PATH,
     systems_root: Path | None = None,
     environ: Mapping[str, str] | None = None,
-    allow_legacy: bool = False,
 ) -> ResolvedSystemConfig:
     """Resolve aliases, inheritance, and environment markers for a public id."""
     resolved_index_path = Path(index_path)
@@ -101,7 +100,7 @@ def resolve_system_config(
     adapter = canonical_entry.adapter
     try:
         policy_findings = validate_raw_system_policy(
-            adapter, raw_config, canonical_id=canonical_id, allow_legacy=allow_legacy
+            adapter, raw_config, canonical_id=canonical_id
         )
     except SystemPolicyError as exc:
         raise SystemConfigError(
