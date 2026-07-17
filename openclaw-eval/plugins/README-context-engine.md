@@ -133,11 +133,17 @@ openclaw_docker:
   ...
 ```
 
-Register the public system id and categorized path in
-`evaluation/config/systems/index.yaml`; do not add a new root-level system
-yaml. The image must be a concrete tag (normally one recorded in
-`evaluation/config/image_manifest.yaml`); build placeholders are rejected by
-the system-config policy.
+For bundled source, first register the plugin in
+`evaluation/config/plugin_registry.yaml` with `kind: context-engine` and
+`type: bundled-source` (plus `source_dir` when it is not the default
+`openclaw-eval/plugins/<id>/`). That registration is sufficient to select the
+plugin with the generic OpenClaw Docker system. Only if a stable named system
+preset is also required, register its categorized preset afterward in
+`evaluation/config/systems/index.yaml`, following the exact 36-ID contract and
+explicit expansion procedure in the system-configuration guide; do not add a
+new root-level system YAML. The image must be a concrete tag (normally one
+recorded in `evaluation/config/image_manifest.yaml`); build placeholders are
+rejected by the system-config policy.
 
 The adapter env-emits `CONTEXT_ENGINE_PLUGIN_ID=your-plugin` and the
 container entrypoint conditionally injects `slots.contextEngine` into
@@ -187,7 +193,7 @@ load-bearing end-to-end content check.
 
 | Mode | Where | When |
 |---|---|---|
-| Bundled | `openclaw-eval/plugins/<your-plugin>/` | Self-authored plugins, forks needing source-level changes |
+| Bundled | Put source under `openclaw-eval/plugins/<your-plugin>/` and register `kind: context-engine` and `type: bundled-source` in `evaluation/config/plugin_registry.yaml`; only if a stable named preset is needed, register it afterward in the system index | Self-authored plugins and forks needing source-level changes |
 | npm install | Register `type: npm` in `evaluation/config/plugin_registry.yaml`, then select `--context-engine <id>@<version>` | Officially published plugins tested as-is. Use `--plugin-spec <id>=npm:...` only for an explicit source override; `--install-spec` is deprecated. See [install-mode onboarding](README-install-mode.md). |
 
 Both modes route through the same slot-wiring + entrypoint render

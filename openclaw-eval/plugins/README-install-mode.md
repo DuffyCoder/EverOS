@@ -20,13 +20,15 @@ and evaluation CLI. npm-backed plugins require an explicit version:
 
 ```bash
 # Registered npm memory plugin
-python3 openclaw-eval/harness/build.py \
-  --memory-plugin hindsight-plugin@0.5.0
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin hindsight-plugin@0.5.0 \
+  --dry-run
 
 # Registered npm context engine, paired with the built-in memory baseline
-python3 openclaw-eval/harness/build.py \
+uv run python openclaw-eval/harness/build.py \
   --memory-plugin memory-core \
-  --context-engine hypercompositor@0.9.6
+  --context-engine hypercompositor@0.9.6 \
+  --dry-run
 ```
 
 The registry validates each plugin's kind (`memory` or `context-engine`) and
@@ -59,14 +61,20 @@ Then select `your-engine@<version>`. Do not use an unregistered package name
 as a public plugin ID, and do not rely on `latest`; explicit versions keep
 resolution and image tags reproducible.
 
-For a private registry, fork, or local npm-compatible package/archive, keep
-the registered ID and override only its install spec:
+For an alternate package in an npm registry that `npm pack` can reach from the
+Docker build, keep the registered ID and override only its install spec:
 
 ```bash
-python3 openclaw-eval/harness/build.py \
-  --context-engine your-engine@1.2.3 \
-  --plugin-spec your-engine=npm:@your-scope/your-engine@1.2.3
+uv run python openclaw-eval/harness/build.py \
+  --context-engine hypercompositor@0.9.6 \
+  --plugin-spec hypercompositor=npm:@your-scope/hypercompositor@0.9.6 \
+  --dry-run
 ```
+
+This flow does not promise access to a host-local path or archive: `npm pack`
+runs inside the Docker build environment, where an arbitrary host path is not
+present. Publish or otherwise expose the package through a registry reachable
+from that build environment.
 
 The legacy `--install-spec`, `--install-plugin-id`, and
 `--extra-install-spec` flags remain as deprecated compatibility shims. They

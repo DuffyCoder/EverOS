@@ -1497,10 +1497,12 @@ git commit -m "fix(eval): honor per-system search timeouts"
 - Modify: `evaluation/README.md`
 - Modify: `evaluation/docs/README.md`
 - Modify: `evaluation/docs/openclaw_adapter.md`
+- Modify: `evaluation/docs/round-finish.md`
 - Modify: `evaluation/docs/system-configs/README.md`
 - Modify: `openclaw-eval/plugins/README-context-engine.md`
 - Modify: `openclaw-eval/plugins/README-install-mode.md`
 - Modify: `docs/usage/USAGE_EXAMPLES.md`
+- Modify: `docs/evaluation/analysis/README.md`
 - Modify: `docs/evaluation/compatibility-baseline.md`
 - Modify: `AGENTS.md`
 - Modify: `docs/plans/2026-07-16-system-config-cleanup.md` only if commands or
@@ -1512,7 +1514,8 @@ Document:
 
 - how to select a stable id;
 - how aliases and deprecation warnings behave;
-- how to add canonical, experiment, ablation, and tooling entries;
+- how to change existing categorized entries and explicitly expand the locked
+  public-ID contract;
 - how `extends` merges dictionaries and replaces lists;
 - how to use secret markers;
 - how to run the config validation tests; and

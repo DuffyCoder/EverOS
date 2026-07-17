@@ -249,10 +249,19 @@ repository hygiene work.
 
 - Select systems by public ID from `evaluation/config/systems/index.yaml`,
   normally a `canonical` / `active` entry. Do not select a YAML filename.
-- New public presets require both a categorized leaf and an index entry:
-  `canonical/` for supported defaults, `experiments/` for exploratory work,
-  `ablations/` for controlled comparisons, and `tooling/` for diagnostics.
-  Compatibility aliases live only in the index and have no runnable leaf.
+- The registry is locked to exactly 36 IDs by
+  `EXPECTED_PUBLIC_SYSTEM_IDS` and exact-equality tests. Routine changes update
+  an existing categorized leaf and its index metadata, or an existing alias's
+  index-only row; adding only a leaf and index row cannot expose a 37th ID. A
+  deliberate public-ID expansion must also update the constant and catalog
+  row/tests, refactor the catalog/index and legacy-baseline gates so the
+  immutable original 36 remain a required subset, and test the new ID
+  separately. Never edit the pre-cleanup fixture to make a new ID appear
+  legacy.
+- Existing presets use `canonical/` for supported defaults, `experiments/` for
+  exploratory work, `ablations/` for controlled comparisons, and `tooling/`
+  for diagnostics. Compatibility aliases live only in the index and have no
+  runnable leaf.
 - `extends` recursively merges mappings; lists and scalar values replace the
   inherited value. Keep bases minimal and semantic differences in leaves.
 - Secret fields in tracked YAML use `${VAR}` or `${VAR:}` with no non-empty

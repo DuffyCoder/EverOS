@@ -10,8 +10,11 @@ two issues:
 > results tree, including OpenClaw workspaces. Those files may be very large and
 > may contain OpenClaw configuration, authentication material, API tokens, or
 > other secrets. Keep snapshots local and inspect and redact them before any
-> transfer or sharing. Until the planned compact archive tooling is available,
-> do not treat `round_finish.sh --archive` as a compact reproducibility package.
+> transfer or sharing. Use the implemented
+> [artifact lifecycle workflow](artifact-lifecycle.md) for normal compact
+> result evidence. Run `round_finish.sh --archive` only when a review or
+> incident investigation deliberately requires the complete OpenViking and
+> runtime state; never present it as a compact reproducibility package.
 
 1. **Cross-round contamination.** OpenViking data lives in the
    `openviking` container's writable layer (`/app/data/`, ~65 MB).

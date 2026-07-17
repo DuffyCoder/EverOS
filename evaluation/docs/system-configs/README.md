@@ -88,22 +88,41 @@ The three memcore leaves intentionally differ only in
 `openclaw.ingest_session_tail`. The emptytail value `""` explicitly disables
 the tail; it does not fall back to an adapter default.
 
-## Adding or changing an entry
+## Changing an entry or extending the contract
 
-1. Choose exactly one public category. Put supported benchmark defaults in
-   `canonical/`, exploratory variants in `experiments/`, controlled
-   one-variable comparisons in `ablations/`, and diagnostics in `tooling/`.
-2. Add a categorized leaf YAML and a matching `index.yaml` entry with
-   `adapter`, `category`, `status`, `path`, and `description`. A compatibility
-   alias has `category: alias` and `alias_of` instead of a physical YAML.
-3. Reuse `_bases/` only for genuinely identical family data. Keep semantic
-   differences in leaves and remember that mappings merge recursively while
-   lists and scalar values replace the inherited value in full.
-4. Update the public-ID constant and index/catalog expectations in the same
-   change. Preserve the immutable pre-cleanup 36-ID fixture; a new ID is
-   registered separately, while a change to an old ID's raw shape requires an
-   explicit approved delta. Adding a public ID is an intentional compatibility
-   contract change, not a way to expose an unindexed local YAML.
+The shipped registry is locked to exactly 36 IDs by
+`EXPECTED_PUBLIC_SYSTEM_IDS` and exact-equality catalog/baseline tests. Routine
+configuration work changes one of those existing IDs; adding a leaf and index
+row alone cannot create a 37th public ID.
+
+For an existing ID:
+
+1. Keep it in the appropriate category: `canonical/` for a supported default,
+   `experiments/` for exploratory work, `ablations/` for a controlled
+   comparison, or `tooling/` for diagnostics. Aliases remain index-only.
+2. Update its categorized leaf and matching `index.yaml` metadata without
+   changing the public-ID set.
+3. Reuse `_bases/` only for genuinely identical family data. Mappings merge
+   recursively; lists and scalar values replace the inherited value in full.
+4. Preserve the immutable pre-cleanup 36-ID fixture. If an existing ID's raw
+   shape or behavior intentionally changes, add the precise approved delta and
+   keep the strict schema, catalog, and legacy tests green.
+
+A new public ID is an explicit compatibility-contract expansion, not a normal
+registration path. The same change must:
+
+1. update `EXPECTED_PUBLIC_SYSTEM_IDS`;
+2. add a categorized leaf plus its `index.yaml` entry, or for an alias add only
+   the index entry with `alias_of`; in either case add the catalog row and
+   direct tests;
+3. refactor the catalog/index exact-equality gates and legacy-baseline test so
+   the immutable fixture's original 36 IDs remain a required subset while the
+   new ID is asserted separately; and
+4. leave `tests/evaluation/fixtures/system_configs_before_cleanup.json`
+   unchanged.
+
+Until all four contract changes are reviewed together, the 37th ID is rejected
+as unexpected.
 
 ## Retry ownership
 

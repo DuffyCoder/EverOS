@@ -314,9 +314,29 @@ after Task 14:
 bea40651a95963623ed46a65e7db58593b0a35d78734e990081bda49b3d0c133  -
 ```
 
+Recompute it from the repository root with the exact metadata pipeline used by
+this audit:
+
+```bash
+git ls-files --others -i --exclude-standard -z -- \
+  evaluation/archives docs/evaluation/analysis evaluation/results \
+  evaluation/experiments openclaw-eval/_active_sidecar \
+  evaluation/read_ov_search.py \
+  evaluation/memory_evaluation/extract_room_data.py \
+  evaluation/memory_evaluation/test.py \
+| LC_ALL=C sort -z \
+| xargs -0 -r stat --printf='%n\0%s\0%y\0%z\0%f\0' \
+| sha256sum
+```
+
 The fingerprint covers ignored archives, analysis, results, experiments,
-OpenClaw sidecar staging, and the three protected ignored evaluation helper
-paths. Existing ignored caches and archives were left in place.
+OpenClaw sidecar staging, and these three protected ignored helper paths:
+
+- `evaluation/read_ov_search.py`
+- `evaluation/memory_evaluation/extract_room_data.py`
+- `evaluation/memory_evaluation/test.py`
+
+Existing ignored caches and archives were left in place.
 
 ### Reproduction commands
 
