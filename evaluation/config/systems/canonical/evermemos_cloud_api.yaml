@@ -1,11 +1,9 @@
-# EverMemOS (HTTP API) System Configuration
 name: "evermemos_api"
 version: "1.0"
 description: "EverMemOS via HTTP Memory API"
 
 adapter: "evermemos_api"
 
-# EverMemOS API configuration
 # base_url can be either host base (https://api.evermind.ai) or full endpoint (.../api/v1/memories)
 base_url: "${EVERMEMOS_API_URL:https://api.evermind.ai/api/v1/memories}"
 # Hosted API requires Bearer token in Authorization header.
@@ -15,21 +13,18 @@ max_retries: 3
 timeout_seconds: 60
 request_interval: 0.0
 
-# Concurrency (conversation-level)
 num_workers: 10
 
-# Search configuration (maps to GET /api/v1/memories/search)
+# These fields map to GET /api/v1/memories/search.
 search:
   scope: "group"
   top_k: 10
-  # keep explicit fields for clarity/compatibility
   retrieve_method: "agentic"
   memory_types: ["episodic_memory"]
-  # Hosted API can be slow for agentic; tune here instead of hardcoding in code.
   num_workers: 10
+  # Compatibility-only: the current adapter does not consume this nested timeout.
   timeout_seconds: 300
 
-# LLM configuration (for answer generation, same as other online systems)
 llm:
   provider: "openai"
   model: "${LLM_MODEL}"
@@ -40,5 +35,3 @@ llm:
 
 answer:
   max_retries: 3
-
-

@@ -4,43 +4,43 @@ systems:
     adapter: evermemos
     category: canonical
     status: active
-    path: evermemos.yaml
+    path: canonical/evermemos.yaml
     description: In-process EverMemOS benchmark preset.
   evermemos_cloud_api:
     adapter: evermemos_api
     category: canonical
     status: active
-    path: evermemos_cloud_api.yaml
+    path: canonical/evermemos_cloud_api.yaml
     description: EverMemOS cloud API benchmark preset.
   evermemos_local_api:
     adapter: evermemos_api
     category: canonical
     status: active
-    path: evermemos_local_api.yaml
+    path: canonical/evermemos_local_api.yaml
     description: EverMemOS local API benchmark preset.
   mem0:
     adapter: mem0
     category: canonical
     status: active
-    path: mem0.yaml
+    path: canonical/mem0.yaml
     description: Mem0 API benchmark preset.
   memos:
     adapter: memos
     category: canonical
     status: active
-    path: memos.yaml
+    path: canonical/memos.yaml
     description: MemOS API benchmark preset.
   memu:
     adapter: memu
     category: canonical
     status: active
-    path: memu.yaml
+    path: canonical/memu.yaml
     description: MemU API benchmark preset.
   zep:
     adapter: zep
     category: canonical
     status: active
-    path: zep.yaml
+    path: canonical/zep.yaml
     description: Zep API benchmark preset.
   hermes-holographic:
     adapter: hermes

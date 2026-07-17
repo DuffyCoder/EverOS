@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 import yaml
@@ -145,7 +145,8 @@ def test_shipped_index_preserves_and_classifies_all_legacy_ids() -> None:
         if entry.category == "alias":
             assert entry.path is None
         else:
-            assert entry.path == PurePosixPath(f"{system_id}.yaml")
+            assert entry.path is not None
+            assert entry.path.name == f"{system_id}.yaml"
             assert (DEFAULT_SYSTEM_INDEX_PATH.parent / entry.path).is_file()
 
 
@@ -385,17 +386,14 @@ def test_entry_cannot_define_both_path_and_alias_target(tmp_path: Path) -> None:
     _assert_invalid(tmp_path, document, "evermemos.*both.*path.*alias_of")
 
 
-@pytest.mark.parametrize(
-    ("system_id", "path_value", "alias_value"),
-    [("evermemos", "evermemos.yaml", None), ("hermes", None, "hermes-holographic")],
-)
+@pytest.mark.parametrize("system_id", ["evermemos", "hermes"])
 def test_path_and_alias_keys_are_mutually_exclusive_even_when_one_is_null(
-    tmp_path: Path, system_id: str, path_value: object, alias_value: object
+    tmp_path: Path, system_id: str
 ) -> None:
     document = _index_document()
     entry = _systems(document)[system_id]
-    entry["path"] = path_value
-    entry["alias_of"] = alias_value
+    entry["path"] = entry.get("path")
+    entry["alias_of"] = entry.get("alias_of")
 
     _assert_invalid(tmp_path, document, f"{system_id}.*both.*path.*alias_of")
 
@@ -563,7 +561,8 @@ def test_alias_adapter_must_match_resolved_target(tmp_path: Path) -> None:
 
 def test_duplicate_paths_for_runnable_entries_are_rejected(tmp_path: Path) -> None:
     document = _index_document()
-    _systems(document)["evermemos_cloud_api"]["path"] = "evermemos.yaml"
+    systems = _systems(document)
+    systems["evermemos_cloud_api"]["path"] = systems["evermemos"]["path"]
 
     _assert_invalid(
         tmp_path, document, "duplicate path.*evermemos.*evermemos_cloud_api"

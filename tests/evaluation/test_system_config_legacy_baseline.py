@@ -60,6 +60,16 @@ EXPECTED_SYSTEM_IDS = {
     "zep",
 }
 
+PUBLIC_ONLINE_SYSTEM_IDS = (
+    "evermemos",
+    "evermemos_cloud_api",
+    "evermemos_local_api",
+    "mem0",
+    "memos",
+    "memu",
+    "zep",
+)
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -447,6 +457,38 @@ def test_every_legacy_id_resolves_with_a_registered_adapter() -> None:
         )
         if not effective_differences:
             assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+@pytest.mark.parametrize("system_id", PUBLIC_ONLINE_SYSTEM_IDS)
+def test_public_online_system_migration_preserves_immutable_baseline(
+    system_id: str,
+) -> None:
+    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]
+
+    resolved = resolve_system_config(
+        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
+    )
+    effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+
+    assert resolved.raw_config == expected["raw_config"]
+    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+    assert effective == expected["effective_config"]
+    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+@pytest.mark.parametrize("system_id", PUBLIC_ONLINE_SYSTEM_IDS)
+def test_public_online_system_configs_live_only_in_canonical_directory(
+    system_id: str,
+) -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    index = load_system_index()
+
+    assert index.systems[system_id].path is not None
+    assert index.systems[system_id].path.as_posix() == f"canonical/{system_id}.yaml"
+    assert (systems_root / "canonical" / f"{system_id}.yaml").is_file()
+    assert not (systems_root / f"{system_id}.yaml").exists()
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

@@ -1,0 +1,17 @@
+name: "evermemos"
+version: "1.0"
+description: "EverMemOS"
+
+adapter: "evermemos"
+
+llm:
+  provider: "openai"
+  model: "${LLM_MODEL}"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  max_tokens: 16384
+
+search:
+  mode: "agentic"  # agentic | lightweight
+  # Lightweight mode defaults to bm25_only; lightweight_search_mode can
+  # override it with hybrid or emb_only.

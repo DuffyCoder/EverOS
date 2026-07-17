@@ -107,7 +107,7 @@ evaluation/
 │   └── utils/          # Configuration, logging, I/O
 ├── config/
 │   ├── datasets/       # Dataset configurations (locomo.yaml, etc.)
-│   ├── systems/        # System configurations (evermemos.yaml, etc.)
+│   ├── systems/        # Registry-backed, categorized system configs
 │   └── prompts.yaml    # Prompt templates
 ├── data/               # Benchmark datasets
 └── results/            # Evaluation results and logs
@@ -217,7 +217,7 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --smoke --smoke-messages 20 --smoke-questions 5
 
 # You can also evaluate specific conversations with `--from-conv` and `--to-conv` (0-based, end exclusive):
-uv run python -m evaluation.cli --dataset locomo --system evermemos_custom --from-conv 0 --to-conv 1
+uv run python -m evaluation.cli --dataset locomo --system evermemos --from-conv 0 --to-conv 1
 ```
 
 
@@ -386,13 +386,26 @@ not a selectable public id:
 
 ```bash
 # Copy and edit configuration
-cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_custom.yaml
+cp evaluation/config/systems/canonical/evermemos.yaml \
+  evaluation/config/systems/canonical/evermemos_custom.yaml
 # Edit evermemos_custom.yaml with your changes
-# Add an evermemos_custom entry with path: evermemos_custom.yaml to
-# evaluation/config/systems/index.yaml
-# Repository maintainers must also update the locked public-id contract in
-# evaluation/src/config/system_index.py and its index/baseline tests.
+```
 
+Register it under `systems` in `evaluation/config/systems/index.yaml`:
+
+```yaml
+evermemos_custom:
+  adapter: evermemos
+  category: canonical
+  status: active
+  path: canonical/evermemos_custom.yaml
+  description: Custom EverMemOS benchmark preset.
+```
+
+Repository maintainers must also update the locked public-id contract in
+`evaluation/src/config/system_index.py` and its index/baseline tests.
+
+```bash
 # Run with custom config
 uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ```

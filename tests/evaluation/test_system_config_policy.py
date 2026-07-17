@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from evaluation.src.config.system_index import (
     DEFAULT_SYSTEM_INDEX_PATH,
@@ -708,11 +709,15 @@ def test_loader_applies_raw_policy_before_environment_substitution(
     index = load_system_index(DEFAULT_SYSTEM_INDEX_PATH)
     systems_root = tmp_path / "systems"
     systems_root.mkdir()
-    index_text = DEFAULT_SYSTEM_INDEX_PATH.read_text(encoding="utf-8").replace(
-        "path: mem0.yaml", "path: custom.yaml", 1
+    index_document = yaml.safe_load(
+        DEFAULT_SYSTEM_INDEX_PATH.read_text(encoding="utf-8")
     )
+    index_document["systems"]["mem0"]["path"] = "custom.yaml"
     index_path = systems_root / "index.yaml"
-    index_path.write_text(index_text, encoding="utf-8")
+    index_path.write_text(
+        yaml.safe_dump(index_document, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
     (systems_root / "custom.yaml").write_text(
         """
 adapter: mem0
