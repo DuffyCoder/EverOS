@@ -6,6 +6,17 @@ the public registry. Select a system with its registry ID (for example,
 The registry path is an internal implementation detail and may move without
 changing the public ID.
 
+For a reproducible benchmark, choose an ID whose registry entry has
+`category: canonical` and `status: active`. The two compatibility aliases
+remain valid, and the CLI prints their requested-to-canonical resolution (a
+resolution line, not an alias warning), but new commands and reports should
+name the canonical ID. Experimental,
+ablation, and tooling entries print an experimental warning; a deprecated
+entry prints its replacement. In every case the default result directory is
+derived from the **requested** ID, while `resolved-system-config.json` records
+both requested and canonical IDs. This keeps old command lines and result
+paths stable even if a compatibility alias resolves to another preset.
+
 ## Categories
 
 - `canonical/` contains active, supported benchmark presets.
@@ -77,6 +88,23 @@ The three memcore leaves intentionally differ only in
 `openclaw.ingest_session_tail`. The emptytail value `""` explicitly disables
 the tail; it does not fall back to an adapter default.
 
+## Adding or changing an entry
+
+1. Choose exactly one public category. Put supported benchmark defaults in
+   `canonical/`, exploratory variants in `experiments/`, controlled
+   one-variable comparisons in `ablations/`, and diagnostics in `tooling/`.
+2. Add a categorized leaf YAML and a matching `index.yaml` entry with
+   `adapter`, `category`, `status`, `path`, and `description`. A compatibility
+   alias has `category: alias` and `alias_of` instead of a physical YAML.
+3. Reuse `_bases/` only for genuinely identical family data. Keep semantic
+   differences in leaves and remember that mappings merge recursively while
+   lists and scalar values replace the inherited value in full.
+4. Update the public-ID constant and index/catalog expectations in the same
+   change. Preserve the immutable pre-cleanup 36-ID fixture; a new ID is
+   registered separately, while a change to an old ID's raw shape requires an
+   explicit approved delta. Adding a public ID is an intentional compatibility
+   contract change, not a way to expose an unindexed local YAML.
+
 ## Retry ownership
 
 `answer.max_retries` belongs only to the online API adapters `evermemos_api`,
@@ -98,10 +126,37 @@ validates existing ownership; it does not change retry behavior.
 
 ## Secrets and paths
 
-Commit only environment markers such as `${LLM_API_KEY}`; never put a secret
-value in a system YAML, fixture, result, or document. Runtime secret names must
-be explicitly allowlisted where a container needs them.
+Non-empty secret-valued fields may contain only `${VAR}` or `${VAR:}`. The
+second form means an empty fallback; a secret must never have a non-empty
+default. The sole literal-empty exception is `api_key: ""` for the strict
+loopback local EverMemOS API preset. Fields that name an environment variable,
+including `api_key_env` and every item in `env_vars`, use the bare name
+(`LLM_API_KEY`), not `${LLM_API_KEY}`. Non-secret fields may use
+`${VAR:default}` when a checked-in default is appropriate. Never put a
+credential value in a system YAML, fixture, result, or document, and explicitly
+list every secret name forwarded into a container.
 
 Every registry `path` and `extends` target is a relative POSIX path contained
 under `evaluation/config/systems/`. Absolute paths, `..`, backslashes, symlink
 traversal, and direct extension of an alias are rejected by the loader.
+
+## Validation
+
+Run the registry contract after every system-config change:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider \
+  tests/evaluation/test_system_config_legacy_baseline.py \
+  tests/evaluation/test_system_config_index.py \
+  tests/evaluation/test_system_config_loader.py \
+  tests/evaluation/test_system_config_schema.py \
+  tests/evaluation/test_system_config_policy.py \
+  tests/evaluation/test_system_config_cli.py \
+  tests/evaluation/test_system_config_metadata.py \
+  tests/evaluation/test_system_config_catalog.py -q
+```
+
+The suite must keep all 36 public IDs resolvable in strict mode, keep the
+catalog/index/leaf mapping exact, reject orphan or root-level runnable YAML,
+and validate the local Markdown links in this catalog.

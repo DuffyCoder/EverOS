@@ -1497,7 +1497,9 @@ git commit -m "fix(eval): honor per-system search timeouts"
 - Modify: `evaluation/README.md`
 - Modify: `evaluation/docs/README.md`
 - Modify: `evaluation/docs/openclaw_adapter.md`
+- Modify: `evaluation/docs/system-configs/README.md`
 - Modify: `openclaw-eval/plugins/README-context-engine.md`
+- Modify: `openclaw-eval/plugins/README-install-mode.md`
 - Modify: `docs/usage/USAGE_EXAMPLES.md`
 - Modify: `docs/evaluation/compatibility-baseline.md`
 - Modify: `AGENTS.md`
@@ -1524,7 +1526,8 @@ path plus an index entry; leave historical plans/specs unchanged.
 **Step 2: Run focused system-config verification**
 
 ```bash
-PYTHONPATH=src uv run pytest \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider \
   tests/evaluation/test_system_config_legacy_baseline.py \
   tests/evaluation/test_system_config_index.py \
   tests/evaluation/test_system_config_loader.py \
@@ -1540,7 +1543,8 @@ Expected: PASS; 36/36 ids resolve.
 **Step 3: Run adjacent adapter and tool tests**
 
 ```bash
-PYTHONPATH=src uv run pytest \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider \
   tests/evaluation/test_hypercompositor_yaml.py \
   tests/evaluation/test_openclaw_bridge_payload.py \
   tests/evaluation/test_openclaw_resolved_config.py \
@@ -1560,7 +1564,8 @@ Expected: PASS.
 **Step 4: Run the repository evaluation regression**
 
 ```bash
-PYTHONPATH=src uv run pytest tests/evaluation tests/routine -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider tests/evaluation tests/routine -q
 ```
 
 Expected: PASS with only the already documented skip/warning surface.
@@ -1568,18 +1573,23 @@ Expected: PASS with only the already documented skip/warning surface.
 Run full collection:
 
 ```bash
-PYTHONPATH=src uv run pytest tests/ --collect-only
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider tests/ --collect-only -q
 ```
 
-Expected: only the three accepted pre-existing collection debts recorded in
-`docs/evaluation/compatibility-baseline.md`; no new collection error.
+Expected: exit 2 with only the three accepted pre-existing collection debts
+recorded in `docs/evaluation/compatibility-baseline.md`: missing
+`get_text_embedding`, missing
+`keyword_vocabulary_milvus_repository`, and undeclared `psutil`; no new
+collection error.
 
 **Step 5: Run static and documentation checks**
 
 ```bash
 bash -n evaluation/scripts/run_latency_baseline.sh
 bash -n openclaw-eval/scripts/run_openviking_local_eval.sh
-PYTHONPATH=src uv run pytest \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider \
   tests/evaluation/test_system_config_catalog.py -q
 test -z "$(find evaluation/config/systems -maxdepth 1 -type f \
   -name '*.yaml' ! -name 'index.yaml' -print -quit)"
@@ -1608,6 +1618,7 @@ Record:
 git add AGENTS.md env.template docs/evaluation docs/usage \
   evaluation/README.md evaluation/docs \
   openclaw-eval/plugins/README-context-engine.md \
+  openclaw-eval/plugins/README-install-mode.md \
   docs/plans/2026-07-16-system-config-cleanup.md
 git commit -m "docs(eval): document system configuration governance"
 ```

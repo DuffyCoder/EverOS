@@ -2,8 +2,10 @@
 
 This adapter plugs the **OpenClaw memory backend** into the EverMemOS
 `Add → Search → Answer → Evaluate` pipeline, letting us score OpenClaw
-with the same prompt + judge + dataset loader as `mem0`, `memos`,
-`evermemos`, etc.
+with the same dataset loader, stage protocol, and judge as `mem0`, `memos`,
+`evermemos`, etc. Prompt ownership depends on `answer_mode`: `shared_llm`
+uses the benchmark answer prompt, while `agent_local` sends the raw question to
+the real `openclaw agent --local` loop.
 
 It is **not** a faithful reproduction of OpenClaw running in production.
 Call it what it is: *OpenClaw retrieval stack embedded in the unified
@@ -28,6 +30,13 @@ System selection is by public registry ID, not by a physical YAML filename.
 See the [system-configuration guide](system-configs/README.md) for registry and
 inheritance rules, and the [OpenViking notes](system-configs/openviking.md) for
 the session-bundle ingest, tenant, timeout, and image invariants.
+
+For routine benchmark runs, select a `canonical` / `active` ID from that
+catalog. `openclaw-hybrid` remains a compatibility alias for `openclaw`: the
+CLI displays the resolution, metadata records both IDs, and the default result
+directory continues to use the requested alias. Experimental, ablation, and
+tooling presets emit an experimental warning; deprecated entries name their
+replacement.
 
 ## Portable local OpenViking runner
 
@@ -98,14 +107,14 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 | Per-conversation isolation | Own `workspace`, `state_dir`, `home`, `cwd` — matches how v0.1/v0.2 bench adapters isolated runs |
 | Embedding provider | sophnet via OpenClaw's native `memorySearch.remote` config (for `vector` / `hybrid` modes) |
 | source_sessions projection | `memory/session-<SX>-<date>.md` filenames — FTS hits project back to session ids for cross-system retrieval metrics |
-| Status check | `openclaw memory status --json`; sandbox refuses to promote `visibility_state` to `settled` unless OpenClaw confirms (plan Review-driven revision #3) |
+| Status check | `openclaw memory status --json`; the sandbox does not promote `visibility_state` to `settled` until OpenClaw confirms the index state. |
 
 ## Approximate, with documented divergence
 
 | Concern | OpenClaw native | This adapter |
 |---------|-----------------|--------------|
 | Memory flush (`flush_mode: "shared_llm"`) | Agent-runner-memory triggers an in-turn flush agent when the conversation crosses a token threshold (`buildMemoryFlushPlan`). Uses the agent's own LLM. | Runs once per session at ingest time with the benchmark's shared LLM provider and a prompt *modelled on* (not copied from) `buildMemoryFlushPlan`. OpenClaw's own `compaction.memoryFlush.enabled` is kept **off** so search never re-flushes. |
-| Answer prompt | OpenClaw agents have their own system prompts per agent definition. | Reuses the shared benchmark answer prompt (`prompts.yaml -> online_api.default.answer_prompt_mem0`) so OpenClaw answers are directly comparable with mem0/memos/etc. |
+| Answer prompt | OpenClaw agents have their own system prompts per agent definition. | `shared_llm` replaces the agent answer path with the benchmark prompt (`prompts.yaml -> online_api.default.answer_prompt_mem0`); `agent_local` sends the raw question through OpenClaw's own agent loop. |
 | Session bucketing | OpenClaw buckets markdown by date (`YYYY-MM-DD.md`). Single date can mix multiple sessions. | One file per session (`session-<SX>-<date>.md`) so `source_sessions` can be derived from the path alone. |
 | Search concurrency | Unrestricted; OpenClaw uses its own sqlite WAL concurrency. | Per-conversation async semaphore (`max_inflight_queries_per_conversation`, default 1) because each query spawns a cold Node subprocess. |
 
@@ -117,7 +126,7 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 | Short-term promotion into `MEMORY.md` | Requires real usage-signal history. |
 | Mid-turn compaction / pre-compaction flush | Requires a running agent loop. Benchmark feeds transcripts as a whole. |
 | `memory promote` / `memory promote-explain` CLIs | Same reason as above. |
-| OpenClaw's internal answer prompt | Replaced by the shared benchmark prompt for cross-system comparability. |
+| OpenClaw's internal answer prompt in `shared_llm` mode | Replaced by the shared benchmark prompt for cross-system comparability. It remains active in `agent_local` mode. |
 
 ## `flush_mode` values
 
@@ -125,6 +134,7 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 |-------|-----------|-----------|
 | `disabled` | Raw session transcript dumped as markdown bullets. Matches v0.1/v0.2 ingestion exactly. | The `openclaw-fts-noflush`, `openclaw-vector-noflush`, and `openclaw-hybrid-noflush` public presets. |
 | `shared_llm` | Framework LLM distils each session into retention-worthy bullets before OpenClaw indexes them. | The `openclaw`, `openclaw-fts`, and `openclaw-vector` public presets. |
+| `session_bundle` | With memory-core, each LoCoMo sub-session goes through `agent_run` and its local transcript is archived before the next bundle. OpenViking combinations also use host-side SDK ingest; an OV-only `memory_mode: noop` preset uses only that SDK path and skips the memory-core agent/index work. | The registered Memcore and OpenViking session-bundle families. |
 
 ## Deciding which preset to use
 

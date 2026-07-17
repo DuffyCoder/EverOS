@@ -245,6 +245,25 @@ Existing paths, imports, commands, and the EverOS, EverMemOS, and `memsys`
 identifiers are compatibility surfaces; do not consolidate names as part of
 repository hygiene work.
 
+## Evaluation System Configuration Governance
+
+- Select systems by public ID from `evaluation/config/systems/index.yaml`,
+  normally a `canonical` / `active` entry. Do not select a YAML filename.
+- New public presets require both a categorized leaf and an index entry:
+  `canonical/` for supported defaults, `experiments/` for exploratory work,
+  `ablations/` for controlled comparisons, and `tooling/` for diagnostics.
+  Compatibility aliases live only in the index and have no runnable leaf.
+- `extends` recursively merges mappings; lists and scalar values replace the
+  inherited value. Keep bases minimal and semantic differences in leaves.
+- Secret fields in tracked YAML use `${VAR}` or `${VAR:}` with no non-empty
+  secret default. `api_key_env` and `env_vars` contain bare environment names.
+  The only empty-key exception is the strict-loopback local EverMemOS API
+  preset. Never commit a materialized credential.
+- Preserve old public IDs and requested-ID result directory names. Metadata
+  records the canonical target and source chain for resume safety.
+- Follow the active [system-configuration guide](evaluation/docs/system-configs/README.md)
+  and run its strict 36-ID validation suite with every registry change.
+
 ## Tech Stack
 
 | Category | Technology |
@@ -357,20 +376,12 @@ docker-compose logs -f           # View logs
 
 ## Environment Variables
 
-Required in `.env` (copy from `env.template`):
-
-```bash
-# LLM (at least one required)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-GOOGLE_API_KEY=
-
-# Databases (defaults work with docker-compose)
-MONGODB_URI=mongodb://localhost:27017
-REDIS_URL=redis://localhost:6379
-MILVUS_HOST=localhost
-ELASTICSEARCH_URL=http://localhost:19200
-```
+Copy `env.template` to `.env` and fill only the services used by the selected
+runtime or evaluation preset. `env.template` is the canonical starting
+template; the selected system YAML and its `env_vars` are the exact per-preset
+contract. Do not duplicate a second variable list here. Never commit `.env` or
+copy a materialized secret into tracked configuration, fixtures, results, or
+docs.
 
 ## Development Guidelines
 

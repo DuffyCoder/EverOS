@@ -35,7 +35,10 @@ Our adapter implementations are based on:
 - **Official open-source repositories**: Mem0, MemOS, Zep on GitHub
 - **Official documentation**: Mem0, MemOS, MemU, Zep quick start guide and API documentation
 - **Consistent methodology**: All systems evaluated using the same pipeline, datasets, and metrics
-- **Unified answer generation**: All systems use **GPT-4.1-mini** as the answer LLM to ensure fair comparison across different memory backends
+- **Explicit answer-model ownership**: Online and `shared_llm` paths use the
+  configured benchmark answer LLM. OpenClaw `agent_local` paths instead use
+  `openclaw.agent_llm`; compare the resolved metadata before treating results
+  as model-matched.
 
 During our evaluation, we identified several issues in existing open-source reference implementations for benchmarking these systems that could negatively impact their performance. We addressed these implementation gaps to ensure each system is evaluated at its best potential:
 
@@ -191,27 +194,42 @@ uv sync --group evaluation-full
 
 ### Environment Configuration
 
-The evaluation framework reuses most environment variables from the main EverMemOS `.env` file:
-- `LLM_API_KEY`, `LLM_BASE_URL` (for answer generation with GPT-4.1-mini)
-- `VECTORIZE_API_KEY` and  `RERANK_API_KEY` (for embeddings/reranker)
+The evaluation framework loads credentials from the main EverMemOS `.env`
+file. Copy `env.template`, populate only the services you will run, and never
+commit `.env`. Common variables include `LLM_API_KEY`, `LLM_BASE_URL`,
+`VECTORIZE_API_KEY`, and `RERANK_API_KEY`. The canonical system presets also
+declare the service-specific names in `env.template`.
 
-**⚠️ Important**: For OpenRouter API (used by gpt-4.1-mini), make sure `LLM_API_KEY` is set to your OpenRouter API key (format: `sk-or-v1-xxx`). The system will look for API keys in this order:
-1. Explicit `api_key` parameter in config
-2. `LLM_API_KEY` environment variable
+In a checked-in system YAML, a secret-valued field must be an environment
+marker (`${VAR}` or `${VAR:}` with an empty fallback). It must not contain a
+literal key or a non-empty secret default. Fields such as `api_key_env` and
+items in `env_vars` take a bare name such as `LLM_API_KEY`. Non-secret values
+may use `${VAR:default}`. The only literal-empty key exception is the strict
+loopback local EverMemOS API preset. See the
+[system-configuration guide](docs/system-configs/README.md) for the enforced
+policy.
 
-For testing EverMemOS, please first configure the whole .env file.
-
-**Additional variables for online API systems** (add to `.env` if testing these systems):
+**Variables for canonical adapters** (add to `.env` only when used):
 
 ```bash
+# EverMemOS hosted API
+EVERMEMOS_API_URL=https://api.evermind.ai/api/v1/memories
+EVERMEMOS_API_KEY=
+
 # Mem0
-MEM0_API_KEY=your_mem0_api_key
+MEM0_API_KEY=
 
 # MemOS
-MEMOS_KEY=your_memos_api_key
+MEMOS_KEY=
 
 # MemU
-MEMU_API_KEY=your_memu_api_key
+MEMU_API_KEY=
+
+# Zep
+ZEP_API_KEY=
+
+# Local Hermes checkout
+HERMES_REPO_PATH=
 ```
 
 ### Quick Test (Smoke Test)
@@ -394,13 +412,16 @@ If you have already done search, and you want to do it again, please remove the 
 
 ### Custom Configuration
 
-Custom system configurations must be registered; an unindexed YAML filename is
-not a selectable public id:
+Prefer an existing `canonical` / `active` ID from the
+[36-ID catalog](docs/system-configs/README.md#catalog). A maintained custom
+system configuration must be a categorized leaf plus an index entry; an
+unindexed YAML filename is not a selectable public ID. For an exploratory
+variant:
 
 ```bash
 # Copy and edit configuration
 cp evaluation/config/systems/canonical/evermemos.yaml \
-  evaluation/config/systems/canonical/evermemos_custom.yaml
+  evaluation/config/systems/experiments/evermemos_custom.yaml
 # Edit evermemos_custom.yaml with your changes
 ```
 
@@ -409,14 +430,18 @@ Register it under `systems` in `evaluation/config/systems/index.yaml`:
 ```yaml
 evermemos_custom:
   adapter: evermemos
-  category: canonical
-  status: active
-  path: canonical/evermemos_custom.yaml
-  description: Custom EverMemOS benchmark preset.
+  category: experiment
+  status: experimental
+  path: experiments/evermemos_custom.yaml
+  description: Experimental EverMemOS variant.
 ```
 
-Repository maintainers must also update the locked public-id contract in
-`evaluation/src/config/system_index.py` and its index/baseline tests.
+Use `canonical` / `active` only for a supported benchmark default; use
+`ablation` for a controlled one-variable comparison and `tooling` for a
+diagnostic preset. Repository maintainers must also update the locked public-ID
+contract in `evaluation/src/config/system_index.py` and the catalog/index
+expectations. The immutable pre-cleanup fixture remains unchanged; only a raw
+shape change to an existing legacy ID gets an explicit approved delta.
 See the [system-configuration guide](docs/system-configs/README.md) for the
 registry, category, inheritance, secret, and path rules. OpenViking presets
 also have dedicated [operational notes](docs/system-configs/openviking.md).
@@ -465,7 +490,7 @@ uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
 
 # Explicit image override (skips manifest lookup)
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
-    --image openclaw-eval:7da23c3-evermemos-9b3a1f4-slim
+    --image YOUR_OPENCLAW_IMAGE_TAG
 
 # Auto-build the image if it's not in the manifest
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
