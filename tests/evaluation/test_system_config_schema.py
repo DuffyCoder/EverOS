@@ -250,6 +250,32 @@ def test_online_adapters_accept_only_positive_answer_max_retries(adapter: str) -
         validate_system_config(adapter, config)
 
 
+@pytest.mark.parametrize("adapter", ONLINE_ANSWER_RETRY_ADAPTERS)
+def test_online_adapters_reject_explicit_null_answer_max_retries(adapter: str) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config["answer"]["max_retries"] = None
+
+    with pytest.raises(SystemSchemaError, match=r"answer\.max_retries"):
+        validate_system_config(adapter, config)
+
+
+@pytest.mark.parametrize("adapter", ONLINE_ANSWER_RETRY_ADAPTERS)
+def test_online_adapters_reject_explicit_null_answer_block(adapter: str) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config["answer"] = None
+
+    with pytest.raises(SystemSchemaError, match=r"answer"):
+        validate_system_config(adapter, config)
+
+
+@pytest.mark.parametrize("adapter", ONLINE_ANSWER_RETRY_ADAPTERS)
+def test_online_adapters_allow_the_answer_block_to_be_omitted(adapter: str) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    del config["answer"]
+
+    assert validate_system_config(adapter, config) is config
+
+
 @pytest.mark.parametrize("adapter", NON_ONLINE_ANSWER_ADAPTERS)
 def test_non_online_adapters_reject_unused_answer_max_retries(adapter: str) -> None:
     config = deepcopy(VALID_CONFIGS[adapter])

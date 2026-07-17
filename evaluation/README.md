@@ -127,7 +127,7 @@ Each stage saves its output and can be resumed independently.
 ### Answer Retry Layers
 
 Answer generation has two independently owned retry layers. For online API
-systems (`evermemos_api`, `mem0`, `memos`, `memu`, and `zep`),
+adapters (`evermemos_api`, `mem0`, `memos`, `memu`, and `zep`),
 `answer.max_retries` controls the inner LLM attempts made inside one
 `OnlineAPIAdapter.answer()` invocation and defaults to three when omitted.
 The outer answer-stage invocation count is controlled by `--retry-policy`

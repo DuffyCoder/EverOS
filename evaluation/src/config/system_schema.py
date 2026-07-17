@@ -82,7 +82,7 @@ class AnswerConfig(_StrictModel):
 
 
 class OnlineAnswerConfig(AnswerConfig):
-    max_retries: PositiveInt | None = None
+    max_retries: PositiveInt = 3
 
 
 class HarnessSearchConfig(_StrictModel):
@@ -103,7 +103,7 @@ class _SystemBase(_StrictModel):
 
 
 class _OnlineSystemBase(_SystemBase):
-    answer: OnlineAnswerConfig | None = None
+    answer: OnlineAnswerConfig = Field(default_factory=OnlineAnswerConfig)
 
 
 class EverMemOSAddConfig(_StrictModel):
