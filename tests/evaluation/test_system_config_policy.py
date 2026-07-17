@@ -39,15 +39,8 @@ FAKE_ENVIRONMENT = {
     "ZEP_API_KEY": "zep-key",
 }
 
-LEGACY_EMBEDDING_REQUESTED_IDS = {
-    "openclaw",
-    "openclaw-hybrid",
-    "openclaw-hybrid-noflush",
-    "openclaw-native-embed",
-    "openclaw-vector",
-    "openclaw-vector-noflush",
-}
-LEGACY_REQUESTED_IDS = LEGACY_EMBEDDING_REQUESTED_IDS | {"openclaw-docker-stub"}
+LEGACY_EMBEDDING_REQUESTED_IDS: set[str] = set()
+LEGACY_REQUESTED_IDS = {"openclaw-docker-stub"}
 
 
 def _raw_config(**updates: Any) -> dict[str, Any]:
@@ -300,14 +293,69 @@ def test_valid_recursive_env_references_are_accepted() -> None:
         openclaw={
             "agent_llm": {
                 "api_key_env": "LLM_API_KEY",
-                "env_vars": ["LLM_API_KEY", "_SECONDARY_KEY"],
+                "env_vars": ["LLM_API_KEY", "SECONDARY_KEY"],
             },
-            "embedding": {"api_key_env": "_EMBED_KEY"},
-            "ov_ingest": {"api_key_env": "OPENVIKING_API_KEY"},
+            "embedding": {"api_key_env": "EMBED_KEY"},
+            "ov_ingest": {"api_key_env": "_openviking_api_key"},
+            "plugin_config": {"nested_env": "lowercase_key"},
         }
     )
 
     assert validate_raw_system_policy("mem0", config, canonical_id="mem0") == ()
+
+
+@pytest.mark.parametrize(
+    ("openclaw", "expected_pointer"),
+    [
+        (
+            {"agent_llm": {"api_key_env": "lowercase"}},
+            "/openclaw/agent_llm/api_key_env",
+        ),
+        (
+            {"agent_llm": {"api_key_env": "_LEADING_UNDERSCORE"}},
+            "/openclaw/agent_llm/api_key_env",
+        ),
+        ({"agent_llm": {"api_key_env": "A" * 129}}, "/openclaw/agent_llm/api_key_env"),
+        ({"agent_llm": {"env_vars": ["lowercase"]}}, "/openclaw/agent_llm/env_vars/0"),
+        (
+            {"agent_llm": {"env_vars": ["_LEADING_UNDERSCORE"]}},
+            "/openclaw/agent_llm/env_vars/0",
+        ),
+        ({"agent_llm": {"env_vars": ["A" * 129]}}, "/openclaw/agent_llm/env_vars/0"),
+        (
+            {"embedding": {"api_key_env": "lowercase"}},
+            "/openclaw/embedding/api_key_env",
+        ),
+        (
+            {"embedding": {"api_key_env": "_LEADING_UNDERSCORE"}},
+            "/openclaw/embedding/api_key_env",
+        ),
+        ({"embedding": {"api_key_env": "A" * 129}}, "/openclaw/embedding/api_key_env"),
+    ],
+)
+def test_bridge_bound_env_references_follow_the_js_name_contract(
+    openclaw: dict[str, object], expected_pointer: str
+) -> None:
+    config = _raw_config(openclaw=openclaw)
+
+    with pytest.raises(SystemPolicyError) as error:
+        validate_raw_system_policy("openclaw", config, canonical_id="openclaw")
+
+    assert error.value.findings[0] == PolicyFinding(
+        code="invalid-env-reference",
+        pointer=expected_pointer,
+        message=(
+            "OpenClaw bridge environment reference must match "
+            "^[A-Z][A-Z0-9_]{0,127}$"
+        ),
+    )
+
+
+@pytest.mark.parametrize("name", ["lowercase_key", "_LEADING_UNDERSCORE"])
+def test_ov_ingest_policy_keeps_generic_python_env_names(name: str) -> None:
+    config = _raw_config(openclaw={"ov_ingest": {"api_key_env": name}})
+
+    assert validate_raw_system_policy("openclaw", config, canonical_id="openclaw") == ()
 
 
 @pytest.mark.parametrize("bad_value", ["${ENV_NAME}", "bad-name", " ", 7])
@@ -688,7 +736,7 @@ def test_all_shipped_systems_have_the_exact_legacy_policy_surface() -> None:
     )
 
 
-def test_strict_loader_rejects_exactly_the_seven_shipped_legacy_ids() -> None:
+def test_strict_loader_rejects_only_the_remaining_shipped_legacy_id() -> None:
     index = load_system_index(DEFAULT_SYSTEM_INDEX_PATH)
     rejected: set[str] = set()
 

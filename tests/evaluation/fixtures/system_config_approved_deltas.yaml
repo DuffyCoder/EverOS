@@ -1,1 +1,109 @@
-deltas: {}
+deltas:
+  openclaw:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-fts:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-fts-noflush:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-hybrid:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-hybrid-noflush:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-vector:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-vector-noflush:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-agent-local:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-hypercompositor:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-native-embed:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-native-noembed:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-noop:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.

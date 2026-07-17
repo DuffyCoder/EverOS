@@ -77,6 +77,38 @@ HERMES_SYSTEM_IDS = (
     "hermes-hindsight",
 )
 
+HOST_OPENCLAW_CANONICAL_IDS = (
+    "openclaw",
+    "openclaw-fts",
+    "openclaw-fts-noflush",
+    "openclaw-hybrid-noflush",
+    "openclaw-vector",
+    "openclaw-vector-noflush",
+)
+
+HOST_OPENCLAW_EXPERIMENT_IDS = (
+    "openclaw-agent-local",
+    "openclaw-hypercompositor",
+    "openclaw-native-embed",
+    "openclaw-native-noembed",
+    "openclaw-noop",
+)
+
+HOST_OPENCLAW_SYSTEM_IDS = (
+    *HOST_OPENCLAW_CANONICAL_IDS,
+    "openclaw-hybrid",
+    *HOST_OPENCLAW_EXPERIMENT_IDS,
+)
+
+HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS = {
+    "openclaw",
+    "openclaw-hybrid",
+    "openclaw-hybrid-noflush",
+    "openclaw-native-embed",
+    "openclaw-vector",
+    "openclaw-vector-noflush",
+}
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -530,6 +562,118 @@ def test_hermes_family_uses_canonical_leaves_and_alias_only() -> None:
     assert index.systems["hermes"].alias_of == "hermes-holographic"
     for system_id in HERMES_SYSTEM_IDS:
         assert not (systems_root / f"{system_id}.yaml").exists()
+
+
+@pytest.mark.parametrize("system_id", HOST_OPENCLAW_SYSTEM_IDS)
+def test_host_openclaw_migration_preserves_effective_legacy_semantics(
+    system_id: str,
+) -> None:
+    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]
+
+    resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+    expected_raw_differences = {"/openclaw/prompts"}
+    if system_id in HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS:
+        expected_raw_differences.update(
+            {"/openclaw/embedding/api_key", "/openclaw/embedding/api_key_env"}
+        )
+
+    assert resolved.adapter == expected["adapter"] == "openclaw"
+    assert resolved.canonical_id == expected["canonical_id"]
+    assert (
+        legacy.json_pointer_differences(expected["raw_config"], resolved.raw_config)
+        == expected_raw_differences
+    )
+    assert "prompts" not in resolved.raw_config["openclaw"]
+
+    if system_id in HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS:
+        embedding = resolved.raw_config["openclaw"]["embedding"]
+        assert "api_key" not in embedding
+        assert embedding["api_key_env"] == "SOPH_API_KEY"
+
+    effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+    assert effective == expected["effective_config"]
+    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_host_openclaw_family_uses_one_base_categorized_leaves_and_alias() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    resolved_root = systems_root.resolve()
+    index = load_system_index()
+    base_path = systems_root / "_bases" / "openclaw-native.yaml"
+
+    assert yaml.safe_load(base_path.read_text(encoding="utf-8")) == {
+        "adapter": "openclaw",
+        "llm": {
+            "provider": "openai",
+            "api_key": "${LLM_API_KEY}",
+            "base_url": "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}",
+            "temperature": 0.0,
+            "max_tokens": 1024,
+        },
+        "search": {
+            "top_k": 6,
+            "response_top_k": 5,
+            "num_workers": 5,
+            "max_inflight_queries_per_conversation": 1,
+        },
+        "answer": {"max_retries": 3},
+        "openclaw": {
+            "repo_path": "${OPENCLAW_REPO_PATH}",
+            "visibility_mode": "settled",
+        },
+    }
+
+    for system_id in HOST_OPENCLAW_CANONICAL_IDS:
+        expected_path = f"canonical/{system_id}.yaml"
+        assert index.systems[system_id].path is not None
+        assert index.systems[system_id].path.as_posix() == expected_path
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+        assert tuple(
+            path.relative_to(resolved_root).as_posix() for path in resolved.source_paths
+        ) == ("_bases/openclaw-native.yaml", expected_path)
+
+    for system_id in HOST_OPENCLAW_EXPERIMENT_IDS:
+        expected_path = f"experiments/{system_id}.yaml"
+        assert index.systems[system_id].path is not None
+        assert index.systems[system_id].path.as_posix() == expected_path
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+        assert tuple(
+            path.relative_to(resolved_root).as_posix() for path in resolved.source_paths
+        ) == ("_bases/openclaw-native.yaml", expected_path)
+
+    alias = resolve_system_config("openclaw-hybrid", environ=FAKE_ENVIRONMENT)
+    assert index.systems["openclaw-hybrid"].path is None
+    assert index.systems["openclaw-hybrid"].alias_of == "openclaw"
+    assert alias.canonical_id == "openclaw"
+    assert alias.alias_chain == ("openclaw-hybrid", "openclaw")
+    assert tuple(
+        path.relative_to(resolved_root).as_posix() for path in alias.source_paths
+    ) == ("_bases/openclaw-native.yaml", "canonical/openclaw.yaml")
+
+    for system_id in HOST_OPENCLAW_SYSTEM_IDS:
+        assert not (systems_root / f"{system_id}.yaml").exists()
+
+
+def test_host_openclaw_approved_raw_deltas_are_exact() -> None:
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+
+    for system_id in HOST_OPENCLAW_SYSTEM_IDS:
+        expected = {("/openclaw/prompts", "structure-only", "raw")}
+        if system_id in HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS:
+            expected.update(
+                {
+                    ("/openclaw/embedding/api_key", "security-fix", "raw"),
+                    ("/openclaw/embedding/api_key_env", "security-fix", "raw"),
+                }
+            )
+
+        actual = {
+            (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
+            for entry in approved_document["deltas"].get(system_id, [])
+        }
+        assert actual == expected
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

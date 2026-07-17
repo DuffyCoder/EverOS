@@ -64,37 +64,37 @@ systems:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw.yaml
+    path: canonical/openclaw.yaml
     description: Default hybrid OpenClaw benchmark preset.
   openclaw-fts:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw-fts.yaml
+    path: canonical/openclaw-fts.yaml
     description: OpenClaw full-text retrieval preset.
   openclaw-fts-noflush:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw-fts-noflush.yaml
+    path: canonical/openclaw-fts-noflush.yaml
     description: OpenClaw full-text preset without explicit flushes.
   openclaw-hybrid-noflush:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw-hybrid-noflush.yaml
+    path: canonical/openclaw-hybrid-noflush.yaml
     description: OpenClaw hybrid preset without explicit flushes.
   openclaw-vector:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw-vector.yaml
+    path: canonical/openclaw-vector.yaml
     description: OpenClaw vector retrieval preset.
   openclaw-vector-noflush:
     adapter: openclaw
     category: canonical
     status: active
-    path: openclaw-vector-noflush.yaml
+    path: canonical/openclaw-vector-noflush.yaml
     description: OpenClaw vector preset without explicit flushes.
   openclaw-docker:
     adapter: openclaw-docker
@@ -148,31 +148,31 @@ systems:
     adapter: openclaw
     category: experiment
     status: experimental
-    path: openclaw-agent-local.yaml
+    path: experiments/openclaw-agent-local.yaml
     description: Experimental agent-local OpenClaw retrieval preset.
   openclaw-hypercompositor:
     adapter: openclaw
     category: experiment
     status: experimental
-    path: openclaw-hypercompositor.yaml
+    path: experiments/openclaw-hypercompositor.yaml
     description: Experimental OpenClaw HyperCompositor preset.
   openclaw-native-embed:
     adapter: openclaw
     category: experiment
     status: experimental
-    path: openclaw-native-embed.yaml
+    path: experiments/openclaw-native-embed.yaml
     description: Experimental native OpenClaw embedding preset.
   openclaw-native-noembed:
     adapter: openclaw
     category: experiment
     status: experimental
-    path: openclaw-native-noembed.yaml
+    path: experiments/openclaw-native-noembed.yaml
     description: Experimental native OpenClaw preset without embeddings.
   openclaw-noop:
     adapter: openclaw
     category: experiment
     status: experimental
-    path: openclaw-noop.yaml
+    path: experiments/openclaw-noop.yaml
     description: Experimental no-op OpenClaw memory preset.
   openclaw-docker-hypercompositor:
     adapter: openclaw-docker

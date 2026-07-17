@@ -708,10 +708,42 @@ def test_env_name_schema_fields_reject_non_bare_names(
 
 def test_env_name_schema_fields_accept_bare_names() -> None:
     config = _config_with_all_env_name_fields()
-    config["openclaw"]["agent_llm"]["api_key_env"] = "_LLM_API_KEY_2"
-    config["openclaw"]["agent_llm"]["env_vars"] = ["LLM_API_KEY", "_SECONDARY_KEY_2"]
+    config["openclaw"]["agent_llm"]["api_key_env"] = "LLM_API_KEY_2"
+    config["openclaw"]["agent_llm"]["env_vars"] = ["LLM_API_KEY", "SECONDARY_KEY_2"]
     config["openclaw"]["embedding"]["api_key_env"] = "EMBED_API_KEY_2"
     config["openclaw"]["ov_ingest"]["api_key_env"] = "_OPENVIKING_API_KEY"
+
+    assert validate_system_config("openclaw-docker", config) is config
+
+
+@pytest.mark.parametrize(
+    ("path", "error_path"),
+    [
+        (("openclaw", "agent_llm", "api_key_env"), r"agent_llm\.api_key_env"),
+        (("openclaw", "agent_llm", "env_vars", 0), r"agent_llm\.env_vars\.0"),
+        (("openclaw", "embedding", "api_key_env"), r"embedding\.api_key_env"),
+    ],
+)
+@pytest.mark.parametrize("bad_name", ["lowercase", "_LEADING_UNDERSCORE", "A" * 129])
+def test_bridge_env_name_schema_fields_reject_names_the_js_bridge_will_drop(
+    path: tuple[str | int, ...], error_path: str, bad_name: str
+) -> None:
+    config = _config_with_all_env_name_fields()
+    target: Any = config
+    for segment in path[:-1]:
+        target = target[segment]
+    target[path[-1]] = bad_name
+
+    with pytest.raises(SystemSchemaError, match=error_path) as error:
+        validate_system_config("openclaw-docker", config)
+
+    assert "^[A-Z][A-Z0-9_]{0,127}$" in str(error.value)
+
+
+@pytest.mark.parametrize("name", ["lowercase_key", "_LEADING_UNDERSCORE"])
+def test_ov_ingest_schema_keeps_generic_python_env_names(name: str) -> None:
+    config = _config_with_all_env_name_fields()
+    config["openclaw"]["ov_ingest"]["api_key_env"] = name
 
     assert validate_system_config("openclaw-docker", config) is config
 

@@ -10,6 +10,15 @@ from typing import Any
 from urllib.parse import urlsplit
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_OPENCLAW_BRIDGE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_OPENCLAW_BRIDGE_ENV_POINTER_SUFFIXES = (
+    "/openclaw/agent_llm/api_key_env",
+    "/openclaw/agent_llm/env_vars",
+    "/openclaw/embedding/api_key_env",
+)
+_OPENCLAW_BRIDGE_ENV_MESSAGE = (
+    "OpenClaw bridge environment reference must match " "^[A-Z][A-Z0-9_]{0,127}$"
+)
 _SECRET_MARKER = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?::)?\}$")
 _UNRESOLVED_MARKER = re.compile(r"\$\{")
 _PRIVATE_KEY_PEM = re.compile(r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----")
@@ -174,24 +183,42 @@ def validate_runtime_system_policy(
 def _inspect_env_var_names(
     value: Any, pointer: str, violations: list[PolicyFinding]
 ) -> None:
+    name_pattern = _env_name_pattern(pointer)
     if not isinstance(value, list):
         violations.append(
             PolicyFinding(
                 code="invalid-env-reference",
                 pointer=pointer,
-                message="environment references must be a list of bare valid names",
+                message=(
+                    "OpenClaw bridge environment references must be a list of "
+                    "names matching ^[A-Z][A-Z0-9_]{0,127}$"
+                    if name_pattern is _OPENCLAW_BRIDGE_ENV_NAME
+                    else "environment references must be a list of bare valid names"
+                ),
             )
         )
         return
     for index, name in enumerate(value):
-        if not isinstance(name, str) or _ENV_NAME.fullmatch(name) is None:
+        if not isinstance(name, str) or name_pattern.fullmatch(name) is None:
             violations.append(
                 PolicyFinding(
                     code="invalid-env-reference",
                     pointer=f"{pointer}/{index}",
-                    message="environment reference must be a bare valid name",
+                    message=_env_name_message(pointer),
                 )
             )
+
+
+def _env_name_pattern(pointer: str) -> re.Pattern[str]:
+    if pointer.endswith(_OPENCLAW_BRIDGE_ENV_POINTER_SUFFIXES):
+        return _OPENCLAW_BRIDGE_ENV_NAME
+    return _ENV_NAME
+
+
+def _env_name_message(pointer: str) -> str:
+    if _env_name_pattern(pointer) is _OPENCLAW_BRIDGE_ENV_NAME:
+        return _OPENCLAW_BRIDGE_ENV_MESSAGE
+    return "environment reference must be a bare valid name"
 
 
 def _inspect_secret_list(
@@ -232,12 +259,16 @@ def _inspect_raw(
             if normalized_segment == "env_vars":
                 _inspect_env_var_names(nested, nested_pointer, violations)
             elif normalized_segment.endswith("_env"):
-                if not isinstance(nested, str) or _ENV_NAME.fullmatch(nested) is None:
+                name_pattern = _env_name_pattern(nested_pointer)
+                if (
+                    not isinstance(nested, str)
+                    or name_pattern.fullmatch(nested) is None
+                ):
                     violations.append(
                         PolicyFinding(
                             code="invalid-env-reference",
                             pointer=nested_pointer,
-                            message="environment reference must be a bare valid name",
+                            message=_env_name_message(nested_pointer),
                         )
                     )
             elif nested_pointer.endswith(_LEGACY_EMBEDDING_POINTER):

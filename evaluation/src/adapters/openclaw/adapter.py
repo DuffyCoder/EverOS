@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 _RUN_ID_LATEST_FILE = "LATEST"
 _ARTIFACT_ROOT = "artifacts/openclaw"
+_OPENCLAW_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 
 # this file lives at evaluation/src/adapters/openclaw/adapter.py
 _EVAL_DIR = Path(__file__).resolve().parents[3]
@@ -746,15 +748,34 @@ class OpenClawAdapter(BaseAdapter):
         yaml (preferred) so the config surface is authoritative; bridge
         still falls back to the env var for developer convenience.
 
-        v0.7: agent_llm_env_vars is the explicit whitelist of env var
-        names that ``envForSandbox`` will pass through to the openclaw
-        subprocess. The resolved config carries ``${VAR}`` template
-        strings for secrets (apiKey); without env passthrough OpenClaw
-        throws MissingEnvVarError on those templates. List comes from
-        yaml ``openclaw.agent_llm.env_vars`` (defaults to []).
+        ``agent_llm_env_vars`` remains the bridge wire key for compatibility,
+        but its value covers every OpenClaw-side credential reference: the
+        explicit agent whitelist, agent LLM key, and embedding key. OpenViking
+        ingest credentials stay host-side. Only validated names are included;
+        environment values are never read or serialized into the payload.
         """
         agent_llm = self._openclaw_cfg.get("agent_llm") or {}
-        env_vars = agent_llm.get("env_vars") or []
+        embedding = self._openclaw_cfg.get("embedding") or {}
+        explicit_env_vars = agent_llm.get("env_vars") or []
+        candidates = (
+            list(explicit_env_vars) if isinstance(explicit_env_vars, list) else []
+        )
+        if agent_llm.get("api_key_env") is not None:
+            candidates.append(agent_llm["api_key_env"])
+        if embedding.get("api_key_env") is not None:
+            candidates.append(embedding["api_key_env"])
+
+        env_vars: list[str] = []
+        seen: set[str] = set()
+        for name in candidates:
+            if not isinstance(name, str) or _OPENCLAW_ENV_NAME.fullmatch(name) is None:
+                raise ValueError(
+                    "invalid OpenClaw environment variable name in bridge whitelist"
+                )
+            if name not in seen:
+                seen.add(name)
+                env_vars.append(name)
+
         return {
             "repo_path": self._openclaw_repo_path,
             "config_path": sandbox.get("resolved_config_path", ""),
@@ -762,7 +783,7 @@ class OpenClawAdapter(BaseAdapter):
             "state_dir": sandbox.get("native_store_dir", ""),
             "home_dir": sandbox.get("home_dir", ""),
             "cwd_dir": sandbox.get("cwd_dir", ""),
-            "agent_llm_env_vars": list(env_vars) if isinstance(env_vars, list) else [],
+            "agent_llm_env_vars": env_vars,
         }
 
     # ===================================================== internal helpers

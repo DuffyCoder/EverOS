@@ -22,6 +22,7 @@ from evaluation.src.plugins.registry import load_registry
 
 NonEmptyStr = Annotated[str, Field(min_length=1, pattern=r"\S")]
 EnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+OpenClawBridgeEnvName = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{0,127}$")]
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveNumber = Annotated[int | float, Field(gt=0)]
@@ -259,8 +260,8 @@ class AgentLLMConfig(_StrictModel):
     provider_id: NonEmptyStr
     base_url: NonEmptyStr
     api: OpenClawModelAPI
-    api_key_env: EnvName
-    env_vars: list[EnvName] | None = None
+    api_key_env: OpenClawBridgeEnvName
+    env_vars: list[OpenClawBridgeEnvName] | None = None
     model: AgentLLMModel
     idle_timeout_seconds: NonNegativeInt | None = None
 
@@ -269,7 +270,7 @@ class EmbeddingConfig(_StrictModel):
     provider: NonEmptyStr
     model: NonEmptyStr
     api_key: NonEmptyStr | None = None
-    api_key_env: EnvName | None = None
+    api_key_env: OpenClawBridgeEnvName | None = None
     base_url: NonEmptyStr
     easyllm_id: NonEmptyStr | None = None
     output_dimensionality: PositiveInt

@@ -1,0 +1,10 @@
+extends: "_bases/openclaw-native.yaml"
+
+llm:
+  model: "${LLM_MODEL}"
+
+openclaw:
+  retrieval_route: "search_then_get"
+  backend_mode: "fts_only"
+  flush_mode: "shared_llm"
+  honor_silent_token: false

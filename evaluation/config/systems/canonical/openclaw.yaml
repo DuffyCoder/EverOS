@@ -1,0 +1,16 @@
+extends: "_bases/openclaw-native.yaml"
+
+llm:
+  model: "${LLM_MODEL}"
+
+openclaw:
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "shared_llm"
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
