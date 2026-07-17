@@ -186,8 +186,7 @@ class MemosSystem(_OnlineSystemBase):
     api_key: NonEmptyStr
     batch_size: PositiveInt
     max_retries: PositiveInt
-    request_interval: NonNegativeNumber | None = None
-    requests_per_second: PositiveNumber | None = None
+    requests_per_second: PositiveNumber = 10
     search: OnlineSearchConfig
 
 

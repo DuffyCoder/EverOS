@@ -8,9 +8,7 @@ api_url: "https://memos.memtensor.cn/api/openmem/v1"
 api_key: "${MEMOS_KEY}"
 batch_size: 10
 max_retries: 5
-
-# Compatibility-only: the current adapter does not consume this field.
-request_interval: 0.1
+requests_per_second: 10
 
 # Serialize conversations to stay within the 10 requests/second API limit.
 num_workers: 1

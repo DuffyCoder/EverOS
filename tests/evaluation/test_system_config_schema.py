@@ -131,7 +131,6 @@ def _valid_configs() -> dict[str, dict[str, Any]]:
             "api_key": "runtime-secret",
             "batch_size": 10,
             "max_retries": 5,
-            "request_interval": 0.1,
             "requests_per_second": 10,
             "post_add_wait_seconds": 180,
             "search": {"top_k": 20},
@@ -822,6 +821,55 @@ def test_dataset_override_keys_are_dynamic_but_inner_fields_are_strict() -> None
     with pytest.raises(
         SystemSchemaError, match=r"dataset_overrides\.future-dataset\.batch_size"
     ):
+        validate_system_config("memos", config)
+
+
+def test_memos_rejects_unused_request_interval_at_top_level() -> None:
+    config = deepcopy(VALID_CONFIGS["memos"])
+    config["request_interval"] = 0.1
+
+    with pytest.raises(SystemSchemaError, match="request_interval"):
+        validate_system_config("memos", config)
+
+
+def test_memos_dataset_overrides_reject_unused_request_interval() -> None:
+    config = deepcopy(VALID_CONFIGS["memos"])
+    config["dataset_overrides"] = {
+        "future-dataset": {"request_interval": 0.1}
+    }
+
+    with pytest.raises(
+        SystemSchemaError,
+        match=r"dataset_overrides\.future-dataset\.request_interval",
+    ):
+        validate_system_config("memos", config)
+
+
+@pytest.mark.parametrize("requests_per_second", [1, 0.5, 10])
+def test_memos_accepts_positive_requests_per_second(
+    requests_per_second: int | float,
+) -> None:
+    config = deepcopy(VALID_CONFIGS["memos"])
+    config["requests_per_second"] = requests_per_second
+
+    assert validate_system_config("memos", config) is config
+
+
+def test_memos_allows_requests_per_second_to_use_the_schema_default() -> None:
+    config = deepcopy(VALID_CONFIGS["memos"])
+    del config["requests_per_second"]
+
+    assert validate_system_config("memos", config) is config
+
+
+@pytest.mark.parametrize("requests_per_second", [0, -1, "10", None])
+def test_memos_rejects_invalid_requests_per_second(
+    requests_per_second: object,
+) -> None:
+    config = deepcopy(VALID_CONFIGS["memos"])
+    config["requests_per_second"] = requests_per_second
+
+    with pytest.raises(SystemSchemaError, match="requests_per_second"):
         validate_system_config("memos", config)
 
 

@@ -1,4 +1,17 @@
 deltas:
+  memos:
+    - pointer: /request_interval
+      classification: behavior-fix
+      surface: raw
+      rationale: Removed the legacy interval field because MemosAdapter never consumed it.
+    - pointer: /requests_per_second
+      classification: behavior-fix
+      surface: raw
+      rationale: Declared the adapter-consumed field at the existing ten-requests-per-second runtime rate.
+    - pointer: /requests_per_second
+      classification: behavior-fix
+      surface: effective
+      rationale: The effective config now exposes the adapter-consumed ten-requests-per-second limit without changing runtime behavior.
   hermes:
     - pointer: /answer/max_retries
       classification: structure-only

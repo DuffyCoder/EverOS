@@ -606,10 +606,39 @@ def test_public_online_system_migration_preserves_immutable_baseline(
     resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
 
-    assert resolved.raw_config == expected["raw_config"]
-    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
-    assert effective == expected["effective_config"]
-    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+    if system_id == "memos":
+        assert legacy.json_pointer_differences(
+            expected["raw_config"], resolved.raw_config
+        ) == {"/request_interval", "/requests_per_second"}
+        assert "request_interval" not in resolved.raw_config
+        assert resolved.raw_config["requests_per_second"] == 10
+        assert legacy.json_pointer_differences(
+            expected["effective_config"], effective
+        ) == {"/requests_per_second"}
+        assert effective["requests_per_second"] == 10
+    else:
+        assert resolved.raw_config == expected["raw_config"]
+        assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+        assert effective == expected["effective_config"]
+        assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_public_online_approved_deltas_are_exact() -> None:
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+
+    for system_id in PUBLIC_ONLINE_SYSTEM_IDS:
+        expected = set()
+        if system_id == "memos":
+            expected = {
+                ("/request_interval", "behavior-fix", "raw"),
+                ("/requests_per_second", "behavior-fix", "raw"),
+                ("/requests_per_second", "behavior-fix", "effective"),
+            }
+        actual = {
+            (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
+            for entry in approved_document["deltas"].get(system_id, [])
+        }
+        assert actual == expected
 
 
 @pytest.mark.parametrize("system_id", PUBLIC_ONLINE_SYSTEM_IDS)
