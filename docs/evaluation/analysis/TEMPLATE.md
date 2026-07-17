@@ -14,7 +14,10 @@
 | Configuration | `<resolved config path>` |
 | Source commit | `<full Git commit SHA>` |
 | Runtime/image | `<runtime and immutable image identifier>` |
-| Archive | `evaluation/archives/<run-id>/` |
+| Compact archive | `evaluation/archives/<run-id>/` |
+| Compact manifest | `evaluation/archives/<run-id>/manifest.json` |
+| External evidence | `evaluation/archives/<run-id>-external/` or `—` |
+| External checksum manifest | `evaluation/archives/<run-id>-external/manifest.sha256` or `—` |
 | Status | `<complete, partial, or failed>` |
 
 ## Question and Method
@@ -45,8 +48,13 @@ runtime prerequisites, and restoration steps. Never include credential values.
 
 ## Evidence Checksums
 
-| Artifact | SHA-256 | Purpose |
-| --- | --- | --- |
-| `<relative archive path>` | `<sha256>` | `<why this file is retained>` |
+The compact archive's `manifest.json` is authoritative for its included files.
+Record manually curated PDFs and external supporting data separately:
 
-Checksum manifest: `evaluation/archives/<run-id>/manifest.sha256`
+| External artifact | SHA-256 | Purpose |
+| --- | --- | --- |
+| `<path relative to <run-id>-external/>` | `<sha256>` | `<why this file is retained>` |
+
+External checksum manifest:
+`evaluation/archives/<run-id>-external/manifest.sha256` (or `—` when there is
+no external evidence).

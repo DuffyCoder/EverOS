@@ -1503,6 +1503,7 @@ git commit -m "fix(eval): honor per-system search timeouts"
 - Modify: `openclaw-eval/plugins/README-install-mode.md`
 - Modify: `docs/usage/USAGE_EXAMPLES.md`
 - Modify: `docs/evaluation/analysis/README.md`
+- Modify: `docs/evaluation/analysis/TEMPLATE.md`
 - Modify: `docs/evaluation/compatibility-baseline.md`
 - Modify: `AGENTS.md`
 - Modify: `docs/plans/2026-07-16-system-config-cleanup.md` only if commands or

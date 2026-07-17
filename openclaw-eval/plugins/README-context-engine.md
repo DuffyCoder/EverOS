@@ -135,10 +135,11 @@ openclaw_docker:
 
 For bundled source, first register the plugin in
 `evaluation/config/plugin_registry.yaml` with `kind: context-engine` and
-`type: bundled-source` (plus `source_dir` when it is not the default
-`openclaw-eval/plugins/<id>/`). That registration is sufficient to select the
-plugin with the generic OpenClaw Docker system. Only if a stable named system
-preset is also required, register its categorized preset afterward in
+`type: bundled-source`. The directory name must match the registered ID: the
+builder stages bundled plugins from the fixed
+`openclaw-eval/plugins/<id>/` path. That registration is sufficient to select
+the plugin with the generic OpenClaw Docker system. Only if a stable named
+system preset is also required, register its categorized preset afterward in
 `evaluation/config/systems/index.yaml`, following the exact 36-ID contract and
 explicit expansion procedure in the system-configuration guide; do not add a
 new root-level system YAML. The image must be a concrete tag (normally one
