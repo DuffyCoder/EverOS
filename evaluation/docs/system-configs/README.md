@@ -77,6 +77,25 @@ The three memcore leaves intentionally differ only in
 `openclaw.ingest_session_tail`. The emptytail value `""` explicitly disables
 the tail; it does not fall back to an adapter default.
 
+## Retry ownership
+
+`answer.max_retries` belongs only to the online API adapters `evermemos_api`,
+`mem0`, `memos`, `memu`, and `zep`. Their shared `OnlineAPIAdapter.answer()`
+implementation consumes it as the number of inner LLM attempts made during
+one adapter invocation; if the field is absent, that implementation keeps its
+historical default of three attempts. Other adapter schemas reject the field
+because they have no consumer for it.
+
+The benchmark harness owns a separate outer retry layer. `--retry-policy`
+selects how many times the answer stage may invoke the adapter
+(`strict_no_retry`: one attempt, `retry_once`: two, `realistic`: three). For an
+online adapter, the outer invocation count and the inner
+`answer.max_retries` loop can therefore be nested. Top-level adapter retry
+fields such as `mem0.max_retries`, `memos.max_retries`, and
+`evermemos_api.max_retries` belong to their adapters' other API operations and
+are not aliases for either answer retry layer. This cleanup only records and
+validates existing ownership; it does not change retry behavior.
+
 ## Secrets and paths
 
 Commit only environment markers such as `${LLM_API_KEY}`; never put a secret

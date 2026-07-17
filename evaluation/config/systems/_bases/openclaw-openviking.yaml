@@ -12,9 +12,6 @@ search:
   response_top_k: 5
   max_inflight_queries_per_conversation: 1
 
-answer:
-  max_retries: 3
-
 openclaw:
   repo_path: "${OPENCLAW_REPO_PATH}"
   visibility_mode: settled

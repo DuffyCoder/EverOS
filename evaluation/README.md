@@ -124,6 +124,19 @@ The evaluation consists of 4 sequential stages:
 
 Each stage saves its output and can be resumed independently.
 
+### Answer Retry Layers
+
+Answer generation has two independently owned retry layers. For online API
+systems (`evermemos_api`, `mem0`, `memos`, `memu`, and `zep`),
+`answer.max_retries` controls the inner LLM attempts made inside one
+`OnlineAPIAdapter.answer()` invocation and defaults to three when omitted.
+The outer answer-stage invocation count is controlled by `--retry-policy`
+(`strict_no_retry`, `retry_once`, or `realistic`). These loops can be nested;
+changing one does not configure the other. Non-online system configurations
+reject `answer.max_retries`, and top-level adapter retry settings retain their
+adapter-specific meanings. This configuration cleanup does not alter the
+existing retry algorithms.
+
 ## 🚀 Getting Started
 
 ### Prerequisites

@@ -144,6 +144,15 @@ SESSION_BUNDLE_SYSTEM_IDS = (
     *OPENVIKING_SESSION_BUNDLE_IDS,
 )
 
+ANSWER_RETRY_REMOVAL_IDS = frozenset(
+    (
+        *HERMES_SYSTEM_IDS,
+        *HOST_OPENCLAW_SYSTEM_IDS,
+        *DOCKER_PLUGIN_SYSTEM_IDS,
+        *SESSION_BUNDLE_SYSTEM_IDS,
+    )
+)
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -510,6 +519,23 @@ def test_fixture_captures_the_locked_surface_without_expanding_secrets() -> None
     assert "machine-local-baseline-secret" not in serialized
 
 
+def test_answer_retry_structure_only_deltas_cover_exactly_non_online_ids() -> None:
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+    actual = {
+        system_id
+        for system_id, entries in approved_document["deltas"].items()
+        if any(
+            entry["pointer"] == "/answer/max_retries"
+            and entry["classification"] == "structure-only"
+            and entry.get("surface", "raw") == "raw"
+            for entry in entries
+        )
+    }
+
+    assert len(ANSWER_RETRY_REMOVAL_IDS) == 29
+    assert actual == ANSWER_RETRY_REMOVAL_IDS
+
+
 def test_every_legacy_id_resolves_with_a_registered_adapter() -> None:
     legacy = _load_test_module("system_config_legacy")
     from evaluation.src.adapters.registry import list_adapters
@@ -600,7 +626,9 @@ def test_public_online_system_configs_live_only_in_canonical_directory(
 
 
 @pytest.mark.parametrize("system_id", HERMES_SYSTEM_IDS)
-def test_hermes_family_migration_preserves_immutable_baseline(system_id: str) -> None:
+def test_hermes_family_migration_preserves_effective_immutable_baseline(
+    system_id: str,
+) -> None:
     legacy = _load_test_module("system_config_legacy")
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected = baseline[system_id]
@@ -608,8 +636,9 @@ def test_hermes_family_migration_preserves_immutable_baseline(system_id: str) ->
     resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
 
-    assert resolved.raw_config == expected["raw_config"]
-    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+    assert legacy.json_pointer_differences(
+        expected["raw_config"], resolved.raw_config
+    ) == {"/answer/max_retries"}
     assert effective == expected["effective_config"]
     assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
 
@@ -640,7 +669,7 @@ def test_host_openclaw_migration_preserves_effective_legacy_semantics(
     expected = baseline[system_id]
 
     resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
-    expected_raw_differences = {"/openclaw/prompts"}
+    expected_raw_differences = {"/answer/max_retries", "/openclaw/prompts"}
     if system_id in HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS:
         expected_raw_differences.update(
             {"/openclaw/embedding/api_key", "/openclaw/embedding/api_key_env"}
@@ -685,7 +714,7 @@ def test_host_openclaw_family_uses_one_base_categorized_leaves_and_alias() -> No
             "num_workers": 5,
             "max_inflight_queries_per_conversation": 1,
         },
-        "answer": {"max_retries": 3},
+        "answer": {},
         "openclaw": {
             "repo_path": "${OPENCLAW_REPO_PATH}",
             "visibility_mode": "settled",
@@ -727,7 +756,10 @@ def test_host_openclaw_approved_raw_deltas_are_exact() -> None:
     approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
 
     for system_id in HOST_OPENCLAW_SYSTEM_IDS:
-        expected = {("/openclaw/prompts", "structure-only", "raw")}
+        expected = {
+            ("/answer/max_retries", "structure-only", "raw"),
+            ("/openclaw/prompts", "structure-only", "raw"),
+        }
         if system_id in HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS:
             expected.update(
                 {
@@ -755,7 +787,7 @@ def test_docker_plugin_migration_preserves_effective_legacy_semantics(
 
     assert resolved.adapter == expected["adapter"] == "openclaw-docker"
     assert resolved.canonical_id == expected["canonical_id"] == system_id
-    expected_raw_differences = {"/openclaw/prompts"}
+    expected_raw_differences = {"/answer/max_retries", "/openclaw/prompts"}
     if system_id == "openclaw-docker-stub":
         expected_raw_differences.add("/openclaw_docker/image")
     assert (
@@ -850,7 +882,10 @@ def test_docker_plugin_approved_deltas_are_exact() -> None:
     approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
 
     for system_id in DOCKER_PLUGIN_SYSTEM_IDS:
-        expected = {("/openclaw/prompts", "structure-only", "raw")}
+        expected = {
+            ("/answer/max_retries", "structure-only", "raw"),
+            ("/openclaw/prompts", "structure-only", "raw"),
+        }
         if system_id == "openclaw-docker-stub":
             expected.update(
                 {
@@ -878,7 +913,7 @@ def test_session_bundle_migration_preserves_effective_immutable_baseline(
 
     assert legacy.json_pointer_differences(
         expected["raw_config"], resolved.raw_config
-    ) == {"/openclaw/prompts"}
+    ) == {"/answer/max_retries", "/openclaw/prompts"}
     assert "prompts" not in resolved.raw_config["openclaw"]
     assert effective == expected["effective_config"]
     assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
@@ -892,13 +927,17 @@ def test_session_bundle_approved_raw_deltas_are_exact() -> None:
             (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
             for entry in approved_document["deltas"].get(system_id, [])
         }
-        assert actual == {("/openclaw/prompts", "structure-only", "raw")}
+        assert actual == {
+            ("/answer/max_retries", "structure-only", "raw"),
+            ("/openclaw/prompts", "structure-only", "raw"),
+        }
 
 
 def test_memcore_session_bundle_base_and_leaves_are_exactly_minimal() -> None:
     systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     expected_base = deepcopy(baseline[MEMCORE_SESSION_BUNDLE_IDS[0]]["raw_config"])
+    expected_base["answer"].pop("max_retries")
     expected_base["openclaw"].pop("ingest_session_tail")
     expected_base["openclaw"].pop("prompts")
 
@@ -927,6 +966,7 @@ def test_openviking_session_bundle_base_and_leaves_are_exactly_minimal() -> None
         for system_id in OPENVIKING_SESSION_BUNDLE_IDS
     ]
     for raw_config in raw_configs:
+        raw_config["answer"].pop("max_retries")
         raw_config["openclaw"].pop("prompts")
     expected_base = _common_mapping(raw_configs)
 

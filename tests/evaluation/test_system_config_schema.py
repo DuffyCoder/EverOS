@@ -25,7 +25,11 @@ def _llm() -> dict[str, Any]:
 
 
 def _answer() -> dict[str, int]:
-    return {"max_retries": 3}
+    return {"max_concurrent": 2}
+
+
+def _online_answer() -> dict[str, int]:
+    return {"max_retries": 3, "max_concurrent": 2}
 
 
 def _openclaw_search() -> dict[str, int]:
@@ -79,7 +83,7 @@ def _openclaw_block() -> dict[str, Any]:
 
 
 def _valid_configs() -> dict[str, dict[str, Any]]:
-    common_online = {"llm": _llm(), "answer": _answer(), "num_workers": 2}
+    common_online = {"llm": _llm(), "answer": _online_answer(), "num_workers": 2}
     openclaw_common = {
         "llm": _llm(),
         "search": _openclaw_search(),
@@ -204,6 +208,9 @@ def _valid_configs() -> dict[str, dict[str, Any]]:
 
 VALID_CONFIGS = _valid_configs()
 
+ONLINE_ANSWER_RETRY_ADAPTERS = ("evermemos_api", "mem0", "memos", "memu", "zep")
+NON_ONLINE_ANSWER_ADAPTERS = ("evermemos", "hermes", "openclaw", "openclaw-docker")
+
 
 def _config_with_all_env_name_fields() -> dict[str, Any]:
     config = deepcopy(VALID_CONFIGS["openclaw-docker"])
@@ -229,6 +236,41 @@ def test_each_supported_adapter_accepts_a_valid_config_without_coercion(
     assert result is config
     assert config == before
     assert isinstance(config["llm"]["temperature"], int)
+
+
+@pytest.mark.parametrize("adapter", ONLINE_ANSWER_RETRY_ADAPTERS)
+def test_online_adapters_accept_only_positive_answer_max_retries(adapter: str) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config["answer"]["max_retries"] = 7
+    assert validate_system_config(adapter, config) is config
+
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config["answer"]["max_retries"] = 0
+    with pytest.raises(SystemSchemaError, match=r"answer\.max_retries"):
+        validate_system_config(adapter, config)
+
+
+@pytest.mark.parametrize("adapter", NON_ONLINE_ANSWER_ADAPTERS)
+def test_non_online_adapters_reject_unused_answer_max_retries(adapter: str) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config.setdefault("answer", {})["max_retries"] = 3
+
+    with pytest.raises(SystemSchemaError, match=r"answer\.max_retries"):
+        validate_system_config(adapter, config)
+
+
+@pytest.mark.parametrize("adapter", NON_ONLINE_ANSWER_ADAPTERS)
+def test_non_online_dataset_overrides_reject_unused_answer_max_retries(
+    adapter: str,
+) -> None:
+    config = deepcopy(VALID_CONFIGS[adapter])
+    config["dataset_overrides"] = {"future-dataset": {"answer": {"max_retries": 3}}}
+
+    with pytest.raises(
+        SystemSchemaError,
+        match=r"dataset_overrides\.future-dataset\.answer\.max_retries",
+    ):
+        validate_system_config(adapter, config)
 
 
 def test_validation_accepts_a_mapping_and_returns_the_same_mapping() -> None:

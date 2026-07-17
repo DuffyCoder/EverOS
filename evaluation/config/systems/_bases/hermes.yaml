@@ -14,8 +14,7 @@ search:
   num_workers: 5
   max_inflight_queries_per_conversation: 1
 
-answer:
-  max_retries: 3
+answer: {}
 
 hermes:
   repo_path: "${HERMES_REPO_PATH}"

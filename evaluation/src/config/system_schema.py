@@ -78,8 +78,11 @@ class LLMConfig(_StrictModel):
 
 
 class AnswerConfig(_StrictModel):
-    max_retries: PositiveInt | None = None
     max_concurrent: PositiveInt | Literal["auto"] | None = None
+
+
+class OnlineAnswerConfig(AnswerConfig):
+    max_retries: PositiveInt | None = None
 
 
 class HarnessSearchConfig(_StrictModel):
@@ -97,6 +100,10 @@ class _SystemBase(_StrictModel):
     num_workers: PositiveInt | None = None
     post_add_wait_seconds: NonNegativeNumber | None = None
     dataset_overrides: dict[NonEmptyStr, dict[str, JsonValue]] | None = None
+
+
+class _OnlineSystemBase(_SystemBase):
+    answer: OnlineAnswerConfig | None = None
 
 
 class EverMemOSAddConfig(_StrictModel):
@@ -141,7 +148,7 @@ class EverMemOSAPISearchConfig(HarnessSearchConfig):
         return value
 
 
-class EverMemOSAPISystem(_SystemBase):
+class EverMemOSAPISystem(_OnlineSystemBase):
     adapter: Literal["evermemos_api"]
     base_url: NonEmptyStr
     api_key: str
@@ -157,7 +164,7 @@ class Mem0SearchConfig(HarnessSearchConfig):
     search_interval: NonNegativeNumber | None = None
 
 
-class Mem0System(_SystemBase):
+class Mem0System(_OnlineSystemBase):
     adapter: Literal["mem0"]
     api_key: NonEmptyStr
     batch_size: PositiveInt
@@ -173,7 +180,7 @@ class OnlineSearchConfig(HarnessSearchConfig):
     top_k: PositiveInt
 
 
-class MemosSystem(_SystemBase):
+class MemosSystem(_OnlineSystemBase):
     adapter: Literal["memos"]
     api_url: NonEmptyStr
     api_key: NonEmptyStr
@@ -184,7 +191,7 @@ class MemosSystem(_SystemBase):
     search: OnlineSearchConfig
 
 
-class MemuSystem(_SystemBase):
+class MemuSystem(_OnlineSystemBase):
     adapter: Literal["memu"]
     api_key: NonEmptyStr
     base_url: NonEmptyStr
@@ -204,7 +211,7 @@ class ZepSearchConfig(OnlineSearchConfig):
     reranker_edges: ZepReranker | None = None
 
 
-class ZepSystem(_SystemBase):
+class ZepSystem(_OnlineSystemBase):
     adapter: Literal["zep"]
     api_key: NonEmptyStr
     max_retries: PositiveInt | None = None

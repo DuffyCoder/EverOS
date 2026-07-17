@@ -6,7 +6,6 @@ search:
   num_workers: 2
 
 answer:
-  max_retries: 2
   max_concurrent: 2
 
 openclaw:

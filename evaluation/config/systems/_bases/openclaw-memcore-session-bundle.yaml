@@ -15,7 +15,6 @@ search:
   max_inflight_queries_per_conversation: 1
 
 answer:
-  max_retries: 3
   max_concurrent: 4
 
 openclaw:

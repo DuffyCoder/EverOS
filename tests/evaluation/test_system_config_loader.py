@@ -107,7 +107,7 @@ def _minimal_openclaw_config() -> dict[str, Any]:
             "num_workers": 2,
             "max_inflight_queries_per_conversation": 1,
         },
-        "answer": {"max_retries": 3},
+        "answer": {},
         "openclaw": {
             "repo_path": "/tmp/openclaw",
             "visibility_mode": "settled",
