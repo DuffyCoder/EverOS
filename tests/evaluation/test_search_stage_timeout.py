@@ -89,7 +89,13 @@ async def test_search_stage_uses_adapter_timeout_once_per_stage(
             question="question",
             answer="gold",
             metadata={"conversation_id": "c1"},
-        )
+        ),
+        QAPair(
+            question_id="q2",
+            question="another question",
+            answer="another gold",
+            metadata={"conversation_id": "c1"},
+        ),
     ]
     conversations = [Conversation(conversation_id="c1", messages=[])]
 
@@ -103,8 +109,8 @@ async def test_search_stage_uses_adapter_timeout_once_per_stage(
         latency_recorder=LatencyRecorder(retry_policy="strict_no_retry"),
     )
 
-    assert len(results) == 1
-    assert observed_timeouts == [expected]
+    assert len(results) == 2
+    assert observed_timeouts == [expected, expected]
     assert adapter.timeout_hook_calls == 1
 
 
