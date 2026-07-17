@@ -6,7 +6,7 @@
 # Step B (throughput baseline): concurrency=default + retry_policy=realistic.
 #   Full 1540 questions, production-aligned numbers.
 #
-# Systems compared: evermemos, openclaw-native-embed, openclaw-native-noembed.
+# Systems compared: evermemos, openclaw, openclaw-fts.
 #
 # Usage:
 #   bash evaluation/scripts/run_latency_baseline.sh step_a

@@ -1,0 +1,36 @@
+name: "evermemos_local_api"
+version: "1.0"
+description: "EverMemOS via LOCAL HTTP Memory API (no hosted auth)"
+
+adapter: "evermemos_api"
+
+base_url: "http://localhost:1995"
+
+# Local server typically does not require auth
+api_key: ""
+sync_mode: true  # Wait for boundary detection (10s), then return
+
+max_retries: 3
+timeout_seconds: 60
+request_interval: 0.0
+
+num_workers: 10
+
+# Local debug/evaluation is usually group-scoped (group_id=conversation_id)
+search:
+  num_workers: 20
+  scope: "group"
+  top_k: 10
+  retrieve_method: "agentic"
+  memory_types: ["episodic_memory"]
+
+llm:
+  provider: "openai"
+  model: "${LLM_MODEL}"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://openrouter.ai/api/v1}"
+  temperature: 0
+  max_tokens: 16000
+
+answer:
+  max_retries: 3

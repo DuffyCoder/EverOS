@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+# Public system ID registered in evaluation/config/systems/index.yaml.
 DEFAULT_SYSTEM = "openclaw-docker-openviking-session-bundle-noop"
 DEFAULT_DATASET_PREFIX = "locomo"
 _QID_CANONICAL_RE = re.compile(r"^(locomo_\d+)_qa(\d+)$")

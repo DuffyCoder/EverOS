@@ -2,15 +2,18 @@
 v0.7 D2 unit tests for OpenClawAdapter._bridge_base_payload().
 
 Locks the contract that:
-- agent_llm_env_vars whitelist from yaml is forwarded into bridge payload.
-- Missing yaml field falls back to empty list (not raises).
-- Whitelist content is exactly what was in yaml (no implicit additions).
+- agent_llm_env_vars remains the bridge payload key.
+- Its value is a stable, deduplicated union of explicit and credential refs.
+- Invalid environment names are rejected before the bridge silently drops them.
+- Only environment names, never values or ov_ingest credentials, are serialized.
 
 Without this, openclaw subprocess will not receive secret env vars and
 will throw MissingEnvVarError on ${LLM_API_KEY} / ${SOPH_API_KEY}
 templates in the resolved config.
 """
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -44,40 +47,57 @@ def _build_adapter(openclaw_cfg: dict) -> OpenClawAdapter:
 
 
 def test_bridge_payload_includes_env_whitelist_from_yaml():
-    """yaml.openclaw.agent_llm.env_vars list is forwarded as-is."""
-    adapter = _build_adapter({
-        "repo_path": "/tmp/openclaw-repo",
-        "agent_llm": {
-            "env_vars": ["LLM_API_KEY", "SOPH_API_KEY", "LLM_BASE_URL"],
+    """Explicit names come first, then missing credential references."""
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "agent_llm": {
+                "env_vars": ["LLM_BASE_URL", "LLM_BASE_URL", "EXTRA_ENV"],
+                "api_key_env": "LLM_API_KEY",
+            },
+            "embedding": {"api_key_env": "SOPH_API_KEY"},
         },
-    })
+    )
     payload = adapter._bridge_base_payload(_SANDBOX_FIXTURE)
 
     assert "agent_llm_env_vars" in payload
     assert payload["agent_llm_env_vars"] == [
+        "LLM_BASE_URL",
+        "EXTRA_ENV",
         "LLM_API_KEY",
         "SOPH_API_KEY",
-        "LLM_BASE_URL",
     ]
 
 
-def test_bridge_payload_env_vars_missing_yaml_returns_empty_list():
-    """Missing agent_llm config: payload still has the field, as []."""
+def test_bridge_payload_without_agent_llm_includes_embedding_credential_ref():
+    """Host shared-LLM presets still need embedding credentials in OpenClaw."""
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "embedding": {"api_key_env": "SOPH_API_KEY"},
+        }
+    )
+    payload = adapter._bridge_base_payload(_SANDBOX_FIXTURE)
+
+    assert payload.get("agent_llm_env_vars") == ["SOPH_API_KEY"]
+
+
+def test_bridge_payload_without_credential_refs_keeps_empty_whitelist():
     adapter = _build_adapter({"repo_path": "/tmp/openclaw-repo"})
+
+    assert adapter._bridge_base_payload(_SANDBOX_FIXTURE)["agent_llm_env_vars"] == []
+
+
+def test_bridge_payload_env_vars_missing_explicit_list_uses_api_key_ref():
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "agent_llm": {"api_key_env": "LLM_API_KEY"},
+        }
+    )
     payload = adapter._bridge_base_payload(_SANDBOX_FIXTURE)
 
-    assert payload.get("agent_llm_env_vars") == []
-
-
-def test_bridge_payload_env_vars_missing_inner_field_returns_empty_list():
-    """agent_llm exists but no env_vars field: still []."""
-    adapter = _build_adapter({
-        "repo_path": "/tmp/openclaw-repo",
-        "agent_llm": {"provider_id": "sophnet"},  # no env_vars
-    })
-    payload = adapter._bridge_base_payload(_SANDBOX_FIXTURE)
-
-    assert payload.get("agent_llm_env_vars") == []
+    assert payload.get("agent_llm_env_vars") == ["LLM_API_KEY"]
 
 
 def test_bridge_payload_env_vars_handles_non_list_type():
@@ -90,6 +110,67 @@ def test_bridge_payload_env_vars_handles_non_list_type():
 
     # Falls back to [] rather than crashing or accepting malformed input
     assert payload.get("agent_llm_env_vars") == []
+
+
+@pytest.mark.parametrize(
+    "invalid_name",
+    ["bad-name", "1BAD", "${SECRET}", "/tmp/secret", "lowercase"],
+)
+def test_bridge_payload_rejects_invalid_env_var_names(invalid_name: str):
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "agent_llm": {"env_vars": [invalid_name]},
+        }
+    )
+
+    with pytest.raises(ValueError, match="invalid OpenClaw environment variable"):
+        adapter._bridge_base_payload(_SANDBOX_FIXTURE)
+
+
+@pytest.mark.parametrize("block", ["agent_llm", "embedding"])
+def test_bridge_payload_rejects_invalid_credential_env_ref(block: str):
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            block: {"api_key_env": "bad-name"},
+        }
+    )
+
+    with pytest.raises(ValueError, match="invalid OpenClaw environment variable"):
+        adapter._bridge_base_payload(_SANDBOX_FIXTURE)
+
+
+def test_bridge_payload_excludes_ov_ingest_secret_ref():
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "ov_ingest": {"api_key_env": "OPENVIKING_API_KEY"},
+        }
+    )
+
+    payload = adapter._bridge_base_payload(_SANDBOX_FIXTURE)
+
+    assert payload["agent_llm_env_vars"] == []
+
+
+def test_bridge_payload_serializes_names_without_secret_values(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "materialized-llm-secret")
+    monkeypatch.setenv("SOPH_API_KEY", "materialized-embedding-secret")
+    adapter = _build_adapter(
+        {
+            "repo_path": "/tmp/openclaw-repo",
+            "agent_llm": {"api_key_env": "LLM_API_KEY"},
+            "embedding": {"api_key_env": "SOPH_API_KEY"},
+        }
+    )
+
+    serialized = json.dumps(adapter._bridge_base_payload(_SANDBOX_FIXTURE))
+
+    assert "LLM_API_KEY" in serialized
+    assert "SOPH_API_KEY" in serialized
+    assert "materialized-llm-secret" not in serialized
+    assert "materialized-embedding-secret" not in serialized
 
 
 def test_bridge_payload_keeps_existing_fields():

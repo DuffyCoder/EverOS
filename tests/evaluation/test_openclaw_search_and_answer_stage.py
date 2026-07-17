@@ -48,6 +48,9 @@ async def test_search_stage_passes_question_id_to_adapter(monkeypatch):
         config: dict = {"search": {"num_workers": 1}}
         num_workers = 1
 
+        def get_search_timeout_seconds(self):
+            return 300.0
+
         async def search(self, query, conv_id, index, **kwargs):
             received.append({"query": query, "conv_id": conv_id, **kwargs})
             return SearchResult(

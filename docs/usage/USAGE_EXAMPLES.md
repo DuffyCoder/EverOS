@@ -211,7 +211,8 @@ The evaluation pipeline consists of 4 stages with automatic checkpointing and re
 > - **Data Preparation**: Place datasets in `evaluation/data/` (see `evaluation/README.md`)
 > - **Environment**: Configure `.env` with LLM API keys (see `env.template`)
 > - **Installation**: Run `uv sync --group evaluation` to install dependencies
-> - **Custom Config**: Copy and modify YAML files in `evaluation/config/systems/` or `evaluation/config/datasets/`
+> - **System Selection**: Prefer a `canonical` / `active` public ID from the [system catalog](../../evaluation/docs/system-configs/README.md#catalog)
+> - **Custom Config**: Add a categorized leaf such as `evaluation/config/systems/experiments/my-system.yaml` and register its public ID in `evaluation/config/systems/index.yaml`; an unindexed filename is not selectable
 > - **Advanced Usage**: See `evaluation/README.md` for checkpoint management, stage-specific runs, and system comparisons
 
 ---

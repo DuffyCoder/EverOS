@@ -1,0 +1,37 @@
+extends: "_bases/openclaw-docker.yaml"
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+
+answer:
+  max_concurrent: 4
+
+openclaw:
+  backend_mode: "hybrid"
+  flush_mode: "shared_llm"
+  memory_mode: "memory-core"
+  agent_timeout_seconds: 180
+  agent_llm:
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+
+openclaw_docker:
+  image: "openclaw-eval:memory-core-baseline-slim"
+  max_concurrent_containers: 4
+  # Leave unset when the host should control the container memory ceiling.
+  mem_limit: ""
+  per_rpc_timeout_seconds: 210

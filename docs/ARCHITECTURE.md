@@ -128,17 +128,39 @@ evermemos-opensource/
 │   ├── core/                         # Core functionality (DI/lifecycle/middleware)
 │   ├── component/                    # Components (LLM adapters, etc.)
 │   └── common_utils/                 # Common utilities
-├── demo/                             # Demo code
-├── data/                             # Sample conversation data
-├── evaluation/                       # Evaluation scripts
-│   └── src/                          # Evaluation framework source code
+├── demo/                             # Runnable product demos
+├── data/                             # Demo and sample conversation data
+├── evaluation/                       # Generic evaluation framework
+│   ├── src/                          # Protocols, pipeline, adapters, metrics
+│   ├── data/                         # Authoritative benchmark datasets
+│   └── docs/                         # Framework-coupled operations
+├── openclaw-eval/                    # OpenClaw-specific evaluation runtime
 ├── data_format/                      # Data format definitions
-├── docs/                             # Documentation
-├── config.json                       # Configuration file
+├── docs/                             # Long-lived project documentation
+│   └── evaluation/                   # Evaluation architecture and policy
+├── config.json                       # Deprecated legacy compatibility config
 ├── env.template                      # Environment variable template
 ├── pyproject.toml                    # Project configuration
 └── README.md                         # Project description
 ```
+
+### Evaluation and Data Boundaries
+
+`evaluation/` is a generic benchmark framework responsible for protocols,
+dataset loading, metrics, configuration, adapters, and stable CLI entry points.
+`openclaw-eval/` is the OpenClaw-specific build and execution runtime. The
+runtime may call public framework contracts, but framework code must not import
+or depend on the runtime's internal directory layout.
+
+`evaluation/data/` is authoritative for benchmark datasets. `data/` is owned by
+product demos and examples; the LoCoMo file there is a compatibility mirror,
+not a second source of truth.
+
+Durable evaluation architecture and policy live in `docs/evaluation/`, while
+implementation-coupled operating notes live in `evaluation/docs/`. Actual
+analysis reports under `docs/evaluation/analysis/` and supporting PDFs or data
+under `evaluation/archives/` stay local and ignored. `docs/superpowers/`
+preserves historical plans and phase records and is not normative documentation.
 
 ---
 
@@ -298,13 +320,18 @@ Optional reranking step to improve result relevance:
 
 ### Environment Variables
 
-Key configuration is managed through environment variables (see `.env`):
+Current configuration is managed through `.env` (created from `env.template`)
+and typed or component-specific runtime configuration:
 - LLM API credentials
 - Embedding service credentials
 - Database connection strings
 - Service endpoints
 
 See [Configuration Guide](usage/CONFIGURATION_GUIDE.md) for complete details.
+
+The root `config.json` is a deprecated legacy file retained unchanged for path
+compatibility. It is not the current primary configuration source and must not
+receive new settings or secrets.
 
 ### Service Configuration
 

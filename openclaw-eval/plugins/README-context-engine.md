@@ -5,12 +5,12 @@ This is the second plugin shape supported by the eval framework.
 | Shape | What | When to use |
 |---|---|---|
 | **memory** | Plugin registers `MemoryPluginRuntime` + `memory_search` / `memory_get` tools. Agent **explicitly retrieves** via tool calls. | Most plugins on npm/clawhub today. mem0, evermemos, memory-core, zep. |
-| **context-engine** | Plugin registers a `ContextEngine` factory. Agent is **transparent** — no tool calls; the engine's `assemble()` injects context every turn, optionally adds a `systemPromptAddition`. | Compaction/transcript-management oriented plugins. Honcho, hindsight, openclaw's built-in `legacy` engine. |
+| **context-engine** | Plugin registers a `ContextEngine` factory. Agent is **transparent** — no tool calls; the engine's `assemble()` injects context every turn, optionally adds a `systemPromptAddition`. | Compaction/transcript-management plugins such as OpenViking, HyperCompositor, stub-engine, and OpenClaw's built-in `legacy` engine. |
 
-For the design rationale see
-`docs/superpowers/specs/2026-04-30-plugin-kinds-design-note.md`.
-For the eval-framework implementation plan see
-`docs/superpowers/plans/2026-04-30-stage3-context-engine-support.md`.
+The active evaluation contracts are the
+[system-configuration guide](../../evaluation/docs/system-configs/README.md),
+[OpenViking operational notes](../../evaluation/docs/system-configs/openviking.md),
+and the [OpenClaw adapter guide](../../evaluation/docs/openclaw_adapter.md).
 
 ## Manifest
 
@@ -87,8 +87,8 @@ function makeYourEngine(): ContextEngine {
 }
 ```
 
-The `ContextEngine` type is in
-`/Data3/shutong.shan/openclaw/repo/src/context-engine/types.ts`.
+The `ContextEngine` type is in `src/context-engine/types.ts` of the OpenClaw
+checkout used to build the evaluation image.
 
 ## Production write-hook precedence
 
@@ -104,9 +104,13 @@ When the openclaw runtime finalizes a turn it dispatches in this order
 3. Per-message `engine.ingest(...)` for each new message if neither
    batch hook is present — slowest path.
 
-The eval framework's `engine_import_history` bridge RPC mirrors this
-precedence when replaying historical conversations into the engine
-(Phase 3 of the Stage 3 plan).
+The bridge contains a pure `dispatchEngineImport` helper that mirrors this
+precedence for contract tests. The native `engine_import_history` RPC is **not
+wired** because the OpenClaw distribution does not expose the required engine
+loader through a stable export; native calls return `ok: false`. Current
+adapters therefore do not use that RPC to replay benchmark history. Do not
+claim that a context engine receives imported history merely because its slot
+is configured.
 
 ## Slot wiring at eval time
 
@@ -115,12 +119,12 @@ The eval framework renders `slots.contextEngine` in
 declares which plugin to bind:
 
 ```yaml
-# evaluation/config/systems/openclaw-docker-<your-plugin>.yaml
-adapter: "openclaw-docker"
+# evaluation/config/systems/experiments/openclaw-docker-<your-plugin>.yaml
+extends: "_bases/openclaw-docker.yaml"
 
 openclaw:
   memory_mode: "noop"                   # no memory plugin needed
-  context_engine_mode: "your-plugin"    # NEW field — drives slots.contextEngine
+  context_engine_mode: "your-plugin"    # drives slots.contextEngine
   flush_mode: "disabled"                # the engine owns compaction
   agent_llm: { ... }
 
@@ -129,29 +133,45 @@ openclaw_docker:
   ...
 ```
 
+For bundled source, first register the plugin in
+`evaluation/config/plugin_registry.yaml` with `kind: context-engine` and
+`type: bundled-source`. The directory name must match the registered ID: the
+builder stages bundled plugins from the fixed
+`openclaw-eval/plugins/<id>/` path. That registration is sufficient to select
+the plugin with the generic OpenClaw Docker system. Only if a stable named
+system preset is also required, register its categorized preset afterward in
+`evaluation/config/systems/index.yaml`, following the exact 36-ID contract and
+explicit expansion procedure in the system-configuration guide; do not add a
+new root-level system YAML. The image must be a concrete tag (normally one
+recorded in `evaluation/config/image_manifest.yaml`); build placeholders are
+rejected by the system-config policy.
+
 The adapter env-emits `CONTEXT_ENGINE_PLUGIN_ID=your-plugin` and the
 container entrypoint conditionally injects `slots.contextEngine` into
 the rendered openclaw config.
 
 ## Session ID strategy
 
-Context engines are **session-keyed**: both `ingest()` and `assemble()`
-take `sessionId`. The eval framework's first context-engine onboarding
-uses **R2 routing** (conversation-level session id):
+Context engines are **session-keyed**: `ingest()` and `assemble()` both take a
+`sessionId`. The current evaluation routing depends on the preset:
 
-- Ingest writes under `session_id = conv_id`.
-- All QA in the conversation share `session_id = conv_id` for `assemble()`.
+- OpenViking session-bundle presets create one OV session UUID per benchmark
+  conversation. Host-side SDK ingest adds every LoCoMo sub-session to that UUID
+  and commits and waits after each sub-session. QA-time `agent_run` reuses the
+  same UUID, so OpenViking `assemble()` sees the committed conversation state.
+- After every Docker QA, the adapter archives the local OpenClaw session JSONL.
+  The next question starts with an empty short-term transcript even though the
+  OpenViking server state for the shared UUID remains available.
+- Presets without an OV session use `session_id = f"{conv_id}__{qid}"` for each
+  QA, and the Docker adapter archives that JSONL on every exit path. During
+  non-OV `session_bundle` ingest, each sub-session uses the conversation ID and
+  is archived before the next bundle; persisted memory files remain.
 
-This is **wiring/prototype** territory, not a comparable benchmark
-against the memory plugin matrix:
-- Memory plugins use per-QA isolation: `session_id = f"{conv_id}__{qid}"`
-  (see `openclaw_adapter.py:414`, "v0.6: per-QA isolation").
-- R2 lets answer to QA n leak into context for QA n+1.
-- Context-engine scorecards under R2 are reported separately, with an
-  explicit "not directly comparable" footnote.
-
-R1 (replicate per QA) and R3 (engine fork primitive) are deferred to
-Stage 4 if/when comparable numbers are needed.
+This means the older blanket description of context engines as sharing a
+conversation transcript across QAs is no longer accurate. Non-OpenViking
+context engines also do not gain historical ingest from the unwired
+`engine_import_history` RPC. Treat their registered presets as experimental
+until their own ingest and comparison contract is documented and tested.
 
 ## Tools your plugin should NOT register
 
@@ -162,26 +182,20 @@ as a tool, you're authoring a memory plugin, not a context engine.
 
 ## Smoke gate
 
-The framework provides `openclaw-eval/harness/<plugin>_engine_passphrase_gate.sh`
-as a per-plugin starting template. Pass criteria (per Codex r3):
-
-1. `resolveContextEngine()` returns the expected engine id (proves slot
-   wiring resolved correctly).
-2. `assemble().messages` or `systemPromptAddition` contains the test
-   passphrase (proves the engine actually injected the ingested context;
-   non-empty messages alone is insufficient, since `assemble()` echoing
-   its `messages` input back trivially produces non-empty output).
-3. The agent reply contains the passphrase (end-to-end success).
-
-All three criteria must hold for the gate to pass. Failing any one
-emits a diagnostic and exits non-zero.
+Copy `openclaw-eval/harness/stub_engine_passphrase_gate.sh` as a per-plugin
+starting template. The current script hard-fails unless the rendered
+`plugins.slots.contextEngine` is `stub-engine`, the bridge exits successfully
+with `ok: true`, and the agent reply contains the sentinel. It also reports
+`system_prompt_chars`; a low value is a warning that `assemble()` may not have
+run, not an independent hard assertion. The reply sentinel is the
+load-bearing end-to-end content check.
 
 ## Where to put your plugin
 
 | Mode | Where | When |
 |---|---|---|
-| Bundled | `openclaw-eval/plugins/<your-plugin>/` | Self-authored plugins, forks needing source-level changes |
-| Install | `npm:<your-plugin>@<version>` via `--install-spec` | Officially-published plugins you test as-is. See `openclaw-eval/plugins/README-install-mode.md`. |
+| Bundled | Put source under `openclaw-eval/plugins/<your-plugin>/` and register `kind: context-engine` and `type: bundled-source` in `evaluation/config/plugin_registry.yaml`; only if a stable named preset is needed, register it afterward in the system index | Self-authored plugins and forks needing source-level changes |
+| npm install | Register `type: npm` in `evaluation/config/plugin_registry.yaml`, then select `--context-engine <id>@<version>` | Officially published plugins tested as-is. Use `--plugin-spec <id>=npm:...` only for an explicit source override; `--install-spec` is deprecated. See [install-mode onboarding](README-install-mode.md). |
 
 Both modes route through the same slot-wiring + entrypoint render
 pipeline once the plugin is loaded.

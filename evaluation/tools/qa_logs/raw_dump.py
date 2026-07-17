@@ -11,10 +11,10 @@ File layout per qid:
                        filtered to this run's wall-clock window
     03_storage.txt    raw cat of every .md file under .ovdata for this conv —
                        ONLY if .ovdata mtime falls in this run's window
-    04_recall.log     raw OV server log lines (vector retrieval), filtered by
-                       [qid=...] tag AND this qa's wall-clock window
-    05_rerank.log     raw OV server log lines (rerank + recall_trace + telemetry),
-                       same scoping as 04
+    04_recall.log     raw OV server vector-retrieval lines inside this QA's
+                       exact wall-clock window
+    05_rerank.log     raw RecursiveSearch, openai_rerank, and telemetry lines
+                       inside the same exact QA wall-clock window
     06_prompt.txt     raw agent LLM user_message_text (verbatim from session jsonl)
     07_thinking.txt   raw agent LLM assistant_thinking
     08_answer.txt     raw agent LLM assistant_text
@@ -33,7 +33,9 @@ filter is the only way to be honest about data freshness.
 
 Window sources:
   * per-qa (04, 05): session jsonl ``user_ts_ms`` + answer_results.json
-    ``answer_latency_ms`` → ``[user_ts, user_ts + latency]``
+    ``answer_latency_ms`` → ``[user_ts, user_ts + latency]``. These files do
+    not filter by qid; their attribution requires the strict-serial preset so
+    QA windows do not overlap.
   * per-run (02): the run's ``pipeline.log`` first and last timestamps
   * per-run-or-recent (03): any .md file under the conv's memories dir
     whose mtime falls within the per-run window — if no .md is in-window,
@@ -379,7 +381,7 @@ def _recall_log(ov_log: Path, qid: str, qa_window: WallClockWindow) -> str:
     Uses pure time-window filtering (no ``[qid=...]`` tag — server source
     is clean; qid attribution is done post-process via
     ``evaluation/tools/qa_logs/annotate.py`` when needed). Strict-serial
-    eval (``openclaw-docker-openviking-session-bundle-noop-serial.yaml``)
+    eval (``openclaw-docker-openviking-session-bundle-noop-serial``)
     guarantees the qa window has no overlap with other qa, so every line
     in the window belongs to this qa.
     """

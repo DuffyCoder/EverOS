@@ -72,35 +72,25 @@ def test_ingest_log_is_raw_unmodified_lines(tmp_path):
     assert "#" not in body[:200] or body.startswith("#")  # only unavailable-stub may begin with #
 
 
-def test_recall_log_qid_strict_and_excludes_rerank(tmp_path):
+def test_recall_log_uses_exact_window_and_excludes_rerank(tmp_path):
     out = _run_dump(tmp_path, session_jsonl=None)
     body = (out / "04_recall.log").read_text()
-    if body.startswith("# unavailable"):
-        return
-    qid = "locomo_0_qa0"
-    for ln in body.splitlines():
-        if ln.startswith("#") or not ln:
-            continue
-        assert f"[qid={qid}]" in ln, f"untagged row leaked into recall: {ln!r}"
-        # rerank-phase markers must NOT appear in recall.log
-        assert "[RecursiveSearch]" not in ln
-        assert "openai_rerank" not in ln
+    assert "untagged inside exact window" in body
+    assert "tagged inside exact window" in body
+    assert "tagged outside exact window" not in body
+    # rerank-phase markers must NOT appear in recall.log
+    assert "[RecursiveSearch]" not in body
+    assert "openai_rerank" not in body
 
 
-def test_rerank_log_captures_recursive_search_and_rerank(tmp_path):
+def test_rerank_log_uses_exact_window_and_supported_sources(tmp_path):
     out = _run_dump(tmp_path, session_jsonl=None)
     body = (out / "05_rerank.log").read_text()
-    if body.startswith("# unavailable"):
-        return
-    # Every non-header line either carries the qid tag OR is a recall_trace
-    # JSON whose body contains the qid string.
-    qid = "locomo_0_qa0"
-    for ln in body.splitlines():
-        if ln.startswith("#") or not ln:
-            continue
-        tag_ok = f"[qid={qid}]" in ln
-        trace_ok = f'"qid": "{qid}"' in ln
-        assert tag_ok or trace_ok, f"qid-untagged row leaked into rerank: {ln!r}"
+    assert "Initial candidate" in body
+    assert "Added initial candidate" in body
+    assert "Telemetry summary" in body
+    assert "rerank outside exact window" not in body
+    assert "recall_trace" not in body
 
 
 def test_storage_lists_md_files_with_uri_separator(tmp_path):
@@ -151,6 +141,7 @@ def _run_dump(tmp_path: Path, session_jsonl, ovdata_root: Path = None) -> Path:
         args, out_dir, dataset_path=dataset_path,
         ov_log=ov_log, ovdata_root=ovdata_root or (tmp_path / "no_ovdata"),
         session_jsonl=session_jsonl,
+        answer_results_path=eval_results_path.parent / "answer_results.json",
     )
     return out_dir
 
@@ -192,6 +183,7 @@ def _write_fixture_dataset(tmp_path: Path) -> Path:
 
 
 def _write_fixture_eval_results(tmp_path: Path) -> Path:
+    import os, time
     run_dir = tmp_path / "results" / "locomo-testsystem-testrun"
     run_dir.mkdir(parents=True)
     eval_results = {
@@ -207,14 +199,17 @@ def _write_fixture_eval_results(tmp_path: Path) -> Path:
     p = run_dir / "eval_results.json"
     p.write_text(json.dumps(eval_results))
     # answer_results.json so qa_window has answer_latency_ms
+    qa_start_ts = time.mktime((2026, 5, 27, 13, 10, 0, 0, 0, -1))
     (run_dir / "answer_results.json").write_text(json.dumps([{
         "question_id": "locomo_0_qa0",
-        "metadata": {"answer_latency_ms": 120_000},
+        "metadata": {
+            "answer_latency_ms": 120_000,
+            "qa_start_unix_ms": int(qa_start_ts * 1000),
+        },
     }]))
     # artifacts dir so run_window has unix-epoch mtimes covering 2026-05-27
     # 13:09:00 → 13:15:00 (matches ov-server.log fixture below). Create
     # all dirs first, THEN utime — creating a child dir updates parent mtime.
-    import os, time
     art_dir = run_dir / "artifacts" / "openclaw" / "run-20260527T130900"
     sess_dir = art_dir / "conversations" / "locomo_0" / "state" / "agents" / "main" / "sessions"
     sess_dir.mkdir(parents=True)
@@ -233,11 +228,21 @@ def _write_fixture_ov_log(tmp_path: Path) -> Path:
         "2026-05-27 13:09:46,000 - openviking.storage.queuefs.embedding_queue - DEBUG - "
         "Enqueued embedding message: uri='viking://user/locomo_0/memories/test.md' "
         "'vector': [0.1, 0.2, 0.3]\n"
+        "2026-05-27 13:10:10,000 - openviking.retrieve.hierarchical_retriever - DEBUG - "
+        "[retrieve] untagged inside exact window\n"
+        "2026-05-27 13:10:11,000 - openviking.storage.viking_vector_index_backend - DEBUG - "
+        "[qid=locomo_0_qa0] tagged inside exact window\n"
         "2026-05-27 13:10:30,000 - openviking.retrieve.hierarchical_retriever - DEBUG - "
         "[qid=locomo_0_qa0] [RecursiveSearch] Initial candidate "
         "viking://user/locomo_0/memories/foo.md score 0.5\n"
         "2026-05-27 13:10:31,000 - openviking.retrieve.openai_rerank - INFO - "
         "[qid=locomo_0_qa0] [RecursiveSearch] Added initial candidate: "
         "viking://user/locomo_0/memories/foo.md (score: 0.91)\n"
+        "2026-05-27 13:10:32,000 - openviking.telemetry.execution - INFO - "
+        "[qid=locomo_0_qa0] Telemetry summary\n"
+        "2026-05-27 13:12:01,000 - openviking.retrieve.hierarchical_retriever - DEBUG - "
+        "[qid=locomo_0_qa0] [retrieve] tagged outside exact window\n"
+        "2026-05-27 13:12:02,000 - openviking.retrieve.hierarchical_retriever - DEBUG - "
+        "[qid=locomo_0_qa0] [RecursiveSearch] rerank outside exact window\n"
     )
     return p

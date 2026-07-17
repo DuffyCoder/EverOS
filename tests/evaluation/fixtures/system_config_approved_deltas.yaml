@@ -1,0 +1,333 @@
+deltas:
+  evermemos_cloud_api:
+    - pointer: /search/timeout_seconds
+      classification: behavior-fix
+      surface: effective
+      rationale: The harness now enforces the existing 300-second per-attempt search timeout.
+  memos:
+    - pointer: /request_interval
+      classification: behavior-fix
+      surface: raw
+      rationale: Removed the legacy interval field because MemosAdapter never consumed it.
+    - pointer: /requests_per_second
+      classification: behavior-fix
+      surface: raw
+      rationale: Declared the adapter-consumed field at the existing ten-requests-per-second runtime rate.
+    - pointer: /requests_per_second
+      classification: behavior-fix
+      surface: effective
+      rationale: The effective config now exposes the adapter-consumed ten-requests-per-second limit without changing runtime behavior.
+  memu:
+    - pointer: /min_similarity
+      classification: behavior-fix
+      surface: raw
+      rationale: Removed the legacy root field that the MemU adapter never consumed.
+    - pointer: /search/min_similarity
+      classification: behavior-fix
+      surface: raw
+      rationale: Moved the threshold into the search block consumed by the MemU adapter.
+    - pointer: /search/min_similarity
+      classification: behavior-fix
+      surface: effective
+      rationale: The effective config now exposes the configured threshold used by MemU retrieval.
+  hermes:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+  hermes-hindsight:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+  hermes-holographic:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+  hermes-honcho:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+  openclaw:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-fts:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-fts-noflush:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-hybrid:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-hybrid-noflush:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-vector:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-vector-noflush:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-agent-local:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-hypercompositor:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-native-embed:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw/embedding/api_key
+      classification: security-fix
+      surface: raw
+      rationale: Replaced the expandable credential field with a bare environment reference.
+    - pointer: /openclaw/embedding/api_key_env
+      classification: security-fix
+      surface: raw
+      rationale: Added the bare environment reference used to rebuild the runtime secret marker.
+  openclaw-native-noembed:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-noop:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-evermemos:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-mem0:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-hypercompositor:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memclaw:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-stub:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw_docker/image
+      classification: behavior-fix
+      surface: raw
+      rationale: Replaced the unresolved stub build placeholder with its content-derived image tag.
+    - pointer: /openclaw_docker/image
+      classification: behavior-fix
+      surface: effective
+      rationale: The runnable stub image now uses the content-derived plugin revision.
+  openclaw-docker-memcore-session-bundle:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memcore-session-bundle-emptytail:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memcore-session-bundle-weaktail:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-memcore:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop-fixpack:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-openviking-session-bundle-noop-serial:
+    - pointer: /answer/max_retries
+      classification: structure-only
+      surface: raw
+      rationale: Removed a retry setting that has no consumer in this adapter.
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.

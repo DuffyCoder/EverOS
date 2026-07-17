@@ -2,12 +2,97 @@
 
 This adapter plugs the **OpenClaw memory backend** into the EverMemOS
 `Add → Search → Answer → Evaluate` pipeline, letting us score OpenClaw
-with the same prompt + judge + dataset loader as `mem0`, `memos`,
-`evermemos`, etc.
+with the same dataset loader, stage protocol, and judge as `mem0`, `memos`,
+`evermemos`, etc. Prompt ownership depends on `answer_mode`: `shared_llm`
+uses the benchmark answer prompt, while `agent_local` sends the raw question to
+the real `openclaw agent --local` loop.
 
 It is **not** a faithful reproduction of OpenClaw running in production.
 Call it what it is: *OpenClaw retrieval stack embedded in the unified
 benchmark protocol*.
+
+## Runtime ownership boundary
+
+`evaluation/` owns the benchmark protocol, the OpenClaw adapter, and the
+shared plugin/manifest contracts. `openclaw-eval/` owns the container and
+image-build implementation and imports those shared contracts. When
+`--build-missing` is requested, evaluation obtains the `openclaw-docker` base
+argv from `evaluation/config/runtime_registry.yaml` instead of hard-coding the
+harness's internal path in Python, then appends the existing plugin and
+manifest flags.
+
+This is a declarative boundary for build invocation, not a claim that the
+current adapter is runtime-agnostic. The adapter behavior, runtime id, build
+flags, and manifest resolution are still specific to OpenClaw; only the
+builder location is supplied by the registry.
+
+System selection is by public registry ID, not by a physical YAML filename.
+See the [system-configuration guide](system-configs/README.md) for registry and
+inheritance rules, and the [OpenViking notes](system-configs/openviking.md) for
+the session-bundle ingest, tenant, timeout, and image invariants.
+
+For routine benchmark runs, select a `canonical` / `active` ID from that
+catalog. `openclaw-hybrid` remains a compatibility alias for `openclaw`: the
+CLI displays the resolution, metadata records both IDs, and the default result
+directory continues to use the requested alias. Experimental, ablation, and
+tooling presets emit an experimental warning; deprecated entries name their
+replacement.
+
+## Portable local OpenViking runner
+
+The repository-root `build.sh` is a compatibility wrapper around
+`openclaw-eval/scripts/run_openviking_local_eval.sh`. It may be invoked from
+any working directory. The historical positional form remains valid:
+
+```bash
+./build.sh RUN_NAME [evaluation arguments...]
+```
+
+Inspect the resolved paths and forwarded arguments without installing plugin
+dependencies, stopping a server, deleting `.ovdata`, polling health, or
+starting an evaluation:
+
+```bash
+./build.sh --dry-run RUN_NAME --from-conv 0 --to-conv 1
+```
+
+A real run stops the process listening on port 1933 and resets
+`OPENVIKING_FORK/.ovdata`. Non-interactive callers must explicitly authorize
+that work with `--yes-reset`; an interactive caller may instead type exactly
+`yes` at the prompt. Required directories, configuration files, and
+executables are validated before the existing server is stopped. Filesystem
+overrides are normalized to absolute canonical paths before dry-run output or
+confirmation, with relative paths interpreted from the caller's working
+directory. A destructive run refuses `/`, requires the fork's
+`pyproject.toml` and `openviking/` checkout markers, and rejects any external
+path placed below the reset target.
+
+```bash
+./build.sh --yes-reset RUN_NAME --from-conv 0 --to-conv 1
+# The control flag is also accepted after RUN_NAME for positional compatibility:
+./build.sh RUN_NAME --yes-reset --from-conv 0 --to-conv 1
+```
+
+Defaults are derived from the checkout and can be overridden without editing
+the script:
+
+| Environment variable | Portable default |
+|----------------------|------------------|
+| `OPENVIKING_FORK` | `OpenViking-fork` beside this repository |
+| `OPENVIKING_PLUGIN_DIR` | `$OPENVIKING_FORK/examples/openclaw-plugin` |
+| `OPENVIKING_CONFIG` | `$HOME/.openviking/ov.local.conf` |
+| `OPENVIKING_SERVER_BIN` | `$OPENVIKING_FORK/.venv/bin/openviking-server` |
+| `EVAL_PYTHON` | this repository's `.venv/bin/python` |
+| `EVAL_SYSTEM` | `openclaw-docker-openviking-session-bundle-noop` |
+| `EVAL_LOG_DIR` | this repository's `.runlogs` |
+| `TCMALLOC_PATH` | unset; no allocator is preloaded |
+
+The source server still starts with direct provider access: inherited HTTP,
+HTTPS, and all-proxy variables are removed only from the server process. The
+runner selects the old listener with an exact port-1933 `ss` query, requires
+its unique PID to stop and release the port, then verifies that the healthy
+listener belongs to the newly launched server PID. It retains the plugin bind
+mount, LoCoMo dataset, and all trailing evaluation CLI arguments.
 
 The fidelity/comparability tradeoff is explicit. Three parts:
 
@@ -22,14 +107,14 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 | Per-conversation isolation | Own `workspace`, `state_dir`, `home`, `cwd` — matches how v0.1/v0.2 bench adapters isolated runs |
 | Embedding provider | sophnet via OpenClaw's native `memorySearch.remote` config (for `vector` / `hybrid` modes) |
 | source_sessions projection | `memory/session-<SX>-<date>.md` filenames — FTS hits project back to session ids for cross-system retrieval metrics |
-| Status check | `openclaw memory status --json`; sandbox refuses to promote `visibility_state` to `settled` unless OpenClaw confirms (plan Review-driven revision #3) |
+| Status check | `openclaw memory status --json`; the sandbox does not promote `visibility_state` to `settled` until OpenClaw confirms the index state. |
 
 ## Approximate, with documented divergence
 
 | Concern | OpenClaw native | This adapter |
 |---------|-----------------|--------------|
 | Memory flush (`flush_mode: "shared_llm"`) | Agent-runner-memory triggers an in-turn flush agent when the conversation crosses a token threshold (`buildMemoryFlushPlan`). Uses the agent's own LLM. | Runs once per session at ingest time with the benchmark's shared LLM provider and a prompt *modelled on* (not copied from) `buildMemoryFlushPlan`. OpenClaw's own `compaction.memoryFlush.enabled` is kept **off** so search never re-flushes. |
-| Answer prompt | OpenClaw agents have their own system prompts per agent definition. | Reuses the shared benchmark answer prompt (`prompts.yaml -> online_api.default.answer_prompt_mem0`) so OpenClaw answers are directly comparable with mem0/memos/etc. |
+| Answer prompt | OpenClaw agents have their own system prompts per agent definition. | `shared_llm` replaces the agent answer path with the benchmark prompt (`prompts.yaml -> online_api.default.answer_prompt_mem0`); `agent_local` sends the raw question through OpenClaw's own agent loop. |
 | Session bucketing | OpenClaw buckets markdown by date (`YYYY-MM-DD.md`). Single date can mix multiple sessions. | One file per session (`session-<SX>-<date>.md`) so `source_sessions` can be derived from the path alone. |
 | Search concurrency | Unrestricted; OpenClaw uses its own sqlite WAL concurrency. | Per-conversation async semaphore (`max_inflight_queries_per_conversation`, default 1) because each query spawns a cold Node subprocess. |
 
@@ -41,20 +126,21 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 | Short-term promotion into `MEMORY.md` | Requires real usage-signal history. |
 | Mid-turn compaction / pre-compaction flush | Requires a running agent loop. Benchmark feeds transcripts as a whole. |
 | `memory promote` / `memory promote-explain` CLIs | Same reason as above. |
-| OpenClaw's internal answer prompt | Replaced by the shared benchmark prompt for cross-system comparability. |
+| OpenClaw's internal answer prompt in `shared_llm` mode | Replaced by the shared benchmark prompt for cross-system comparability. It remains active in `agent_local` mode. |
 
 ## `flush_mode` values
 
 | Value | Behaviour | Used when |
 |-------|-----------|-----------|
-| `disabled` | Raw session transcript dumped as markdown bullets. Matches v0.1/v0.2 ingestion exactly. | Ablation preset (`*-noflush.yaml`) — for direct comparison against the historical bench adapters. |
-| `shared_llm` | Framework LLM distils each session into retention-worthy bullets before OpenClaw indexes them. | Main `openclaw.yaml` + `*-fts.yaml` / `*-vector.yaml` / `*-hybrid.yaml` — the "closest to OpenClaw production lifecycle, given benchmark constraints" preset. |
+| `disabled` | Raw session transcript dumped as markdown bullets. Matches v0.1/v0.2 ingestion exactly. | The `openclaw-fts-noflush`, `openclaw-vector-noflush`, and `openclaw-hybrid-noflush` public presets. |
+| `shared_llm` | Framework LLM distils each session into retention-worthy bullets before OpenClaw indexes them. | The `openclaw`, `openclaw-fts`, and `openclaw-vector` public presets. |
+| `session_bundle` | With memory-core, each LoCoMo sub-session goes through `agent_run` and its local transcript is archived before the next bundle. OpenViking combinations also use host-side SDK ingest; an OV-only `memory_mode: noop` preset uses only that SDK path and skips the memory-core agent/index work. | The registered Memcore and OpenViking session-bundle families. |
 
 ## Deciding which preset to use
 
-- `openclaw-fts-noflush.yaml` ← cheapest, best for wiring smokes. Byte-for-byte comparable with v0.1.
-- `openclaw-hybrid-noflush.yaml` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
-- `openclaw-hybrid.yaml` (`openclaw.yaml` main preset) ← full stack. Closest to production but with documented divergences above.
+- `openclaw-fts-noflush` ← cheapest, best for wiring smokes. Byte-for-byte comparable with v0.1.
+- `openclaw-hybrid-noflush` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
+- `openclaw` (`openclaw-hybrid` is its compatibility alias) ← full stack. Closest to production but with documented divergences above.
 
 ## Cross-QA short-term isolation (OV / openclaw-eval alignment)
 

@@ -16,12 +16,16 @@ Locks the contract that:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from evaluation.src.adapters.openclaw.adapter import OpenClawAdapter
 from evaluation.src.adapters.openclaw.resolved_config import (
     build_openclaw_resolved_config,
 )
+from evaluation.src.config.system_loader import resolve_system_config
+from evaluation.src.core.data_models import Conversation
 
 
 # --- helpers ----------------------------------------------------------
@@ -94,6 +98,36 @@ def test_resolved_config_does_not_leak_embedding_secret(monkeypatch):
     assert "${SOPH_API_KEY}" in serialized
     remote = cfg["agents"]["defaults"]["memorySearch"]["remote"]
     assert remote["apiKey"] == "${SOPH_API_KEY}"
+
+
+def test_public_host_preset_writes_embedding_marker_without_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    materialized_secret = "materialized-embedding-secret-must-not-land-on-disk"
+    monkeypatch.setenv("SOPH_API_KEY", materialized_secret)
+    environment = {
+        "LLM_API_KEY": "llm-key",
+        "LLM_BASE_URL": "https://llm.example/v1",
+        "LLM_MODEL": "test-model",
+        "OPENCLAW_EMBED_MODEL": "embedding-model",
+        "OPENCLAW_EMBED_PROVIDER": "sophnet",
+        "OPENCLAW_REPO_PATH": "/tmp/openclaw",
+        "SOPH_API_KEY": materialized_secret,
+        "SOPH_EMBED_EASYLLM_ID": "deployment",
+        "SOPH_EMBED_URL": "https://embed.example/v1",
+    }
+    system = resolve_system_config("openclaw", environ=environment)
+    adapter = OpenClawAdapter(system.config, output_dir=tmp_path)
+    root_dir = tmp_path / "artifacts" / "openclaw" / "run-secret-hygiene"
+    root_dir.mkdir(parents=True)
+
+    sandbox = adapter._prepare_conversation_sandbox(
+        root_dir, Conversation(conversation_id="conv-secret-hygiene", messages=[])
+    )
+    serialized = Path(sandbox["resolved_config_path"]).read_text(encoding="utf-8")
+
+    assert "${SOPH_API_KEY}" in serialized
+    assert materialized_secret not in serialized
 
 
 def test_resolved_config_preserves_non_secret_expanded_values():

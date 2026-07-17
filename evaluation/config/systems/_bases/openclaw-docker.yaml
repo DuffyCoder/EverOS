@@ -1,0 +1,34 @@
+adapter: "openclaw-docker"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  max_inflight_queries_per_conversation: 1
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: "settled"
+  retrieval_route: "search_then_get"
+  answer_mode: "agent_local"
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+
+openclaw_docker:
+  network: "bridge"

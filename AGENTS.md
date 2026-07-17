@@ -203,9 +203,13 @@ EverMemOS/
 │   ├── config/                   # Demo configs
 │   ├── tools/                    # Demo tools
 │   └── utils/                    # Demo utilities
-├── docs/                         # Documentation
-├── evaluation/                   # Evaluation framework
-├── data/                         # Sample data
+├── docs/                         # Long-lived project documentation
+│   └── evaluation/              # Evaluation architecture and policy
+├── evaluation/                   # Generic evaluation framework
+│   ├── data/                    # Authoritative benchmark datasets
+│   └── docs/                    # Framework-coupled operations
+├── openclaw-eval/                # OpenClaw-specific evaluation runtime
+├── data/                         # Product demo and sample data
 ├── data_format/                  # Data format specs
 ├── figs/                         # Figures/images
 │
@@ -213,12 +217,61 @@ EverMemOS/
 ├── Dockerfile                    # Container build
 ├── pyproject.toml                # Project dependencies
 ├── Makefile                      # Build commands
-├── config.json                   # App configuration
-├── env.template                  # Environment template
+├── config.json                   # Deprecated legacy config (compatibility only)
+├── env.template                  # Current environment template
 ├── pytest.ini                    # Pytest config
 ├── pyrightconfig.json            # Type checker config
 └── .pre-commit-config.yaml       # Pre-commit hooks
 ```
+
+## Repository Ownership Boundaries
+
+- `evaluation/` is the generic benchmark framework. It owns protocols,
+  datasets, metrics, configuration, adapters, and public CLI entry points.
+- `openclaw-eval/` owns the OpenClaw-specific container, plugin, build, and
+  harness runtime. It may depend on public `evaluation/` contracts;
+  `evaluation/` must not depend on its internal file layout.
+- `evaluation/data/` is authoritative for benchmark datasets. `data/` owns
+  demo inputs; `data/locomo10.json` is a controlled compatibility mirror.
+- `docs/evaluation/` owns durable evaluation architecture, policy, and
+  reproducibility guidance. `evaluation/docs/` owns implementation-coupled
+  operations. `docs/superpowers/` contains historical records, not current
+  repository policy.
+- Reports under `docs/evaluation/analysis/` and evidence under
+  `evaluation/archives/` are local and ignored. Git tracks only the analysis
+  policy README and template.
+
+Existing paths, imports, commands, and the EverOS, EverMemOS, and `memsys`
+identifiers are compatibility surfaces; do not consolidate names as part of
+repository hygiene work.
+
+## Evaluation System Configuration Governance
+
+- Select systems by public ID from `evaluation/config/systems/index.yaml`,
+  normally a `canonical` / `active` entry. Do not select a YAML filename.
+- The registry is locked to exactly 36 IDs by
+  `EXPECTED_PUBLIC_SYSTEM_IDS` and exact-equality tests. Routine changes update
+  an existing categorized leaf and its index metadata, or an existing alias's
+  index-only row; adding only a leaf and index row cannot expose a 37th ID. A
+  deliberate public-ID expansion must also update the constant and catalog
+  row/tests, refactor the catalog/index and legacy-baseline gates so the
+  immutable original 36 remain a required subset, and test the new ID
+  separately. Never edit the pre-cleanup fixture to make a new ID appear
+  legacy.
+- Existing presets use `canonical/` for supported defaults, `experiments/` for
+  exploratory work, `ablations/` for controlled comparisons, and `tooling/`
+  for diagnostics. Compatibility aliases live only in the index and have no
+  runnable leaf.
+- `extends` recursively merges mappings; lists and scalar values replace the
+  inherited value. Keep bases minimal and semantic differences in leaves.
+- Secret fields in tracked YAML use `${VAR}` or `${VAR:}` with no non-empty
+  secret default. `api_key_env` and `env_vars` contain bare environment names.
+  The only empty-key exception is the strict-loopback local EverMemOS API
+  preset. Never commit a materialized credential.
+- Preserve old public IDs and requested-ID result directory names. Metadata
+  records the canonical target and source chain for resume safety.
+- Follow the active [system-configuration guide](evaluation/docs/system-configs/README.md)
+  and run its strict 36-ID validation suite with every registry change.
 
 ## Tech Stack
 
@@ -332,20 +385,12 @@ docker-compose logs -f           # View logs
 
 ## Environment Variables
 
-Required in `.env` (copy from `env.template`):
-
-```bash
-# LLM (at least one required)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-GOOGLE_API_KEY=
-
-# Databases (defaults work with docker-compose)
-MONGODB_URI=mongodb://localhost:27017
-REDIS_URL=redis://localhost:6379
-MILVUS_HOST=localhost
-ELASTICSEARCH_URL=http://localhost:19200
-```
+Copy `env.template` to `.env` and fill only the services used by the selected
+runtime or evaluation preset. `env.template` is the canonical starting
+template; the selected system YAML and its `env_vars` are the exact per-preset
+contract. Do not duplicate a second variable list here. Never commit `.env` or
+copy a materialized secret into tracked configuration, fixtures, results, or
+docs.
 
 ## Development Guidelines
 
@@ -375,7 +420,10 @@ ELASTICSEARCH_URL=http://localhost:19200
 3. **Type Safety**: Add type hints to all functions
 4. **Error Handling**: Use custom exceptions from `core/`
 5. **Logging**: Use logger from `core/observation/logger.py`
-6. **Configuration**: Main config in `config.json`, env variables in `.env`
+6. **Configuration**: Current configuration comes from `.env` (based on
+   `env.template`) plus typed and component runtime configs. Root `config.json`
+   is deprecated legacy configuration retained unchanged for compatibility; do
+   not treat it as the primary configuration source or add secrets to it.
 
 ## Documentation References
 
@@ -386,6 +434,7 @@ ELASTICSEARCH_URL=http://localhost:19200
 - [Development Guide](docs/dev_docs/development_guide.md)
 - [Usage Examples](docs/usage/USAGE_EXAMPLES.md)
 - [Configuration Guide](docs/usage/CONFIGURATION_GUIDE.md)
+- [Evaluation Ownership](docs/evaluation/README.md)
 
 ## Testing Approach
 

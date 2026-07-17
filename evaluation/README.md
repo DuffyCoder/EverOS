@@ -2,6 +2,21 @@
 
 A unified, modular evaluation framework for benchmarking memory systems on standard datasets.
 
+## Repository Ownership
+
+`evaluation/data/` is the authoritative home for benchmark datasets.
+`data/locomo10.json` remains available only as an exact compatibility mirror of
+`evaluation/data/locomo/locomo10.json` for consumers of the legacy path.
+
+Public system ids are registered in
+`evaluation/config/systems/index.yaml`. The CLI resolves aliases and
+inheritance through that registry instead of assuming that every id has a
+same-named flat YAML file. Alias runs retain the requested id in their result
+directory (for example, `openclaw-hybrid` still writes under
+`locomo-openclaw-hybrid`) while run metadata records the canonical target.
+Unknown or invalid ids exit non-zero; unknown-id errors include close matches,
+and experimental or deprecated entries emit a visible warning.
+
 ## 📖 Overview
 
 ### Evaluation Scope
@@ -20,7 +35,10 @@ Our adapter implementations are based on:
 - **Official open-source repositories**: Mem0, MemOS, Zep on GitHub
 - **Official documentation**: Mem0, MemOS, MemU, Zep quick start guide and API documentation
 - **Consistent methodology**: All systems evaluated using the same pipeline, datasets, and metrics
-- **Unified answer generation**: All systems use **GPT-4.1-mini** as the answer LLM to ensure fair comparison across different memory backends
+- **Explicit answer-model ownership**: Online and `shared_llm` paths use the
+  configured benchmark answer LLM. OpenClaw `agent_local` paths instead use
+  `openclaw.agent_llm`; compare the resolved metadata before treating results
+  as model-matched.
 
 During our evaluation, we identified several issues in existing open-source reference implementations for benchmarking these systems that could negatively impact their performance. We addressed these implementation gaps to ensure each system is evaluated at its best potential:
 
@@ -92,7 +110,7 @@ evaluation/
 │   └── utils/          # Configuration, logging, I/O
 ├── config/
 │   ├── datasets/       # Dataset configurations (locomo.yaml, etc.)
-│   ├── systems/        # System configurations (evermemos.yaml, etc.)
+│   ├── systems/        # Registry-backed, categorized system configs
 │   └── prompts.yaml    # Prompt templates
 ├── data/               # Benchmark datasets
 └── results/            # Evaluation results and logs
@@ -108,6 +126,19 @@ The evaluation consists of 4 sequential stages:
 4. **Evaluate**: Assess answer quality with LLM Judge or Exact Match
 
 Each stage saves its output and can be resumed independently.
+
+### Answer Retry Layers
+
+Answer generation has two independently owned retry layers. For online API
+adapters (`evermemos_api`, `mem0`, `memos`, `memu`, and `zep`),
+`answer.max_retries` controls the inner LLM attempts made inside one
+`OnlineAPIAdapter.answer()` invocation and defaults to three when omitted.
+The outer answer-stage invocation count is controlled by `--retry-policy`
+(`strict_no_retry`, `retry_once`, or `realistic`). These loops can be nested;
+changing one does not configure the other. Non-online system configurations
+reject `answer.max_retries`, and top-level adapter retry settings retain their
+adapter-specific meanings. This configuration cleanup does not alter the
+existing retry algorithms.
 
 ## 🚀 Getting Started
 
@@ -163,27 +194,42 @@ uv sync --group evaluation-full
 
 ### Environment Configuration
 
-The evaluation framework reuses most environment variables from the main EverMemOS `.env` file:
-- `LLM_API_KEY`, `LLM_BASE_URL` (for answer generation with GPT-4.1-mini)
-- `VECTORIZE_API_KEY` and  `RERANK_API_KEY` (for embeddings/reranker)
+The evaluation framework loads credentials from the main EverMemOS `.env`
+file. Copy `env.template`, populate only the services you will run, and never
+commit `.env`. Common variables include `LLM_API_KEY`, `LLM_BASE_URL`,
+`VECTORIZE_API_KEY`, and `RERANK_API_KEY`. The canonical system presets also
+declare the service-specific names in `env.template`.
 
-**⚠️ Important**: For OpenRouter API (used by gpt-4.1-mini), make sure `LLM_API_KEY` is set to your OpenRouter API key (format: `sk-or-v1-xxx`). The system will look for API keys in this order:
-1. Explicit `api_key` parameter in config
-2. `LLM_API_KEY` environment variable
+In a checked-in system YAML, a secret-valued field must be an environment
+marker (`${VAR}` or `${VAR:}` with an empty fallback). It must not contain a
+literal key or a non-empty secret default. Fields such as `api_key_env` and
+items in `env_vars` take a bare name such as `LLM_API_KEY`. Non-secret values
+may use `${VAR:default}`. The only literal-empty key exception is the strict
+loopback local EverMemOS API preset. See the
+[system-configuration guide](docs/system-configs/README.md) for the enforced
+policy.
 
-For testing EverMemOS, please first configure the whole .env file.
-
-**Additional variables for online API systems** (add to `.env` if testing these systems):
+**Variables for canonical adapters** (add to `.env` only when used):
 
 ```bash
+# EverMemOS hosted API
+EVERMEMOS_API_URL=https://api.evermind.ai/api/v1/memories
+EVERMEMOS_API_KEY=
+
 # Mem0
-MEM0_API_KEY=your_mem0_api_key
+MEM0_API_KEY=
 
 # MemOS
-MEMOS_KEY=your_memos_api_key
+MEMOS_KEY=
 
 # MemU
-MEMU_API_KEY=your_memu_api_key
+MEMU_API_KEY=
+
+# Zep
+ZEP_API_KEY=
+
+# Local Hermes checkout
+HERMES_REPO_PATH=
 ```
 
 ### Quick Test (Smoke Test)
@@ -202,7 +248,7 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos \
     --smoke --smoke-messages 20 --smoke-questions 5
 
 # You can also evaluate specific conversations with `--from-conv` and `--to-conv` (0-based, end exclusive):
-uv run python -m evaluation.cli --dataset locomo --system evermemos_custom --from-conv 0 --to-conv 1
+uv run python -m evaluation.cli --dataset locomo --system evermemos --from-conv 0 --to-conv 1
 ```
 
 
@@ -237,10 +283,26 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name e
 uv run python -m evaluation.cli --dataset locomo --system evermemos --run-name 20241107
 
 # Resume from checkpoint if interrupted (automatic)
-# Just re-run the same command - it will detect and resume from checkpoint
+# Matching resolved-system metadata is verified before the adapter starts.
+# Just re-run the same command to resume a verified checkpoint.
 uv run python -m evaluation.cli --dataset locomo --system evermemos
 
+# One-time migration for a pre-metadata result directory. This is accepted
+# only when a recognized checkpoint/progress artifact exists, and the old
+# checkpoint is permanently marked adopted-legacy-unverified.
+uv run python -m evaluation.cli --dataset locomo --system evermemos \
+    --adopt-legacy-result-dir
+
 ```
+
+Every new result directory contains `resolved-system-config.json`. It records
+the requested and canonical ids, source chain, redacted configuration,
+environment-variable names, and deterministic redacted hashes. Resume is
+refused before adapter construction if this provenance does not match the
+current dataset, source/alias chain, configuration, or runtime context. A
+non-empty pre-migration directory without metadata is also refused unless the
+one-time adoption flag above is supplied; arbitrary files are not sufficient
+evidence for adoption.
 
 ### View Results
 
@@ -263,6 +325,7 @@ cat evaluation/results/locomo-evermemos/pipeline.log
 - `answer_results.json` - Generated answers and retrieved context
 - `search_results.json` - Retrieved memories for each question
 - `pipeline.log` - Detailed execution logs
+- `resolved-system-config.json` - Redacted configuration and resume provenance
 
 ## 📊 Understanding Results
 
@@ -349,13 +412,41 @@ If you have already done search, and you want to do it again, please remove the 
 
 ### Custom Configuration
 
-Modify system or dataset configurations:
+Prefer an existing `canonical` / `active` ID from the
+[36-ID catalog](docs/system-configs/README.md#catalog). A maintained custom
+system configuration must be a categorized leaf plus an index entry; an
+unindexed YAML filename is not a selectable public ID. For an exploratory
+variant:
 
 ```bash
 # Copy and edit configuration
-cp evaluation/config/systems/evermemos.yaml evaluation/config/systems/evermemos_custom.yaml
+cp evaluation/config/systems/canonical/evermemos.yaml \
+  evaluation/config/systems/experiments/evermemos_custom.yaml
 # Edit evermemos_custom.yaml with your changes
+```
 
+Register it under `systems` in `evaluation/config/systems/index.yaml`:
+
+```yaml
+evermemos_custom:
+  adapter: evermemos
+  category: experiment
+  status: experimental
+  path: experiments/evermemos_custom.yaml
+  description: Experimental EverMemOS variant.
+```
+
+Use `canonical` / `active` only for a supported benchmark default; use
+`ablation` for a controlled one-variable comparison and `tooling` for a
+diagnostic preset. Repository maintainers must also update the locked public-ID
+contract in `evaluation/src/config/system_index.py` and the catalog/index
+expectations. The immutable pre-cleanup fixture remains unchanged; only a raw
+shape change to an existing legacy ID gets an explicit approved delta.
+See the [system-configuration guide](docs/system-configs/README.md) for the
+registry, category, inheritance, secret, and path rules. OpenViking presets
+also have dedicated [operational notes](docs/system-configs/openviking.md).
+
+```bash
 # Run with custom config
 uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 ```
@@ -366,8 +457,11 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 > baselines via the `openclaw-docker` adapter — prerequisites, docker images,
 > required env vars, and the per-round `round_finish.sh` reset), see
 > [`docs/locomo-fair-baseline.md`](../docs/locomo-fair-baseline.md). The
-> OpenViking system config is
-> `evaluation/config/systems/openclaw-docker-openviking-session-bundle-noop.yaml`.
+> default OpenViking public system ID is
+> `openclaw-docker-openviking-session-bundle-noop`; its implementation and
+> operational constraints are documented in the
+> [system-config guide](docs/system-configs/README.md) and
+> [OpenViking notes](docs/system-configs/openviking.md).
 
 The `openclaw-docker` adapter accepts CLI overrides for the memory and
 context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
@@ -376,7 +470,7 @@ context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
 > `--build-missing` flags are honored by the
 > `openclaw-docker` adapter only. Other adapters (mem0, memos, zep,
 > evermemos online API, …) do not consume these flags; pass them and
-> the eval will run, but the flags will have no effect on those
+> the eval will run with one concise warning, but the flags will have no effect on those
 > systems. The image_resolver also only applies to openclaw-docker.
 
 ```bash
@@ -396,7 +490,7 @@ uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
 
 # Explicit image override (skips manifest lookup)
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
-    --image openclaw-eval:7da23c3-evermemos-9b3a1f4-slim
+    --image YOUR_OPENCLAW_IMAGE_TAG
 
 # Auto-build the image if it's not in the manifest
 uv run python -m evaluation.cli --dataset locomo --system openclaw-docker \
@@ -407,6 +501,14 @@ Plugin ids and their kinds live in
 `evaluation/config/plugin_registry.yaml`. Image tags built by `build.py`
 are recorded in `evaluation/config/image_manifest.yaml` and used by the
 CLI's image resolver.
+
+The base command used by `--build-missing` is declared per runtime in
+`evaluation/config/runtime_registry.yaml`. The shipped `openclaw-docker`
+entry points to the OpenClaw-owned builder; evaluation renders that argv and
+adds the existing memory-plugin, context-engine, and image-manifest flags.
+This removes the OpenClaw harness path from generic Python code, while the
+adapter and its build flags remain intentionally OpenClaw-specific. It does
+not make the evaluation implementation fully runtime-agnostic.
 
 ## 📄 License
 

@@ -85,6 +85,7 @@ async def run_search_stage(
 
     recorder = latency_recorder or NULL_RECORDER
     max_retries = max_retries_for(recorder.retry_policy)
+    timeout_seconds = adapter.get_search_timeout_seconds()
     
     # Create fine-grained progress bar (track by questions)
     total_questions = len(qa_pairs)
@@ -107,7 +108,6 @@ async def run_search_stage(
             # views can break wall_ms down into per-attempt durations.
             # max_retries comes from retry_policy (set above at stage
             # init); strict_no_retry → 1 attempt total, no retries.
-            timeout_seconds = 300.0  # Increased from 120s for complex agentic retrieval
             result = None
 
             async with recorder.measure("search", qa.question_id) as ctx:
@@ -275,4 +275,3 @@ async def run_search_stage(
     print(f"{'='*60}")
     print(f"✅ Search completed: {len(all_results)} results\n")
     return all_results
-

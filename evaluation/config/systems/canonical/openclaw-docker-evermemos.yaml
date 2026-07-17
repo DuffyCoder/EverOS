@@ -1,0 +1,32 @@
+extends: "_bases/openclaw-docker.yaml"
+
+search:
+  top_k: 6
+  response_top_k: 5
+  num_workers: 5
+
+answer:
+  max_concurrent: 4
+
+openclaw:
+  backend_mode: "fts_only"
+  flush_mode: "disabled"
+  memory_mode: "evermemos"
+  agent_timeout_seconds: 180
+  agent_llm:
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "EVERMEMOS_API_URL"
+      - "EVERMEMOS_API_KEY"
+      - "EVERMEMOS_GROUP_ID"
+      - "OPENCLAW_PROMPT_STYLE"
+
+openclaw_docker:
+  image: "openclaw-eval:7da23c3-evermemos-74363c1-slim"
+  max_concurrent_containers: 4
+  mem_limit: "2g"
+  per_rpc_timeout_seconds: 210
+  # The container reaches the EverMemOS API running on the Docker host.
+  add_host_gateway: true

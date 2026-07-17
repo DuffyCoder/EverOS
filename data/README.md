@@ -3,6 +3,15 @@
 
 This directory contains sample conversation data files used for testing and demonstration purposes.
 
+## Repository Ownership
+
+Benchmark datasets under `evaluation/data/` are authoritative. The file
+`data/locomo10.json` is retained only as an exact compatibility mirror of
+`evaluation/data/locomo/locomo10.json` for consumers of the legacy path.
+
+Similarly named system YAML files are independent configurations. They may
+diverge intentionally and are not compatibility mirrors.
+
 ## 📂 Contents
 
 ### Bilingual Sample Data

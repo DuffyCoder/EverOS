@@ -14,8 +14,8 @@ Precedence for ``openclaw_docker.image``:
                                       (preserved when no CLI override)
 
 If manifest lookup fails and ``--build-missing`` is set, this module
-shells out to ``build.py`` with the same plugin selection, then
-re-resolves.
+resolves the runtime's declarative build command, invokes it with the same
+plugin selection, then re-resolves.
 """
 from __future__ import annotations
 
@@ -40,6 +40,13 @@ from evaluation.src.plugins.resolver import (
     ResolverError,
     parse_ref,
 )
+from evaluation.src.plugins.runtime_registry import (
+    DEFAULT_REPO_ROOT,
+    DEFAULT_RUNTIME_REGISTRY_PATH,
+    get_runtime,
+    load_runtime_registry,
+    render_command,
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,7 @@ def apply_plugin_overrides(
     image: Optional[str],
     build_missing: bool,
     registry_path: Optional[Path] = None,
+    runtime_registry_path: Optional[Path] = None,
     manifest_path: Optional[Path] = None,
 ) -> PluginOverrideResult:
     """Apply CLI plugin overrides to ``system_config``.
@@ -149,7 +157,12 @@ def apply_plugin_overrides(
             if not build_missing:
                 sys.exit(f"[eval] ERROR: image lookup failed: {e}")
             triggered_build = True
-            _invoke_build(memory_plugin, context_engine, manifest_path)
+            _invoke_build(
+                memory_plugin,
+                context_engine,
+                manifest_path,
+                runtime_registry_path=runtime_registry_path,
+            )
             manifest = load_manifest(manifest_path)
             try:
                 entry = find_image(
@@ -198,20 +211,27 @@ def _invoke_build(
     memory_plugin: Optional[str],
     context_engine: Optional[str],
     manifest_path: Path,
+    *,
+    runtime_registry_path: Optional[Path] = None,
 ) -> None:
     """Shell out to build.py with the same plugin selection. Aborts on failure."""
-    build_py = (
-        Path(__file__).resolve().parents[3]
-        / "openclaw-eval" / "harness" / "build.py"
+    registry = load_runtime_registry(
+        runtime_registry_path or DEFAULT_RUNTIME_REGISTRY_PATH
     )
-    cmd = [sys.executable, str(build_py)]
+    runtime = get_runtime(registry, "openclaw-docker")
+    cmd = render_command(
+        runtime.build_command,
+        repo_root=DEFAULT_REPO_ROOT,
+        python=Path(sys.executable),
+    )
+    base_command_length = len(cmd)
     if memory_plugin and memory_plugin.lower() not in ("none", ""):
         cmd.extend(["--memory-plugin", memory_plugin])
     if context_engine and context_engine.lower() not in ("none", ""):
         cmd.extend(["--context-engine", context_engine])
     cmd.extend(["--image-manifest-out", str(manifest_path)])
     print(f"[eval] image not in manifest; auto-building: "
-          f"{' '.join(cmd[len([sys.executable, str(build_py)]):])}")
+          f"{' '.join(cmd[base_command_length:])}")
     res = subprocess.run(cmd)
     if res.returncode != 0:
         sys.exit("[eval] build.py failed; see output above for details")

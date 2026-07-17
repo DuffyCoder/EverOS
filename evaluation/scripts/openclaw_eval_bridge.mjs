@@ -119,11 +119,11 @@ function envForSandbox(input) {
   // env would leak OPENAI_API_KEY etc into OpenClaw's auto-provider
   // selection, which we explicitly do NOT want.
   //
-  // v0.7: agent_llm_env_vars is the explicit whitelist for env passthrough
-  // when answer_mode=agent_local. The resolved config carries ${VAR}
-  // template strings for secrets (apiKey), so OpenClaw resolves them at
-  // startup against the env this function provides. Without the whitelist
-  // OpenClaw throws MissingEnvVarError on unresolved templates.
+  // agent_llm_env_vars is the compatibility wire key for the host-built
+  // whitelist. It contains the stable union of explicit agent env names plus
+  // agent-LLM and embedding credential references. The payload carries names,
+  // never values; ov_ingest credentials remain host-side. OpenClaw resolves
+  // the corresponding ${VAR} config templates against this minimal env.
   const env = {
     PATH: process.env.PATH || "",
     HOME: input.home_dir || input.workspace_dir || "",
@@ -139,7 +139,7 @@ function envForSandbox(input) {
   // doesn't exist in the workspace mount.
   if (process.env.OPENCLAW_HOME) env.OPENCLAW_HOME = process.env.OPENCLAW_HOME;
 
-  // v0.7: explicit env whitelist - only listed names are passed through.
+  // Defense in depth: only validated, explicitly listed names pass through.
   if (Array.isArray(input.agent_llm_env_vars)) {
     for (const name of input.agent_llm_env_vars) {
       if (typeof name !== "string") continue;

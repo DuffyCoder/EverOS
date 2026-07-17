@@ -9,7 +9,7 @@ from CI.
 ## Prerequisites
 
 - Working `.env` with `LLM_API_KEY`, `LLM_BASE_URL`, `SOPH_EMBED_URL`,
-  and any other provider keys the three adapters require.
+  and any other provider keys the three active presets require.
 - `uv sync` has been run; `uv run pytest tests/evaluation -q` passes
   on the commit you intend to benchmark.
 - Free disk in `/tmp` (or wherever `$RESULTS_ROOT` points) — each full
@@ -28,8 +28,10 @@ bash evaluation/scripts/run_latency_baseline.sh step_a
 ```
 
 What it does:
-- Iterates over `evermemos`, `openclaw-native-embed`,
-  `openclaw-native-noembed`.
+- Iterates over `evermemos`, `openclaw`, and `openclaw-fts`, matching the
+  executable `SYSTEMS` array. The `openclaw-native-*` ids remain available as
+  experimental compatibility presets, but they are not part of this active
+  baseline sweep.
 - Each system runs 3 times over a 30-question slice of Locomo.
 - `--retry-policy strict_no_retry` cascades into every
   `BenchmarkContext`; `latency_invariants.json` will fail loudly if any

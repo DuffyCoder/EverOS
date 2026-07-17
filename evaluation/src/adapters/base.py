@@ -126,10 +126,22 @@ class BaseAdapter(ABC):
         """
         return 120.0
 
+    def get_search_timeout_seconds(self) -> float:
+        """Return the per-attempt search timeout owned by the harness.
+
+        ``None`` and an omitted setting preserve the historical 300-second
+        default.  Adapters normally inherit this implementation; the hook
+        keeps timeout selection at the adapter boundary used by search_stage.
+        """
+        search_config = self.config.get("search") or {}
+        timeout_seconds = search_config.get("timeout_seconds")
+        if timeout_seconds is None:
+            return 300.0
+        return float(timeout_seconds)
+
     def pop_answer_metrics(self, question_id: str) -> dict:
         """Optional per-QA metrics (e.g. OpenClaw agent_local token usage).
 
         Default empty; adapters that record metrics during ``answer()`` override.
         """
         return {}
-

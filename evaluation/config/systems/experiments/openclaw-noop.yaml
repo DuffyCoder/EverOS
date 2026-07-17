@@ -1,0 +1,39 @@
+extends: "_bases/openclaw-native.yaml"
+
+llm:
+  model: "gpt-4o-mini"
+
+openclaw:
+  retrieval_route: "search_then_get"
+  backend_mode: "hybrid"
+  flush_mode: "shared_llm"
+  answer_mode: "agent_local"
+  memory_mode: "noop"
+  agent_timeout_seconds: 180
+  agent_llm:
+    provider_id: "sophnet"
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: "openai-completions"
+    api_key_env: "LLM_API_KEY"
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+      - "SOPH_API_KEY"
+      - "SOPH_EMBED_URL"
+      - "SOPH_EMBED_EASYLLM_ID"
+    model:
+      id: "gpt-4.1-mini"
+      name: "GPT 4.1 Mini (sophnet)"
+      reasoning: false
+      input: ["text"]
+      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+      context_window: 128000
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: "SOPH_API_KEY"
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024

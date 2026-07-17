@@ -1,0 +1,20 @@
+- id: locomo10-legacy-data-path
+  canonical: evaluation/data/locomo/locomo10.json
+  mirrors:
+    - data/locomo10.json
+  strategy: exact
+  reason: Retain the legacy benchmark data path for existing consumers.
+
+- id: openclaw-eval-bridge-library
+  canonical: openclaw-eval/container/openclaw_eval_bridge_lib.mjs
+  mirrors:
+    - evaluation/scripts/openclaw_eval_bridge_lib.mjs
+  strategy: exact
+  reason: Preserve the evaluation script path used by existing imports and tests.
+
+- id: openclaw-prompt-builders
+  canonical: openclaw-eval/plugins/evermemos/src/prompt-builders.ts
+  mirrors:
+    - openclaw-eval/plugins/mem0/src/prompt-builders.ts
+  strategy: exact
+  reason: Keep the two compatibility plugin prompt entry points synchronized.

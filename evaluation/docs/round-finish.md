@@ -4,6 +4,18 @@
 LoCoMo evaluations using the OpenClaw + OpenViking stack. It addresses
 two issues:
 
+> [!WARNING]
+> This is a **legacy full-snapshot and reset utility**, not the compact archive
+> workflow. Its archive path recursively copies and dereferences the complete
+> results tree, including OpenClaw workspaces. Those files may be very large and
+> may contain OpenClaw configuration, authentication material, API tokens, or
+> other secrets. Keep snapshots local and inspect and redact them before any
+> transfer or sharing. Use the implemented
+> [artifact lifecycle workflow](artifact-lifecycle.md) for normal compact
+> result evidence. Run `round_finish.sh --archive` only when a review or
+> incident investigation deliberately requires the complete OpenViking and
+> runtime state; never present it as a compact reproducibility package.
+
 1. **Cross-round contamination.** OpenViking data lives in the
    `openviking` container's writable layer (`/app/data/`, ~65 MB).
    The host mount (`/Data/.../.openviking`) only holds config. Conv
@@ -47,7 +59,7 @@ bash evaluation/scripts/round_finish.sh --reset
 The script appends a timestamp to the archive dir, so re-running with the
 same NAME is safe — each archive lands in its own dir.
 
-## What `--archive NAME` saves
+## What the legacy `--archive NAME` snapshot saves
 
 Output: `evaluation/archives/NAME-YYYYMMDD-HHMMSS/`
 
@@ -63,6 +75,12 @@ NAME-20260519-153012/
 
 `results/` is a copy (`cp -rL`), so the archive stays self-contained
 even if you later delete or rerun in the original `evaluation/results/`.
+
+`cp -rL` follows symlinks and applies no secret filtering, redaction, or size
+limit. Review the complete copied tree before moving it off the local machine.
+This legacy snapshot is useful only when the full runtime state is deliberately
+required. It must not be presented as the compact archive described by the
+[local analysis policy](../../docs/evaluation/analysis/README.md).
 
 Conv container workspaces are bind-mounted into
 `evaluation/results/.../artifacts/openclaw/run-*/conversations/locomo_*/`,

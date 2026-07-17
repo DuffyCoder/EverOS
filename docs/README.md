@@ -56,6 +56,12 @@ Welcome to the EverMemOS documentation! This page serves as a comprehensive inde
 - **[Demo Guide](../demo/README.md)** - Interactive examples and memory extraction demos
 - **[Data Guide](../data/README.md)** - Sample conversation data and format specifications
 - **[Evaluation Guide](../evaluation/README.md)** - Benchmarking on LoCoMo, LongMemEval, PersonaMem
+- **[Evaluation Ownership & Reproducibility](evaluation/README.md)** - Durable architecture, data ownership, archives, and analysis policy
+- **[Evaluation Framework Operations](../evaluation/docs/README.md)** - Implementation-coupled adapter and run procedures
+
+Evaluation benchmark data is owned by `evaluation/data/`; `data/` contains
+demo inputs. Human analysis reports under `docs/evaluation/analysis/` and raw
+supporting evidence under `evaluation/archives/` are local, ignored artifacts.
 
 ## Contributing
 
@@ -66,6 +72,7 @@ Welcome to the EverMemOS documentation! This page serves as a comprehensive inde
 - **[Changelog](CHANGELOG.md)** - Release notes and version history
 - **[Citation](CITATION.md)** - How to cite EverMemOS in your research
 - **[Acknowledgments](ACKNOWLEDGMENTS.md)** - Credits and thanks
+- **[Historical Evaluation Records](superpowers/README.md)** - Archived plans, specifications, runbooks, and phase notes; not current policy
 
 ---
 

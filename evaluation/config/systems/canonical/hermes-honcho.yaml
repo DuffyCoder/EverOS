@@ -1,0 +1,6 @@
+extends: "_bases/hermes.yaml"
+
+hermes:
+  plugin: "honcho"
+  ingest_strategy: "sync_per_turn"
+  plugin_config: {}

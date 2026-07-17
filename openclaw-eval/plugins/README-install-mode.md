@@ -1,129 +1,134 @@
-# Install-Mode Plugin Onboarding
+# Install-mode plugin onboarding
 
-Two ways to bring a plugin into the eval framework:
+OpenClaw evaluation images can include plugins from two sources:
 
-| Mode | When to use | Source of truth |
+| Mode | Use | Source of truth |
 |---|---|---|
-| **Bundled** (existing) | Self-authored or modified plugins under our control | `openclaw-eval/plugins/<name>/` (TS source) |
-| **Install** (this doc) | Officially-published plugins (npm / clawhub / marketplace) we test as-is | The published package |
+| Bundled source | Repository-owned or modified plugins | `openclaw-eval/plugins/<id>/` plus `evaluation/config/plugin_registry.yaml` |
+| npm install | Published plugins tested without source changes | A pinned npm package declared in `evaluation/config/plugin_registry.yaml` |
 
-## Quick start (install mode)
+The active registry and builder are authoritative. Historical design notes
+under `docs/superpowers/` are retained for archaeology but are not current
+policy. See the [system-configuration guide](../../evaluation/docs/system-configs/README.md)
+and [context-engine authoring guide](README-context-engine.md) for the current
+evaluation contracts.
+
+## Quick start
+
+Plugin selection uses the same `<id>[@<version>]` syntax in the image builder
+and evaluation CLI. npm-backed plugins require an explicit version:
 
 ```bash
-python3 openclaw-eval/harness/build.py \
-    --memory-plugin hindsight-plugin \
-    --install-spec npm:hindsight-plugin@0.5.0
+# Registered npm memory plugin
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin hindsight-plugin@0.5.0 \
+  --dry-run
+
+# Registered npm context engine, paired with the built-in memory baseline
+uv run python openclaw-eval/harness/build.py \
+  --memory-plugin memory-core \
+  --context-engine hypercompositor@0.9.6 \
+  --dry-run
 ```
 
-Build steps performed:
+The registry validates each plugin's kind (`memory` or `context-engine`) and
+maps the ID to its package. The build then:
 
-1. Reuse `openclaw-base:<sha>-memory-core-slim` (no per-plugin base build).
-2. Build eval layer with `INSTALL_SPEC` + `INSTALL_PLUGIN_ID` build args; the
-   image runs `openclaw plugins install npm:hindsight-plugin@0.5.0 --force --pin
-   --dangerously-force-unsafe-install` at build time.
-3. Plugin lands at `/opt/openclaw/extensions/hindsight-plugin/` inside the image
-   (because `OPENCLAW_HOME=/opt/openclaw`).
-4. Image tag: `openclaw-eval:<sha>-install-hindsight-plugin-<spec_hash>-slim`.
+1. builds or reuses the OpenClaw base;
+2. runs `npm pack` for each pinned npm spec and extracts it into
+   `/opt/openclaw/extensions/<id>/` in the evaluation image;
+3. makes the extension discoverable through the rendered
+   `plugins.load.paths` and the appropriate plugin slot; and
+4. appends the concrete image and plugin metadata to
+   `evaluation/config/image_manifest.yaml`, unless
+   `--no-image-manifest` is supplied.
 
-At runtime, `entrypoint.sh` injects the install dir into the rendered
-config's `plugins.load.paths` so openclaw discovers the plugin alongside
-bundled ones.
+Use `--dry-run` to inspect resolution without invoking Docker.
 
-## Supported install spec formats
+## Registering an npm plugin
 
-| Spec | Plugin id derivation | Example |
-|---|---|---|
-| `npm:<name>@<version>` | name (after `@scope/` if scoped) | `npm:@mem0/openclaw-plugin@1.2.0` -> `openclaw-plugin` |
-| `clawhub:<owner>/<name>` | name | `clawhub:acme/cool-plugin` -> `cool-plugin` |
-| `marketplace:<name>` | name | `marketplace:my-engine` -> `my-engine` |
-| Local path / archive | not derivable | must pass `--install-plugin-id <id>` |
+Add the ID, kind, type, and package to
+`evaluation/config/plugin_registry.yaml`:
 
-## When `--install-plugin-id` is required
+```yaml
+your-engine:
+  kind: context-engine
+  type: npm
+  npm_package: "@example/your-engine"
+```
 
-For raw paths or archives, build.py can't infer the id, so:
+Then select `your-engine@<version>`. Do not use an unregistered package name
+as a public plugin ID, and do not rely on `latest`; explicit versions keep
+resolution and image tags reproducible.
+
+For an alternate package in an npm registry that `npm pack` can reach from the
+Docker build, keep the registered ID and override only its install spec:
 
 ```bash
-python3 openclaw-eval/harness/build.py \
-    --memory-plugin foo \
-    --install-spec /tmp/foo-1.0.tgz \
-    --install-plugin-id foo
+uv run python openclaw-eval/harness/build.py \
+  --context-engine hypercompositor@0.9.6 \
+  --plugin-spec hypercompositor=npm:@your-scope/hypercompositor@0.9.6 \
+  --dry-run
 ```
 
-For npm/clawhub/marketplace specs, derivation is automatic; pass
-`--install-plugin-id` only to override.
+This flow does not promise access to a host-local path or archive: `npm pack`
+runs inside the Docker build environment, where an arbitrary host path is not
+present. Publish or otherwise expose the package through a registry reachable
+from that build environment.
 
-## Required: `--memory-plugin` matches installed id
+The legacy `--install-spec`, `--install-plugin-id`, and
+`--extra-install-spec` flags remain as deprecated compatibility shims. They
+resolve through the same registry and emit a deprecation warning; new scripts
+must use `--memory-plugin`, `--context-engine`, and `--plugin-spec`.
 
-build.py rejects mismatched ids:
+## Reproducibility and image selection
 
-```
-[build] ERROR: --memory-plugin 'evermemos' must match installed plugin id
-'hindsight-plugin' when --install-spec is set.
-```
+The plugin revision in an image tag is content-derived for bundled source and
+spec-derived for npm plugins. Different pinned npm versions therefore produce
+different tags. A successful normal build records the tag in the image
+manifest, after which evaluation can resolve the plugin selection:
 
-This is because `entrypoint.sh` uses `MEMORY_PLUGIN_ID` for plugin slot
-wiring (`plugins.slots.memory`); a mismatch silently binds the slot to
-a non-existent plugin.
-
-## Refusing bundled ids
-
-`memory-core` and `noop` are bundled-only — they're built into the openclaw
-image at the base layer and have no installable npm package. build.py
-rejects:
-
-```
-[build] ERROR: --install-spec is not supported for 'memory-core' (bundled
-plugin, not an install target).
+```bash
+uv run python -m evaluation.cli \
+  --dataset locomo \
+  --system openclaw-docker \
+  --memory-plugin memory-core \
+  --context-engine hypercompositor@0.9.6
 ```
 
-## Reproducibility
+An explicit `--image <tag>` bypasses manifest lookup. Use only a concrete,
+locally available or pullable tag; system YAML rejects image placeholders.
 
-Each install spec produces a different image tag rev, derived from
-`sha256(spec)[:7]`:
+## Source modifications
 
-```
-openclaw-eval:7da23c3-install-hindsight-plugin-a1b2c3d-slim   # @0.5.0
-openclaw-eval:7da23c3-install-hindsight-plugin-e4f5g6h-slim   # @0.5.1
-```
+Environment- or configuration-only changes can use a pinned published
+package. For source changes, add a repository-owned fork under
+`openclaw-eval/plugins/<fork-id>/`, register it as `bundled-source`, and build
+that ID. There is no pnpm-patch onboarding tier.
 
-Different versions cannot collide; cached images are version-specific.
+## Operational limits
 
-`--pin` (passed to `openclaw plugins install`) records the exact resolved
-npm version in openclaw's persisted config, so re-runs of the same image
-get the same resolution.
-
-## Modifying installed plugins
-
-Per the design note (`docs/superpowers/specs/2026-04-30-plugin-kinds-design-note.md`),
-only Tier 1 (env/config-driven, no source change) is supported via this
-flow. For source-level modifications, fork the plugin into
-`openclaw-eval/plugins/<your-fork>/` and use bundled mode (Tier 3 in the
-design note).
-
-The intermediate Tier 2 (pnpm patch) is **not implemented** — per user
-direction (`session 2026-04-30: 方案 A 当中的第二档修改策略不需要`).
-
-## Limitations
-
-- The `openclaw plugins install` step uses
-  `--dangerously-force-unsafe-install` to bypass safety scanning. The
-  eval framework only installs specs explicitly listed in build commands
-  by an operator; if you prefer scanning, drop the flag in
-  `Dockerfile.eval` and accept that flagged plugins will fail at build.
-- npm-published context-engine plugins are NOT yet runnable through this
-  flow — see `docs/superpowers/specs/2026-04-30-plugin-kinds-design-note.md`
-  for the Stage 3 prerequisites (4 downstream code path changes,
-  upstream openclaw normalization patch, etc.).
-- This is a build-time install. Per-conversation containers don't run
-  `openclaw plugins install` at startup — that would re-download on
-  every container spawn.
+- npm packages are executed as part of the built image. Selection is an
+  explicit operator trust decision; the direct `npm pack` extraction path is
+  not a security review of third-party code.
+- Installation happens at image-build time. Per-conversation containers do
+  not download plugins at startup.
+- Packaging and slot wiring do not import benchmark history into a context
+  engine. The native `engine_import_history` bridge path is currently unwired;
+  each engine needs a documented, tested ingest path before its scores are
+  treated as comparable.
 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/evaluation/test_build_install_spec.py -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src uv run pytest \
+  -p no:cacheprovider \
+  tests/evaluation/test_build_new_cli.py \
+  tests/evaluation/test_build_install_spec.py \
+  tests/evaluation/test_plugin_registry.py \
+  tests/evaluation/test_plugin_resolver.py -q
 ```
 
-12 tests cover: spec hash determinism, plugin id derivation for every
-spec format, argparse validation (memory-plugin mismatch / bundled id
-rejection / underivable id requires explicit flag).
+These tests cover registry resolution, kind and version validation, deprecated
+flag migration, deterministic revisions, and build-plan emission. They do not
+build an image or execute a third-party plugin.

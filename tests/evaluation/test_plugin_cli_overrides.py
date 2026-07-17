@@ -1,6 +1,9 @@
 """Unit tests for evaluation.src.plugins.cli_overrides (PR3)."""
+
 from __future__ import annotations
 
+import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -8,6 +11,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from evaluation.src.config.system_loader import resolve_system_config
 from evaluation.src.plugins.cli_overrides import (
     PluginOverrideResult,
     apply_plugin_overrides,
@@ -19,9 +23,26 @@ from evaluation.src.plugins.manifest import (
     now_iso,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SHIPPED_REGISTRY = REPO_ROOT / "evaluation" / "config" / "plugin_registry.yaml"
+SHIPPED_CONFIG_ENVIRONMENT = {
+    "LLM_API_KEY": "test-key",
+    "LLM_BASE_URL": "https://llm.example/v1",
+    "OPENCLAW_REPO_PATH": "/tmp/openclaw",
+    "OPENCLAW_EMBED_MODEL": "test-embedding-model",
+    "OPENCLAW_EMBED_PROVIDER": "test-provider",
+    "SOPH_API_KEY": "test-embedding-key",
+    "SOPH_EMBED_EASYLLM_ID": "test-deployment",
+    "SOPH_EMBED_URL": "https://embedding.example/v1",
+}
+DOCKER_PLUGIN_SYSTEM_IDS = (
+    "openclaw-docker",
+    "openclaw-docker-evermemos",
+    "openclaw-docker-mem0",
+    "openclaw-docker-hypercompositor",
+    "openclaw-docker-memclaw",
+    "openclaw-docker-stub",
+)
 
 
 def _seed_manifest(path: Path, entries: list[ManifestEntry]) -> None:
@@ -108,6 +129,33 @@ def test_no_cli_args_preserves_yaml(tmp_path: Path):
         context_engine_mode_applied=None,
         triggered_build=False,
     )
+
+
+@pytest.mark.parametrize("system_id", DOCKER_PLUGIN_SYSTEM_IDS)
+def test_plugin_overrides_preserve_shipped_preset_operational_tuning(
+    system_id: str,
+) -> None:
+    config = resolve_system_config(
+        system_id, environ=SHIPPED_CONFIG_ENVIRONMENT
+    ).config
+    expected = deepcopy(config)
+
+    apply_plugin_overrides(
+        config,
+        memory_plugin="none",
+        context_engine="none",
+        image="openclaw-eval:test-override",
+        build_missing=False,
+        registry_path=SHIPPED_REGISTRY,
+    )
+
+    config["openclaw"].pop("memory_mode")
+    config["openclaw"].pop("context_engine_mode", None)
+    config["openclaw_docker"].pop("image")
+    expected["openclaw"].pop("memory_mode")
+    expected["openclaw"].pop("context_engine_mode", None)
+    expected["openclaw_docker"].pop("image")
+    assert config == expected
 
 
 # ---------- --memory-plugin -------------------------------------------------
@@ -381,6 +429,20 @@ def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
     tests (returncode=0 is enough)."""
     cfg = _baseline_yaml()
     manifest_path = _seeded_manifest(tmp_path)
+    custom_builder = REPO_ROOT / "custom" / "build.py"
+    runtime_registry_path = tmp_path / "runtime_registry.yaml"
+    runtime_registry_path.write_text(
+        yaml.safe_dump(
+            {
+                "openclaw-docker": {
+                    "build_command": [
+                        "{python}",
+                        "{repo_root}/custom/build.py",
+                    ],
+                },
+            }
+        )
+    )
     target_image = "openclaw-eval:7da23c3-evermemos_install-hypercompositor-deadbee-slim"
     captured: dict[str, list[str]] = {}
 
@@ -410,12 +472,14 @@ def test_build_missing_invokes_build_with_correct_argv(tmp_path: Path):
             image=None,
             build_missing=True,
             registry_path=SHIPPED_REGISTRY,
+            runtime_registry_path=runtime_registry_path,
             manifest_path=manifest_path,
         )
 
     argv = captured["argv"]
-    # First arg = sys.executable; second = build.py path
-    assert argv[1].endswith("build.py")
+    # The base command comes from the runtime registry, not a hard-coded path.
+    assert Path(argv[0]) == Path(sys.executable).absolute()
+    assert Path(argv[1]) == custom_builder
     # Must carry both plugin selections forward to build.py
     assert "--memory-plugin" in argv
     mp_idx = argv.index("--memory-plugin")
