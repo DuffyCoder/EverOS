@@ -100,19 +100,19 @@ systems:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker.yaml
+    path: canonical/openclaw-docker.yaml
     description: Default containerized OpenClaw benchmark preset.
   openclaw-docker-evermemos:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker-evermemos.yaml
+    path: canonical/openclaw-docker-evermemos.yaml
     description: Containerized OpenClaw with the EverMemOS plugin.
   openclaw-docker-mem0:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker-mem0.yaml
+    path: canonical/openclaw-docker-mem0.yaml
     description: Containerized OpenClaw with the Mem0 plugin.
   openclaw-docker-memcore-session-bundle:
     adapter: openclaw-docker
@@ -178,19 +178,19 @@ systems:
     adapter: openclaw-docker
     category: experiment
     status: experimental
-    path: openclaw-docker-hypercompositor.yaml
+    path: experiments/openclaw-docker-hypercompositor.yaml
     description: Experimental containerized HyperCompositor preset.
   openclaw-docker-memclaw:
     adapter: openclaw-docker
     category: experiment
     status: experimental
-    path: openclaw-docker-memclaw.yaml
+    path: experiments/openclaw-docker-memclaw.yaml
     description: Experimental containerized MemClaw preset.
   openclaw-docker-stub:
     adapter: openclaw-docker
     category: experiment
     status: experimental
-    path: openclaw-docker-stub.yaml
+    path: experiments/openclaw-docker-stub.yaml
     description: Experimental containerized stub-memory preset.
   openclaw-docker-memcore-session-bundle-emptytail:
     adapter: openclaw-docker

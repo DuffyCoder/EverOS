@@ -115,8 +115,8 @@ The eval framework renders `slots.contextEngine` in
 declares which plugin to bind:
 
 ```yaml
-# evaluation/config/systems/openclaw-docker-<your-plugin>.yaml
-adapter: "openclaw-docker"
+# evaluation/config/systems/experiments/openclaw-docker-<your-plugin>.yaml
+extends: "_bases/openclaw-docker.yaml"
 
 openclaw:
   memory_mode: "noop"                   # no memory plugin needed
@@ -128,6 +128,10 @@ openclaw_docker:
   image: "openclaw-eval:<sha>-<your-plugin>-<rev>-slim"
   ...
 ```
+
+Register the public system id and categorized path in
+`evaluation/config/systems/index.yaml`; do not add a new root-level system
+yaml.
 
 The adapter env-emits `CONTEXT_ENGINE_PLUGIN_ID=your-plugin` and the
 container entrypoint conditionally injects `slots.contextEngine` into

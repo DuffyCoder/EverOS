@@ -1,7 +1,9 @@
 """Unit tests for evaluation.src.plugins.cli_overrides (PR3)."""
+
 from __future__ import annotations
 
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -9,6 +11,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from evaluation.src.config.system_loader import resolve_system_config
 from evaluation.src.plugins.cli_overrides import (
     PluginOverrideResult,
     apply_plugin_overrides,
@@ -20,9 +23,26 @@ from evaluation.src.plugins.manifest import (
     now_iso,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SHIPPED_REGISTRY = REPO_ROOT / "evaluation" / "config" / "plugin_registry.yaml"
+SHIPPED_CONFIG_ENVIRONMENT = {
+    "LLM_API_KEY": "test-key",
+    "LLM_BASE_URL": "https://llm.example/v1",
+    "OPENCLAW_REPO_PATH": "/tmp/openclaw",
+    "OPENCLAW_EMBED_MODEL": "test-embedding-model",
+    "OPENCLAW_EMBED_PROVIDER": "test-provider",
+    "SOPH_API_KEY": "test-embedding-key",
+    "SOPH_EMBED_EASYLLM_ID": "test-deployment",
+    "SOPH_EMBED_URL": "https://embedding.example/v1",
+}
+DOCKER_PLUGIN_SYSTEM_IDS = (
+    "openclaw-docker",
+    "openclaw-docker-evermemos",
+    "openclaw-docker-mem0",
+    "openclaw-docker-hypercompositor",
+    "openclaw-docker-memclaw",
+    "openclaw-docker-stub",
+)
 
 
 def _seed_manifest(path: Path, entries: list[ManifestEntry]) -> None:
@@ -109,6 +129,33 @@ def test_no_cli_args_preserves_yaml(tmp_path: Path):
         context_engine_mode_applied=None,
         triggered_build=False,
     )
+
+
+@pytest.mark.parametrize("system_id", DOCKER_PLUGIN_SYSTEM_IDS)
+def test_plugin_overrides_preserve_shipped_preset_operational_tuning(
+    system_id: str,
+) -> None:
+    config = resolve_system_config(
+        system_id, environ=SHIPPED_CONFIG_ENVIRONMENT, allow_legacy=True
+    ).config
+    expected = deepcopy(config)
+
+    apply_plugin_overrides(
+        config,
+        memory_plugin="none",
+        context_engine="none",
+        image="openclaw-eval:test-override",
+        build_missing=False,
+        registry_path=SHIPPED_REGISTRY,
+    )
+
+    config["openclaw"].pop("memory_mode")
+    config["openclaw"].pop("context_engine_mode", None)
+    config["openclaw_docker"].pop("image")
+    expected["openclaw"].pop("memory_mode")
+    expected["openclaw"].pop("context_engine_mode", None)
+    expected["openclaw_docker"].pop("image")
+    assert config == expected
 
 
 # ---------- --memory-plugin -------------------------------------------------

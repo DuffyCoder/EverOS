@@ -107,3 +107,33 @@ deltas:
       classification: structure-only
       surface: raw
       rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-evermemos:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-mem0:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-hypercompositor:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-memclaw:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.
+  openclaw-docker-stub:
+    - pointer: /openclaw/prompts
+      classification: structure-only
+      surface: raw
+      rationale: Removed an unused prompt block with no adapter consumer.

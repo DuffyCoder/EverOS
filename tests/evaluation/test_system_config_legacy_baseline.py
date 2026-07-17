@@ -109,6 +109,20 @@ HOST_OPENCLAW_EMBEDDING_MIGRATION_IDS = {
     "openclaw-vector-noflush",
 }
 
+DOCKER_PLUGIN_CANONICAL_IDS = (
+    "openclaw-docker",
+    "openclaw-docker-evermemos",
+    "openclaw-docker-mem0",
+)
+
+DOCKER_PLUGIN_EXPERIMENT_IDS = (
+    "openclaw-docker-hypercompositor",
+    "openclaw-docker-memclaw",
+    "openclaw-docker-stub",
+)
+
+DOCKER_PLUGIN_SYSTEM_IDS = (*DOCKER_PLUGIN_CANONICAL_IDS, *DOCKER_PLUGIN_EXPERIMENT_IDS)
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -674,6 +688,113 @@ def test_host_openclaw_approved_raw_deltas_are_exact() -> None:
             for entry in approved_document["deltas"].get(system_id, [])
         }
         assert actual == expected
+
+
+@pytest.mark.parametrize("system_id", DOCKER_PLUGIN_SYSTEM_IDS)
+def test_docker_plugin_migration_preserves_effective_legacy_semantics(
+    system_id: str,
+) -> None:
+    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]
+
+    resolved = resolve_system_config(
+        system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
+    )
+
+    assert resolved.adapter == expected["adapter"] == "openclaw-docker"
+    assert resolved.canonical_id == expected["canonical_id"] == system_id
+    assert legacy.json_pointer_differences(
+        expected["raw_config"], resolved.raw_config
+    ) == {"/openclaw/prompts"}
+    assert "prompts" not in resolved.raw_config["openclaw"]
+
+    effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+    assert effective == expected["effective_config"]
+    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_docker_plugin_family_uses_only_common_fields_in_shared_base() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    base_path = systems_root / "_bases" / "openclaw-docker.yaml"
+
+    assert yaml.safe_load(base_path.read_text(encoding="utf-8")) == {
+        "adapter": "openclaw-docker",
+        "llm": {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "${LLM_API_KEY}",
+            "base_url": ("${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"),
+            "temperature": 0.0,
+            "max_tokens": 1024,
+        },
+        "search": {"max_inflight_queries_per_conversation": 1},
+        "openclaw": {
+            "repo_path": "${OPENCLAW_REPO_PATH}",
+            "visibility_mode": "settled",
+            "retrieval_route": "search_then_get",
+            "answer_mode": "agent_local",
+            "agent_llm": {
+                "provider_id": "sophnet",
+                "base_url": (
+                    "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+                ),
+                "api": "openai-completions",
+                "api_key_env": "LLM_API_KEY",
+                "model": {
+                    "id": "gpt-4.1-mini",
+                    "name": "GPT 4.1 Mini (sophnet)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "context_window": 128000,
+                    "max_tokens": 4096,
+                },
+            },
+        },
+        "openclaw_docker": {"network": "bridge"},
+    }
+
+
+def test_docker_plugin_family_uses_categorized_leaves_and_no_flat_files() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    resolved_root = systems_root.resolve()
+    index = load_system_index()
+
+    expected_paths = {
+        **{
+            system_id: f"canonical/{system_id}.yaml"
+            for system_id in DOCKER_PLUGIN_CANONICAL_IDS
+        },
+        **{
+            system_id: f"experiments/{system_id}.yaml"
+            for system_id in DOCKER_PLUGIN_EXPERIMENT_IDS
+        },
+    }
+    for system_id, expected_path in expected_paths.items():
+        entry = index.systems[system_id]
+        assert entry.path is not None
+        assert entry.path.as_posix() == expected_path
+        assert (systems_root / expected_path).is_file()
+
+        resolved = resolve_system_config(
+            system_id, environ=FAKE_ENVIRONMENT, allow_legacy=True
+        )
+        assert tuple(
+            path.relative_to(resolved_root).as_posix() for path in resolved.source_paths
+        ) == ("_bases/openclaw-docker.yaml", expected_path)
+        assert not (systems_root / f"{system_id}.yaml").exists()
+
+
+def test_docker_plugin_approved_raw_deltas_are_exact() -> None:
+    approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
+
+    for system_id in DOCKER_PLUGIN_SYSTEM_IDS:
+        actual = {
+            (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
+            for entry in approved_document["deltas"].get(system_id, [])
+        }
+        assert actual == {("/openclaw/prompts", "structure-only", "raw")}
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

@@ -1,0 +1,28 @@
+extends: "_bases/openclaw-docker.yaml"
+
+search:
+  top_k: 1
+  response_top_k: 1
+  num_workers: 1
+
+answer:
+  max_retries: 1
+  max_concurrent: 1
+
+openclaw:
+  backend_mode: "fts_only"
+  flush_mode: "shared_llm"
+  memory_mode: "stub"
+  agent_timeout_seconds: 60
+  agent_llm:
+    env_vars:
+      - "LLM_API_KEY"
+      - "LLM_BASE_URL"
+      - "LLM_MODEL"
+
+openclaw_docker:
+  # Temporary legacy placeholder retained for the structure-only migration.
+  image: "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"
+  max_concurrent_containers: 1
+  mem_limit: "2g"
+  per_rpc_timeout_seconds: 60
