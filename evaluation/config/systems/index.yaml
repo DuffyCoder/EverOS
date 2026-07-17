@@ -118,19 +118,19 @@ systems:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker-memcore-session-bundle.yaml
+    path: canonical/openclaw-docker-memcore-session-bundle.yaml
     description: Containerized OpenClaw Memcore session-bundle preset.
   openclaw-docker-openviking-session-bundle-memcore:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker-openviking-session-bundle-memcore.yaml
+    path: canonical/openclaw-docker-openviking-session-bundle-memcore.yaml
     description: OpenViking session bundle with Memcore retrieval.
   openclaw-docker-openviking-session-bundle-noop:
     adapter: openclaw-docker
     category: canonical
     status: active
-    path: openclaw-docker-openviking-session-bundle-noop.yaml
+    path: canonical/openclaw-docker-openviking-session-bundle-noop.yaml
     description: OpenViking session bundle with no-op memory retrieval.
   hermes:
     adapter: hermes
@@ -196,23 +196,23 @@ systems:
     adapter: openclaw-docker
     category: ablation
     status: experimental
-    path: openclaw-docker-memcore-session-bundle-emptytail.yaml
+    path: ablations/openclaw-docker-memcore-session-bundle-emptytail.yaml
     description: Memcore session-bundle empty-tail ablation.
   openclaw-docker-memcore-session-bundle-weaktail:
     adapter: openclaw-docker
     category: ablation
     status: experimental
-    path: openclaw-docker-memcore-session-bundle-weaktail.yaml
+    path: ablations/openclaw-docker-memcore-session-bundle-weaktail.yaml
     description: Memcore session-bundle weak-tail ablation.
   openclaw-docker-openviking-session-bundle-noop-fixpack:
     adapter: openclaw-docker
     category: ablation
     status: experimental
-    path: openclaw-docker-openviking-session-bundle-noop-fixpack.yaml
+    path: ablations/openclaw-docker-openviking-session-bundle-noop-fixpack.yaml
     description: OpenViking no-op session-bundle fix-pack ablation.
   openclaw-docker-openviking-session-bundle-noop-serial:
     adapter: openclaw-docker
     category: tooling
     status: experimental
-    path: openclaw-docker-openviking-session-bundle-noop-serial.yaml
+    path: tooling/openclaw-docker-openviking-session-bundle-noop-serial.yaml
     description: Serialized OpenViking no-op preset for QA attribution.

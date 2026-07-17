@@ -27,8 +27,8 @@ This is a stand-alone tool, NOT invoked by the eval pipeline or
 
 Prerequisites:
 
-* Eval was run with strict per-qa serial config
-  (``openclaw-docker-openviking-session-bundle-noop-serial.yaml`` or
+* Eval was run with the strict per-QA serial public preset
+  (``openclaw-docker-openviking-session-bundle-noop-serial`` or
   equivalent ``search.num_workers=1`` + ``answer.max_concurrent=1``).
 * OV server log starts at or before Stage 1 Add (typical case: OV was
   restarted right before eval; a single ``> ov-server.log`` at restart

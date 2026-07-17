@@ -3,11 +3,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from evaluation.src.config.system_index import load_system_index
+from evaluation.src.config.system_loader import resolve_system_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNER = REPO_ROOT / "openclaw-eval" / "scripts" / "run_openviking_local_eval.sh"
 WRAPPER = REPO_ROOT / "build.sh"
 EXTERNAL_COMMANDS = ("ss", "rm", "npm", "curl", "setsid", "sleep", "git")
+DEFAULT_OPENVIKING_SYSTEM = "openclaw-docker-openviking-session-bundle-noop"
 
 
 def _environment_with_command_traps(tmp_path: Path) -> tuple[dict[str, str], Path]:
@@ -179,6 +182,30 @@ def test_dry_run_prints_all_overrides_without_invoking_external_commands(
     assert f"log: {overrides['EVAL_LOG_DIR']}/ov-server.log" in result.stdout
     for value in overrides.values():
         assert value in result.stdout
+    assert not call_log.exists()
+
+
+def test_dry_run_default_system_is_a_registered_public_id(tmp_path: Path) -> None:
+    env, call_log = _environment_with_command_traps(tmp_path)
+    env.pop("EVAL_SYSTEM", None)
+
+    result = subprocess.run(
+        [str(WRAPPER), "--dry-run", "default-system"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"system: {DEFAULT_OPENVIKING_SYSTEM}" in result.stdout
+    assert DEFAULT_OPENVIKING_SYSTEM in load_system_index().systems
+    resolved = resolve_system_config(
+        DEFAULT_OPENVIKING_SYSTEM,
+        environ={"LLM_API_KEY": "test-key", "OPENCLAW_REPO_PATH": "/tmp/openclaw"},
+    )
+    assert resolved.requested_id == DEFAULT_OPENVIKING_SYSTEM
     assert not call_log.exists()
 
 

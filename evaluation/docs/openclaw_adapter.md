@@ -24,6 +24,11 @@ current adapter is runtime-agnostic. The adapter behavior, runtime id, build
 flags, and manifest resolution are still specific to OpenClaw; only the
 builder location is supplied by the registry.
 
+System selection is by public registry ID, not by a physical YAML filename.
+See the [system-configuration guide](system-configs/README.md) for registry and
+inheritance rules, and the [OpenViking notes](system-configs/openviking.md) for
+the session-bundle ingest, tenant, timeout, and image invariants.
+
 ## Portable local OpenViking runner
 
 The repository-root `build.sh` is a compatibility wrapper around
@@ -118,14 +123,14 @@ The fidelity/comparability tradeoff is explicit. Three parts:
 
 | Value | Behaviour | Used when |
 |-------|-----------|-----------|
-| `disabled` | Raw session transcript dumped as markdown bullets. Matches v0.1/v0.2 ingestion exactly. | Ablation preset (`*-noflush.yaml`) — for direct comparison against the historical bench adapters. |
-| `shared_llm` | Framework LLM distils each session into retention-worthy bullets before OpenClaw indexes them. | Main `openclaw.yaml` + `*-fts.yaml` / `*-vector.yaml` / `*-hybrid.yaml` — the "closest to OpenClaw production lifecycle, given benchmark constraints" preset. |
+| `disabled` | Raw session transcript dumped as markdown bullets. Matches v0.1/v0.2 ingestion exactly. | The `openclaw-fts-noflush`, `openclaw-vector-noflush`, and `openclaw-hybrid-noflush` public presets. |
+| `shared_llm` | Framework LLM distils each session into retention-worthy bullets before OpenClaw indexes them. | The `openclaw`, `openclaw-fts`, and `openclaw-vector` public presets. |
 
 ## Deciding which preset to use
 
-- `openclaw-fts-noflush.yaml` ← cheapest, best for wiring smokes. Byte-for-byte comparable with v0.1.
-- `openclaw-hybrid-noflush.yaml` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
-- `openclaw-hybrid.yaml` (`openclaw.yaml` main preset) ← full stack. Closest to production but with documented divergences above.
+- `openclaw-fts-noflush` ← cheapest, best for wiring smokes. Byte-for-byte comparable with v0.1.
+- `openclaw-hybrid-noflush` ← measures the pure impact of adding sophnet embeddings without confounding LLM flush.
+- `openclaw` (`openclaw-hybrid` is its compatibility alias) ← full stack. Closest to production but with documented divergences above.
 
 ## Cross-QA short-term isolation (OV / openclaw-eval alignment)
 

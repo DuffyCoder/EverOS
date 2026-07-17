@@ -1,0 +1,46 @@
+extends: "_bases/openclaw-openviking.yaml"
+
+llm:
+  model: doubao-seed-2-0-pro-260215
+
+search:
+  num_workers: 5
+
+answer:
+  max_concurrent: 16
+
+openclaw:
+  backend_mode: fts_only
+  memory_mode: noop
+  agent_timeout_seconds: 240
+  ingest_session_tail: ""
+  ov_ingest:
+    user_id_template: "{conv_id}"
+    agent_id_template: "{conv_id}"
+    task_timeout_sec: 3600
+  agent_llm:
+    idle_timeout_seconds: 180
+    env_vars:
+      - LLM_API_KEY
+      - LLM_BASE_URL
+      - LLM_MODEL
+      - SOPH_API_KEY
+      - SOPH_EMBED_URL
+      - SOPH_EMBED_EASYLLM_ID
+      - OPENVIKING_BASE_URL
+      - OPENVIKING_API_KEY
+      - OPENVIKING_ACCOUNT_ID
+      - OPENVIKING_USER_ID
+      - OPENVIKING_ARCHIVE_INDEX_TRIM_LIMIT
+      - OPENVIKING_ARCHIVE_INDEX_ORDER
+      - OPENVIKING_ARCHIVE_SEARCH_OPT
+    model:
+      max_tokens: 8192
+      compat:
+        supportsUsageInStreaming: true
+
+openclaw_docker:
+  image: openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim
+  max_concurrent_containers: 16
+  mem_limit: ""
+  remove_container_on_stop: true

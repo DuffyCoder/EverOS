@@ -1,0 +1,3 @@
+extends: "_bases/openclaw-memcore-session-bundle.yaml"
+openclaw:
+  ingest_session_tail: "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]"

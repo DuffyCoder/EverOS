@@ -1,0 +1,45 @@
+extends: "_bases/openclaw-openviking.yaml"
+
+llm:
+  model: doubao-seed-2-0-code-preview-260215
+
+search:
+  num_workers: 5
+
+answer:
+  max_concurrent: 4
+
+openclaw:
+  backend_mode: hybrid
+  memory_mode: memory-core
+  agent_timeout_seconds: 90
+  ingest_session_tail: "[End of session. Use the write tool to save key facts from this conversation to memory/<date>.md before replying.]"
+  ov_ingest:
+    user_id: eval-1
+    task_timeout_sec: 600
+  agent_llm:
+    env_vars:
+      - LLM_API_KEY
+      - LLM_BASE_URL
+      - LLM_MODEL
+      - SOPH_API_KEY
+      - SOPH_EMBED_URL
+      - SOPH_EMBED_EASYLLM_ID
+      - OPENVIKING_BASE_URL
+      - OPENVIKING_API_KEY
+      - OPENVIKING_ACCOUNT_ID
+      - OPENVIKING_USER_ID
+    model:
+      max_tokens: 4096
+  embedding:
+    provider: "${OPENCLAW_EMBED_PROVIDER:sophnet}"
+    model: "${OPENCLAW_EMBED_MODEL:text-embeddings}"
+    api_key_env: SOPH_API_KEY
+    base_url: "${SOPH_EMBED_URL:https://www.sophnet.com/api/open-apis/projects/4Q7Oxnq9F01FIBFSMfC8K3/easyllms/embeddings}"
+    easyllm_id: "${SOPH_EMBED_EASYLLM_ID:1aKhWpzR3QKay9sZZ1TqWi}"
+    output_dimensionality: 1024
+
+openclaw_docker:
+  image: "ghcr.io/duffycoder/openclaw-eval-plugins@sha256:d972aad0ccb3c1495f451b0cdb467a6b7bec782625ce3374e2fdb343793e45d2"
+  max_concurrent_containers: 4
+  mem_limit: 2g

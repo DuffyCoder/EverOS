@@ -45,6 +45,7 @@ OPENVIKING_PLUGIN_DIR="$(canonical_path "${OPENVIKING_PLUGIN_DIR:-$OPENVIKING_FO
 OPENVIKING_CONFIG="$(canonical_path "${OPENVIKING_CONFIG:-${HOME:-$REPO_ROOT}/.openviking/ov.local.conf}")"
 OPENVIKING_SERVER_BIN="$(canonical_path "${OPENVIKING_SERVER_BIN:-$OPENVIKING_FORK/.venv/bin/openviking-server}")"
 EVAL_PYTHON="$(canonical_path "${EVAL_PYTHON:-$REPO_ROOT/.venv/bin/python}")"
+# Public system ID registered in evaluation/config/systems/index.yaml.
 EVAL_SYSTEM="${EVAL_SYSTEM:-openclaw-docker-openviking-session-bundle-noop}"
 EVAL_LOG_DIR="$(canonical_path "${EVAL_LOG_DIR:-$REPO_ROOT/.runlogs}")"
 if [[ -n "${TCMALLOC_PATH:-}" ]]; then

@@ -1,0 +1,53 @@
+adapter: openclaw-docker
+
+llm:
+  provider: openai
+  api_key: "${LLM_API_KEY}"
+  base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+  temperature: 0.0
+  max_tokens: 1024
+
+search:
+  top_k: 6
+  response_top_k: 5
+  max_inflight_queries_per_conversation: 1
+
+answer:
+  max_retries: 3
+
+openclaw:
+  repo_path: "${OPENCLAW_REPO_PATH}"
+  visibility_mode: settled
+  retrieval_route: search_then_get
+  flush_mode: session_bundle
+  answer_mode: agent_local
+  context_engine_mode: openviking
+  ov_ingest:
+    base_url: "${OPENVIKING_INGEST_URL:http://127.0.0.1:1933}"
+    api_key_env: OPENVIKING_API_KEY
+    account_id: default
+  agent_llm:
+    provider_id: sophnet
+    base_url: "${LLM_BASE_URL:https://www.sophnet.com/api/open-apis/v1}"
+    api: openai-completions
+    api_key_env: LLM_API_KEY
+    model:
+      id: doubao-seed-2-0-code-preview-260215
+      name: Doubao Seed 2.0 Code Preview (sophnet)
+      reasoning: false
+      input: [text]
+      cost:
+        input: 0
+        output: 0
+        cacheRead: 0
+        cacheWrite: 0
+      context_window: 128000
+  prompts:
+    memory_mode: native_compiled
+    flush_mode: session_bundle
+    answer_mode: shared
+
+openclaw_docker:
+  network: bridge
+  per_rpc_timeout_seconds: 360
+  add_host_gateway: true

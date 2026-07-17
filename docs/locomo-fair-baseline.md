@@ -5,38 +5,44 @@ LoCoMo numbers on a fair, internally-consistent stack.
 
 ## What gets compared
 
-Three system configurations that share **everything except the system
-under test**. Only the memory plugins differ.
+These three registered presets preserve the historical A1/B2/B1 comparison
+surface. They are not a one-variable ablation: in addition to memory wiring,
+they retain different top-level model, timeout, tenant, concurrency, and image
+settings. Treat the published scores as historical references, not as proof
+that only the memory plugin caused the delta.
 
-| Label | yaml                                                                    | What it tests       | OV official |
-| ----- | ----------------------------------------------------------------------- | ------------------- | ----------- |
-| A1    | `openclaw-docker-memcore-session-bundle.yaml`                           | memcore only        | 35.65%      |
-| B2    | `openclaw-docker-openviking-session-bundle-noop.yaml`                   | OV only             | 52.08%      |
-| B1    | `openclaw-docker-openviking-session-bundle-memcore.yaml`                | OV + memcore        | 51.23%      |
+| Label | Public system ID | What it tests | OV official |
+| ----- | ---------------- | ------------- | ----------- |
+| A1 | `openclaw-docker-memcore-session-bundle` | memcore only | 35.65% |
+| B2 | `openclaw-docker-openviking-session-bundle-noop` | OV only | 52.08% |
+| B1 | `openclaw-docker-openviking-session-bundle-memcore` | OV + memcore | 51.23% |
+
+These are registry IDs, not YAML filenames. See the
+[system-configuration guide](../evaluation/docs/system-configs/README.md) and
+[OpenViking operational notes](../evaluation/docs/system-configs/openviking.md)
+for their current categorized paths and runtime invariants.
 
 The reference numbers come from OpenViking/README.md and were produced
 with `seed-2.0-code` as the agent LLM via the upstream
 [openclaw-eval](https://github.com/ZaynJarvis/openclaw-eval) harness.
 
-## Shared baseline (locked for fairness)
+## Current locked evaluation surfaces
 
-Every system uses the same stack so a delta between them can only come
-from the memory plugin:
-
-- Agent LLM: `gpt-4.1-mini` via Sophnet
-- Embedding: Sophnet `text-embeddings` 1024-dim
-- Rerank: SiliconFlow `BAAI/bge-reranker-v2-m3` (configured in
-  `~/.openviking/ov.conf`)
-- Judge LLM: `gpt-4.1-mini` via Sophnet (`evaluation/config/datasets/locomo.yaml`)
-- Dataset: LoCoMo10 with `category_filter: [5]` (matches official; 1540
+- OpenClaw agent model: `doubao-seed-2-0-code-preview-260215` via Sophnet in
+  all three presets.
+- Pipeline LLM model: the code-preview model in A1/B1 and
+  `doubao-seed-2-0-pro-260215` in B2.
+- OpenClaw embedding: Sophnet `text-embeddings` 1024-dim in A1/B1; B2 has no
+  OpenClaw embedding block because memory-core retrieval is disabled.
+- OpenViking embedding and rerank are server-side settings outside these
+  presets and must be recorded with each run.
+- Judge LLM: `doubao-seed-2-0-pro-260215` via Sophnet
+  (`evaluation/config/datasets/locomo.yaml`).
+- Dataset: LoCoMo10 with `filter_category: [5]` (matches official; 1540
   cases evaluated)
 - num_runs: 3 (judge each Q three times, average)
 - Aggregation: per-run `correct / (total - None)`; rate-limit failures
   return `Optional[bool] None` and are excluded from the denominator.
-  The judge's built-in retry (`max_retries` in the system config under
-  `evaluator.llm_judge`) handles transient errors; if a run still leaves
-  many None verdicts, re-run only the `evaluate` stage with a higher
-  `max_retries`.
 
 ## Memory-plugin-specific knobs
 
@@ -45,7 +51,8 @@ from the memory plugin:
 | `memory_mode`                            | memory-core  | noop      | memory-core     |
 | `context_engine_mode`                    | (unset)      | openviking| openviking      |
 | `ingest_session_tail` (drives file_write)| medium       | ""        | medium          |
-| OV SDK ingest (`ov_ingest.user_id_template`) | n/a       | `""` (shared) | `""` (shared) |
+| OV SDK user identity | n/a | `{conv_id}` template | fixed `eval-1` |
+| OV SDK agent identity | n/a | `{conv_id}` template | server default |
 
 The medium tail is:
 ```
@@ -53,17 +60,14 @@ The medium tail is:
  conversation to memory/<date>.md before replying.]
 ```
 
-This is the "fair compromise" between the openclaw-eval README's weak
-tail (which `seed-2.0-code` honors but `gpt-4.1-mini` ignores → 0
-memory writes) and our previous 230-character explicit directive
-(which over-elicits → memcore inflated to 0.51 above OV's 0.36). With
-the medium tail, `gpt-4.1-mini` writes ~6-8 memory bullets per LoCoMo
-session.
+The medium tail explicitly asks the agent to persist durable facts. Its exact
+effect is model-dependent, so retain the literal string when reproducing the
+locked presets.
 
-`user_id_template: ""` matches OV team's `import_to_ov.py
---no-user-agent-id` flag — both SDK ingest and the in-container OV
-plugin read from the OV server's default namespace. Cross-conversation
-name collisions are resolved by the rerank stage at QA time.
+For B2, both `user_id_template` and `agent_id_template` resolve to the
+conversation ID. The host-side SDK ingest and the in-container plugin must
+use the same tenant identity. B1 retains the fixed `user_id: eval-1` required
+by its locked baseline.
 
 ## Prerequisites
 
@@ -72,11 +76,11 @@ name collisions are resolved by the rerank stage at QA time.
    assistant payload via `findLast`; a stale image with the old `payloads[0]`
    bridge silently grades the preamble instead of the answer.
    - `openclaw-eval:7da23c3-memory-core-0000000-slim` (A1)
-   - `ghcr.io/duffycoder/openclaw-eval-plugins:7da23c3-openviking-b7e6bcb-findlast-slim`
-     (B1, B2) — a public ghcr image. The yaml
-     (`openclaw-docker-openviking-session-bundle-noop.yaml`) pins it by digest
-     (`@sha256:b73fe1ce…`) so teammates pull the exact build regardless of any
-     later re-push under the same tag; the adapter `docker pull`s it on demand.
+   - B1 uses the public GHCR image pinned by digest in its registered preset.
+   - B2 names
+     `openclaw-eval-plugins:7da23c3-openviking-2026.6.04-qidtrace-on-findlast-slim`;
+     build that source-matched image locally, or publish and digest-pin it for
+     cross-host reproduction. See the OpenViking operational notes above.
 2. **EverMemOS infra running** via `docker-compose up -d`.
 3. **OpenViking server running** on host port 1933 with `ov.conf`
    configured for Sophnet VLM/embedding and SiliconFlow rerank.
@@ -98,9 +102,8 @@ Output lands in
 
 ## Run all three sequentially
 
-Memory constraint: each system needs ~8 GB for its docker containers
-plus ~10 GB for the EverMemOS infra. Three systems concurrently exceed
-the 16 GB budget on standard nodes, so run serial:
+Run the systems sequentially unless the host is sized for all three presets'
+internal container concurrency:
 
 ```bash
 for sys in \
@@ -112,34 +115,23 @@ for sys in \
 done
 ```
 
-Estimated time per system on a single 16 GB node: 3-4 h. The judge's
-built-in retry (`max_retries` in system yaml) absorbs transient Sophnet
-rate-limit hiccups; if a run still leaves many None judgments, re-run
-only the `evaluate` stage with a higher `max_retries`.
+Runtime depends on provider quotas, host capacity, and OpenViking server
+throughput. Record those inputs alongside the result.
 
-## What numbers to expect
+## Interpreting results
 
-Reproducing with `gpt-4.1-mini` instead of `seed-2.0-code` introduces a
-model-driven offset that we cannot eliminate without doubao API access.
-Expect:
-
-- **A1** ≈ 0.40-0.50. Above OV's 0.36 because `gpt-4.1-mini` writes
-  more memory per session than `seed-2.0-code` did under the same tail.
-- **B2** ≈ 0.45-0.55. Closer to OV's 0.52 because OV does the memory
-  work; the agent's job is just QA retrieval.
-- **B1** ≈ 0.45-0.55. Typically ≤ B2 (memcore additions don't help OV
-  on commonsense / open questions and may dilute retrieval).
-
-Numbers within each system are directly comparable to one another
-because the entire stack — model, embedding, rerank, judge, dataset
-filter, aggregation — is locked.
+The percentages in the first table are historical upstream references. A new
+run is comparable only when its resolved system config, container digest,
+OpenViking server commit/config, dataset, provider endpoints, and judge config
+are all recorded. Compare repeated runs of the same public ID first; do not
+attribute a cross-ID delta solely to memory architecture.
 
 ## Caveats and known limitations
 
 - `compaction.memoryFlush` autoCapture is structurally unviable for
   LoCoMo: openclaw's gate is `threshold = contextWindow - reserveTokens
-  - softThreshold`, which yields a 104k-token trigger on gpt-4.1-mini's
-  128k window. A single ~5k session bundle never crosses it. Memcore
+  - softThreshold`, which yields a 104k-token trigger with the configured
+  128k context window. A single ~5k session bundle never crosses it. Memcore
   writes must therefore come from explicit `write` tool calls driven
   by the tail directive.
 

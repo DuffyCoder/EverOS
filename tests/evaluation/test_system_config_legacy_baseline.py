@@ -3,10 +3,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 import yaml
@@ -123,6 +126,24 @@ DOCKER_PLUGIN_EXPERIMENT_IDS = (
 
 DOCKER_PLUGIN_SYSTEM_IDS = (*DOCKER_PLUGIN_CANONICAL_IDS, *DOCKER_PLUGIN_EXPERIMENT_IDS)
 
+MEMCORE_SESSION_BUNDLE_IDS = (
+    "openclaw-docker-memcore-session-bundle",
+    "openclaw-docker-memcore-session-bundle-emptytail",
+    "openclaw-docker-memcore-session-bundle-weaktail",
+)
+
+OPENVIKING_SESSION_BUNDLE_IDS = (
+    "openclaw-docker-openviking-session-bundle-memcore",
+    "openclaw-docker-openviking-session-bundle-noop",
+    "openclaw-docker-openviking-session-bundle-noop-fixpack",
+    "openclaw-docker-openviking-session-bundle-noop-serial",
+)
+
+SESSION_BUNDLE_SYSTEM_IDS = (
+    *MEMCORE_SESSION_BUNDLE_IDS,
+    *OPENVIKING_SESSION_BUNDLE_IDS,
+)
+
 CANONICAL_ID_OVERRIDES = {"hermes": "hermes-holographic", "openclaw-hybrid": "openclaw"}
 FAKE_ENVIRONMENT = {
     "EVERMEMOS_API_KEY": "evermemos-key",
@@ -157,6 +178,44 @@ def _load_test_module(name: str) -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _common_mapping(values: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return only recursively identical fields shared by every mapping."""
+    common: dict[str, Any] = {}
+    for key in sorted(set.intersection(*(set(value) for value in values))):
+        candidates = [value[key] for value in values]
+        if all(isinstance(candidate, dict) for candidate in candidates):
+            nested = _common_mapping(candidates)
+            if nested:
+                common[key] = nested
+        elif all(candidate == candidates[0] for candidate in candidates[1:]):
+            common[key] = deepcopy(candidates[0])
+    return common
+
+
+def _subtract_mapping(config: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact recursive leaf override needed on top of ``base``."""
+    remainder: dict[str, Any] = {}
+    for key, value in config.items():
+        if key not in base:
+            remainder[key] = deepcopy(value)
+        elif isinstance(value, dict) and isinstance(base[key], dict):
+            nested = _subtract_mapping(value, base[key])
+            if nested:
+                remainder[key] = nested
+        elif value != base[key]:
+            remainder[key] = deepcopy(value)
+    return remainder
+
+
+def _has_path(config: dict[str, Any], path: tuple[str, ...]) -> bool:
+    current: object = config
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
 
 
 def test_legacy_system_id_surface_is_locked() -> None:
@@ -814,6 +873,240 @@ def test_docker_plugin_approved_deltas_are_exact() -> None:
             for entry in approved_document["deltas"].get(system_id, [])
         }
         assert actual == expected
+
+
+@pytest.mark.parametrize("system_id", SESSION_BUNDLE_SYSTEM_IDS)
+def test_session_bundle_migration_preserves_exact_immutable_baseline(
+    system_id: str,
+) -> None:
+    legacy = _load_test_module("system_config_legacy")
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]
+
+    resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+    effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
+
+    assert resolved.raw_config == expected["raw_config"]
+    assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+    assert effective == expected["effective_config"]
+    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+
+
+def test_memcore_session_bundle_base_and_leaves_are_exactly_minimal() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected_base = deepcopy(baseline[MEMCORE_SESSION_BUNDLE_IDS[0]]["raw_config"])
+    expected_base["openclaw"].pop("ingest_session_tail")
+
+    base_path = systems_root / "_bases" / "openclaw-memcore-session-bundle.yaml"
+    assert yaml.safe_load(base_path.read_text(encoding="utf-8")) == expected_base
+
+    expected_categories = ("canonical", "ablations", "ablations")
+    for system_id, category in zip(
+        MEMCORE_SESSION_BUNDLE_IDS, expected_categories, strict=True
+    ):
+        leaf_path = systems_root / category / f"{system_id}.yaml"
+        raw_config = baseline[system_id]["raw_config"]
+        assert yaml.safe_load(leaf_path.read_text(encoding="utf-8")) == {
+            "extends": "_bases/openclaw-memcore-session-bundle.yaml",
+            "openclaw": {
+                "ingest_session_tail": raw_config["openclaw"]["ingest_session_tail"]
+            },
+        }
+
+
+def test_openviking_session_bundle_base_and_leaves_are_exactly_minimal() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    raw_configs = [
+        baseline[system_id]["raw_config"] for system_id in OPENVIKING_SESSION_BUNDLE_IDS
+    ]
+    expected_base = _common_mapping(raw_configs)
+
+    base_path = systems_root / "_bases" / "openclaw-openviking.yaml"
+    assert yaml.safe_load(base_path.read_text(encoding="utf-8")) == expected_base
+
+    categories = ("canonical", "canonical", "ablations", "tooling")
+    for system_id, category, raw_config in zip(
+        OPENVIKING_SESSION_BUNDLE_IDS, categories, raw_configs, strict=True
+    ):
+        leaf_path = systems_root / category / f"{system_id}.yaml"
+        assert yaml.safe_load(leaf_path.read_text(encoding="utf-8")) == {
+            "extends": "_bases/openclaw-openviking.yaml",
+            **_subtract_mapping(raw_config, expected_base),
+        }
+
+
+def test_session_bundle_presets_use_categorized_paths_and_single_base_chain() -> None:
+    systems_root = REPO_ROOT / "evaluation" / "config" / "systems"
+    resolved_root = systems_root.resolve()
+    index = load_system_index()
+    expected = {
+        "openclaw-docker-memcore-session-bundle": (
+            "canonical",
+            "active",
+            "canonical/openclaw-docker-memcore-session-bundle.yaml",
+            "_bases/openclaw-memcore-session-bundle.yaml",
+        ),
+        "openclaw-docker-memcore-session-bundle-emptytail": (
+            "ablation",
+            "experimental",
+            "ablations/openclaw-docker-memcore-session-bundle-emptytail.yaml",
+            "_bases/openclaw-memcore-session-bundle.yaml",
+        ),
+        "openclaw-docker-memcore-session-bundle-weaktail": (
+            "ablation",
+            "experimental",
+            "ablations/openclaw-docker-memcore-session-bundle-weaktail.yaml",
+            "_bases/openclaw-memcore-session-bundle.yaml",
+        ),
+        "openclaw-docker-openviking-session-bundle-memcore": (
+            "canonical",
+            "active",
+            "canonical/openclaw-docker-openviking-session-bundle-memcore.yaml",
+            "_bases/openclaw-openviking.yaml",
+        ),
+        "openclaw-docker-openviking-session-bundle-noop": (
+            "canonical",
+            "active",
+            "canonical/openclaw-docker-openviking-session-bundle-noop.yaml",
+            "_bases/openclaw-openviking.yaml",
+        ),
+        "openclaw-docker-openviking-session-bundle-noop-fixpack": (
+            "ablation",
+            "experimental",
+            "ablations/openclaw-docker-openviking-session-bundle-noop-fixpack.yaml",
+            "_bases/openclaw-openviking.yaml",
+        ),
+        "openclaw-docker-openviking-session-bundle-noop-serial": (
+            "tooling",
+            "experimental",
+            "tooling/openclaw-docker-openviking-session-bundle-noop-serial.yaml",
+            "_bases/openclaw-openviking.yaml",
+        ),
+    }
+
+    for system_id, (category, status, leaf, base) in expected.items():
+        entry = index.systems[system_id]
+        assert entry.category == category
+        assert entry.status == status
+        assert entry.path is not None
+        assert entry.path.as_posix() == leaf
+        assert (systems_root / leaf).is_file()
+
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+        assert tuple(
+            path.relative_to(resolved_root).as_posix() for path in resolved.source_paths
+        ) == (base, leaf)
+        assert not (systems_root / f"{system_id}.yaml").exists()
+
+
+@pytest.mark.parametrize("system_id", OPENVIKING_SESSION_BUNDLE_IDS)
+def test_openviking_optional_key_presence_matches_immutable_baseline(
+    system_id: str,
+) -> None:
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    expected = baseline[system_id]["raw_config"]
+    actual = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT).raw_config
+    optional_paths = (
+        ("openclaw", "embedding"),
+        ("openclaw", "agent_llm", "idle_timeout_seconds"),
+        ("openclaw", "agent_llm", "model", "compat"),
+        ("openclaw", "ov_ingest", "user_id"),
+        ("openclaw", "ov_ingest", "user_id_template"),
+        ("openclaw", "ov_ingest", "agent_id_template"),
+        ("openclaw", "ov_ingest", "cleanup_max_retries"),
+        ("post_add_wait_seconds",),
+        ("openclaw_docker", "remove_container_on_stop"),
+    )
+
+    for path in optional_paths:
+        assert _has_path(actual, path) is _has_path(expected, path), path
+
+
+def test_session_bundle_documentation_covers_stable_operational_rules() -> None:
+    docs_root = REPO_ROOT / "evaluation" / "docs" / "system-configs"
+    catalog = (docs_root / "README.md").read_text(encoding="utf-8")
+    openviking = (docs_root / "openviking.md").read_text(encoding="utf-8")
+    normalized_openviking = " ".join(openviking.split())
+
+    for token in (
+        "index.yaml",
+        "canonical",
+        "alias",
+        "experiment",
+        "ablation",
+        "tooling",
+        "_bases",
+        "extends",
+        "secret",
+        "path",
+        "openviking.md",
+    ):
+        assert token in catalog
+
+    for token in (
+        "direct SDK ingest",
+        "plugin hooks",
+        "user_id_template",
+        "agent_id_template",
+        "user_id: eval-1",
+        "OPENVIKING_AGENT_PREFIX",
+        "240",
+        "180",
+        "serial",
+        "QA-log",
+        "diagnostic-only",
+        "not suitable for benchmark scoring",
+        "post_add_wait_seconds: 600",
+        "OPENVIKING_AUTO_CAPTURE",
+        "OPENVIKING_RECALL_SCORE_THRESHOLD",
+        "OPENVIKING_RECALL_LIMIT",
+        "OPENVIKING_RECALL_MAX_INJECTED_CHARS",
+        "cleanup_max_retries",
+        "cleanup_retry_delay_sec",
+        "remove_container_on_stop",
+        "rebuild",
+        "pinning",
+    ):
+        assert token in normalized_openviking
+
+    assert not re.search(r"outer[^\n]{0,40}\b90\s*s", openviking, re.IGNORECASE)
+    assert "377GB" not in openviking
+    assert "locomo_4_qa119" not in openviking
+    assert "Fix #4" not in openviking
+    assert "Phase 3" not in openviking
+    assert "/Data3/" not in openviking
+
+
+def test_active_session_bundle_references_use_registered_public_ids() -> None:
+    index = load_system_index()
+    active_paths = (
+        REPO_ROOT / "evaluation" / "README.md",
+        REPO_ROOT / "evaluation" / "docs" / "openclaw_adapter.md",
+        REPO_ROOT / "docs" / "locomo-fair-baseline.md",
+        REPO_ROOT / "env.template",
+        REPO_ROOT / "openclaw-eval" / "scripts" / "run_openviking_local_eval.sh",
+        REPO_ROOT / "evaluation" / "tools" / "qa_logs" / "cli.py",
+        REPO_ROOT / "evaluation" / "tools" / "qa_logs" / "raw_dump.py",
+        REPO_ROOT / "evaluation" / "tools" / "qa_logs" / "annotate.py",
+    )
+    id_pattern = re.compile(
+        r"openclaw-docker-(?:memcore|openviking)-session-bundle"
+        r"(?:-(?:emptytail|weaktail|memcore|noop(?:-fixpack|-serial)?))?"
+    )
+
+    for path in active_paths:
+        text = path.read_text(encoding="utf-8")
+        for system_id in id_pattern.findall(text):
+            assert system_id in index.systems, (path, system_id)
+        for system_id in SESSION_BUNDLE_SYSTEM_IDS:
+            assert f"{system_id}.yaml" not in text, (path, system_id)
+
+    for path in active_paths[:3]:
+        text = path.read_text(encoding="utf-8")
+        assert "system-configs/README.md" in text
+        assert "system-configs/openviking.md" in text
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

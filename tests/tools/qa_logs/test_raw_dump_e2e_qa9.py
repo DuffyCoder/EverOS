@@ -136,6 +136,11 @@ def _build_fixtures(tmp: Path) -> tuple[Path, Path, Path, Path, Path]:
         # qid-tagged telemetry summary
         f"{_log_ts(8_000)} - openviking.telemetry.execution - INFO - "
         f"[qid={QID}] Telemetry summary (id=tm_xyz): {{'operation': 'search.find', 'status': 'ok'}}",
+        # Even a matching qid tag cannot admit a line outside the exact QA window.
+        f"{_log_ts(18_500)} - openviking.retrieve.hierarchical_retriever - DEBUG - "
+        f"[qid={QID}] [retrieve] tagged outside exact window",
+        f"{_log_ts(19_000)} - openviking.retrieve.hierarchical_retriever - DEBUG - "
+        f"[qid={QID}] [RecursiveSearch] tagged rerank outside exact window",
     ]
     ov_log = tmp / "ov-server.log"
     ov_log.write_text("\n".join(rows) + "\n")
@@ -206,17 +211,17 @@ def test_e2e_storage_lists_md_files(tmp_path):
     assert "```" not in body
 
 
-def test_e2e_recall_qid_strict_excludes_rerank(tmp_path):
+def test_e2e_recall_exact_window_keeps_untagged_and_excludes_rerank(tmp_path):
     out = _dump(tmp_path)
     body = (out / "04_recall.log").read_text()
-    tag = f"[qid={QID}]"
     for ln in body.splitlines():
         if not ln or ln.startswith("#"):
             continue
-        assert tag in ln, f"untagged row leaked into recall: {ln!r}"
         assert "[RecursiveSearch]" not in ln, f"rerank line leaked into recall: {ln!r}"
         assert "openai_rerank" not in ln
         assert "recall_trace" not in ln
+    assert f"[retrieve] {CONV} untagged" in body
+    assert "tagged outside exact window" not in body
     # Vector retrieval markers ARE present
     assert "[retrieve] Step 2 completed" in body
     assert "URI: " in body and "0.8123" in body
@@ -224,26 +229,21 @@ def test_e2e_recall_qid_strict_excludes_rerank(tmp_path):
     assert "openai_embedders" in body
 
 
-def test_e2e_rerank_captures_recursive_search_plus_returned_top(tmp_path):
+def test_e2e_rerank_exact_window_captures_supported_sources(tmp_path):
     out = _dump(tmp_path)
     body = (out / "05_rerank.log").read_text()
-    tag = f"[qid={QID}]"
-    trace_qid = f'"qid": "{QID}"'
-    for ln in body.splitlines():
-        if not ln or ln.startswith("#"):
-            continue
-        assert tag in ln or trace_qid in ln, f"untagged row leaked into rerank: {ln!r}"
     # Per-URI rerank scores from RecursiveSearch
     assert "Added initial candidate" in body
     assert "0.9540" in body
     assert "did not pass threshold" in body
     # openai_rerank summary
     assert "Reranked 2 documents" in body
-    # recall_trace JSON with returned_top final result
-    assert "returned_top" in body
-    assert '"qid": "locomo_7_qa9"' in body
     # telemetry
     assert "Telemetry summary" in body
+    # recall_trace is not one of the sources collected by 05_rerank.log.
+    assert "recall_trace" not in body
+    assert "returned_top" not in body
+    assert "tagged rerank outside exact window" not in body
 
 
 def test_e2e_prompt_thinking_answer_are_three_separate_raw_files(tmp_path):

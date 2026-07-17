@@ -404,6 +404,9 @@ evermemos_custom:
 
 Repository maintainers must also update the locked public-id contract in
 `evaluation/src/config/system_index.py` and its index/baseline tests.
+See the [system-configuration guide](docs/system-configs/README.md) for the
+registry, category, inheritance, secret, and path rules. OpenViking presets
+also have dedicated [operational notes](docs/system-configs/openviking.md).
 
 ```bash
 # Run with custom config
@@ -416,8 +419,11 @@ uv run python -m evaluation.cli --dataset locomo --system evermemos_custom
 > baselines via the `openclaw-docker` adapter — prerequisites, docker images,
 > required env vars, and the per-round `round_finish.sh` reset), see
 > [`docs/locomo-fair-baseline.md`](../docs/locomo-fair-baseline.md). The
-> OpenViking system config is
-> `evaluation/config/systems/openclaw-docker-openviking-session-bundle-noop.yaml`.
+> default OpenViking public system ID is
+> `openclaw-docker-openviking-session-bundle-noop`; its implementation and
+> operational constraints are documented in the
+> [system-config guide](docs/system-configs/README.md) and
+> [OpenViking notes](docs/system-configs/openviking.md).
 
 The `openclaw-docker` adapter accepts CLI overrides for the memory and
 context-engine slots. Same syntax as `openclaw-eval/harness/build.py`.
