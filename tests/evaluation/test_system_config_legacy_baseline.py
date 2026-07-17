@@ -369,7 +369,7 @@ def test_effective_config_removes_only_proven_unused_fields() -> None:
             },
             {
                 "adapter": "evermemos_api",
-                "search": {"top_k": 20},
+                "search": {"timeout_seconds": 300, "top_k": 20},
                 "answer": {"max_retries": 3},
             },
         ),
@@ -626,6 +626,13 @@ def test_public_online_system_migration_preserves_immutable_baseline(
             expected["effective_config"], effective
         ) == {"/search/min_similarity"}
         assert effective["search"]["min_similarity"] == 0.3
+    elif system_id == "evermemos_cloud_api":
+        assert resolved.raw_config == expected["raw_config"]
+        assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
+        assert legacy.json_pointer_differences(
+            expected["effective_config"], effective
+        ) == {"/search/timeout_seconds"}
+        assert effective["search"]["timeout_seconds"] == 300
     else:
         assert resolved.raw_config == expected["raw_config"]
         assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
@@ -649,6 +656,10 @@ def test_public_online_approved_deltas_are_exact() -> None:
                 ("/min_similarity", "behavior-fix", "raw"),
                 ("/search/min_similarity", "behavior-fix", "raw"),
                 ("/search/min_similarity", "behavior-fix", "effective"),
+            }
+        elif system_id == "evermemos_cloud_api":
+            expected = {
+                ("/search/timeout_seconds", "behavior-fix", "effective"),
             }
         actual = {
             (entry["pointer"], entry["classification"], entry.get("surface", "raw"))

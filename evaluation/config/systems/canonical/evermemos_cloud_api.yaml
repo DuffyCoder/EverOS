@@ -22,7 +22,7 @@ search:
   retrieve_method: "agentic"
   memory_types: ["episodic_memory"]
   num_workers: 10
-  # Compatibility-only: the current adapter does not consume this nested timeout.
+  # Harness-enforced per-attempt timeout for the search stage.
   timeout_seconds: 300
 
 llm:

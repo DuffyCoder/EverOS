@@ -1,4 +1,9 @@
 deltas:
+  evermemos_cloud_api:
+    - pointer: /search/timeout_seconds
+      classification: behavior-fix
+      surface: effective
+      rationale: The harness now enforces the existing 300-second per-attempt search timeout.
   memos:
     - pointer: /request_interval
       classification: behavior-fix

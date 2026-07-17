@@ -88,6 +88,7 @@ class OnlineAnswerConfig(AnswerConfig):
 class HarnessSearchConfig(_StrictModel):
     response_top_k: PositiveInt | None = None
     num_workers: PositiveInt | None = None
+    timeout_seconds: PositiveNumber | None = None
 
 
 class _SystemBase(_StrictModel):
@@ -133,8 +134,6 @@ class EverMemOSAPISearchConfig(HarnessSearchConfig):
     retrieve_method: RetrieveMethod | None = None
     mode: RetrieveMethod | None = None
     memory_types: str | list[MemoryType] | None = None
-    timeout_seconds: PositiveNumber | None = None
-
     @field_validator("memory_types")
     @classmethod
     def _validate_memory_type_string(

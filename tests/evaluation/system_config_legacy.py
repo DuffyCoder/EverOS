@@ -51,10 +51,6 @@ def normalized_effective_config(system_id: str, raw: dict[str, Any]) -> dict[str
         effective.pop("request_interval", None)
     elif system_id == "memu":
         effective.pop("min_similarity", None)
-    elif system_id == "evermemos_cloud_api":
-        search = effective.get("search")
-        if isinstance(search, dict):
-            search.pop("timeout_seconds", None)
 
     return effective
 
