@@ -191,7 +191,7 @@ systems:
     category: experiment
     status: experimental
     path: experiments/openclaw-docker-stub.yaml
-    description: Experimental containerized stub-memory preset.
+    description: Experimental stub-memory preset; its image may need to be built locally.
   openclaw-docker-memcore-session-bundle-emptytail:
     adapter: openclaw-docker
     category: ablation

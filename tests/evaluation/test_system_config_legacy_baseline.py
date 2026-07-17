@@ -704,14 +704,25 @@ def test_docker_plugin_migration_preserves_effective_legacy_semantics(
 
     assert resolved.adapter == expected["adapter"] == "openclaw-docker"
     assert resolved.canonical_id == expected["canonical_id"] == system_id
-    assert legacy.json_pointer_differences(
-        expected["raw_config"], resolved.raw_config
-    ) == {"/openclaw/prompts"}
+    expected_raw_differences = {"/openclaw/prompts"}
+    if system_id == "openclaw-docker-stub":
+        expected_raw_differences.add("/openclaw_docker/image")
+    assert (
+        legacy.json_pointer_differences(expected["raw_config"], resolved.raw_config)
+        == expected_raw_differences
+    )
     assert "prompts" not in resolved.raw_config["openclaw"]
 
     effective = legacy.normalized_effective_config(system_id, resolved.raw_config)
-    assert effective == expected["effective_config"]
-    assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
+    expected_effective_differences = (
+        {"/openclaw_docker/image"} if system_id == "openclaw-docker-stub" else set()
+    )
+    assert (
+        legacy.json_pointer_differences(expected["effective_config"], effective)
+        == expected_effective_differences
+    )
+    if not expected_effective_differences:
+        assert legacy.semantic_sha256(effective) == expected["effective_sha256"]
 
 
 def test_docker_plugin_family_uses_only_common_fields_in_shared_base() -> None:
@@ -786,15 +797,23 @@ def test_docker_plugin_family_uses_categorized_leaves_and_no_flat_files() -> Non
         assert not (systems_root / f"{system_id}.yaml").exists()
 
 
-def test_docker_plugin_approved_raw_deltas_are_exact() -> None:
+def test_docker_plugin_approved_deltas_are_exact() -> None:
     approved_document = yaml.safe_load(APPROVED_DELTAS_PATH.read_text(encoding="utf-8"))
 
     for system_id in DOCKER_PLUGIN_SYSTEM_IDS:
+        expected = {("/openclaw/prompts", "structure-only", "raw")}
+        if system_id == "openclaw-docker-stub":
+            expected.update(
+                {
+                    ("/openclaw_docker/image", "behavior-fix", "raw"),
+                    ("/openclaw_docker/image", "behavior-fix", "effective"),
+                }
+            )
         actual = {
             (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
             for entry in approved_document["deltas"].get(system_id, [])
         }
-        assert actual == {("/openclaw/prompts", "structure-only", "raw")}
+        assert actual == expected
 
 
 def test_generator_build_is_deterministic_and_rejects_reserved_index(

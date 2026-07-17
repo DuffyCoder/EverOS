@@ -137,3 +137,11 @@ deltas:
       classification: structure-only
       surface: raw
       rationale: Removed an unused prompt block with no adapter consumer.
+    - pointer: /openclaw_docker/image
+      classification: behavior-fix
+      surface: raw
+      rationale: Replaced the unresolved stub build placeholder with its content-derived image tag.
+    - pointer: /openclaw_docker/image
+      classification: behavior-fix
+      surface: effective
+      rationale: The runnable stub image now uses the content-derived plugin revision.

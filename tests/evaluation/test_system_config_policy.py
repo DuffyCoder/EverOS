@@ -40,7 +40,7 @@ FAKE_ENVIRONMENT = {
 }
 
 LEGACY_EMBEDDING_REQUESTED_IDS: set[str] = set()
-LEGACY_REQUESTED_IDS = {"openclaw-docker-stub"}
+LEGACY_REQUESTED_IDS: set[str] = set()
 
 
 def _raw_config(**updates: Any) -> dict[str, Any]:
@@ -731,24 +731,15 @@ def test_all_shipped_systems_have_the_exact_legacy_policy_surface() -> None:
         for system_id, findings in seen_findings.items()
         if findings and findings[0].code == "legacy-embedding-api-key"
     } == LEGACY_EMBEDDING_REQUESTED_IDS
-    assert seen_findings["openclaw-docker-stub"][0].code == (
-        "legacy-docker-image-placeholder"
-    )
+    assert all(not findings for findings in seen_findings.values())
 
 
-def test_strict_loader_rejects_only_the_remaining_shipped_legacy_id() -> None:
+def test_strict_loader_accepts_all_shipped_ids() -> None:
     index = load_system_index(DEFAULT_SYSTEM_INDEX_PATH)
-    rejected: set[str] = set()
 
     for system_id in sorted(index.systems):
-        try:
-            resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
-        except SystemConfigError:
-            rejected.add(system_id)
-        else:
-            assert resolved.policy_findings == ()
-
-    assert rejected == LEGACY_REQUESTED_IDS
+        resolved = resolve_system_config(system_id, environ=FAKE_ENVIRONMENT)
+        assert resolved.policy_findings == ()
 
 
 def test_loader_applies_raw_policy_before_environment_substitution(

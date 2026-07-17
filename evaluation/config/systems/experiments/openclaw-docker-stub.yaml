@@ -21,8 +21,7 @@ openclaw:
       - "LLM_MODEL"
 
 openclaw_docker:
-  # Temporary legacy placeholder retained for the structure-only migration.
-  image: "openclaw-eval:7da23c3-stub-PLUGIN_REV-slim"
+  image: "openclaw-eval:7da23c3-stub-c1e9088-slim"
   max_concurrent_containers: 1
   mem_limit: "2g"
   per_rpc_timeout_seconds: 60

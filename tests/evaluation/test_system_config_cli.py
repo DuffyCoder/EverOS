@@ -232,7 +232,7 @@ def test_prepare_revalidates_cli_image_override_with_runtime_policy(
     assert "runtime policy" in capsys.readouterr().err
 
 
-def test_prepare_keeps_exact_legacy_stub_visible_until_image_migration() -> None:
+def test_prepare_shipped_stub_has_no_legacy_policy_findings() -> None:
     resolution = resolve_system_for_cli(
         "openclaw-docker-stub", environ=FAKE_ENVIRONMENT
     )
@@ -247,9 +247,7 @@ def test_prepare_keeps_exact_legacy_stub_visible_until_image_migration() -> None
         build_missing=False,
     )
 
-    assert [finding.code for finding in prepared.runtime_policy_findings] == [
-        "legacy-docker-image-placeholder"
-    ]
+    assert prepared.runtime_policy_findings == ()
 
 
 def _synthetic_resolution(tmp_path: Path) -> ResolvedSystemConfig:
