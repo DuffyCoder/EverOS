@@ -23,9 +23,6 @@ dataset_overrides:
     # Kept explicit for compatibility with the historical preset.
     num_workers: 1
 
-# Compatibility-only: the current adapter does not consume this field.
-min_similarity: 0.3
-
 llm:
   provider: "openai"
   model: "${LLM_MODEL}"
@@ -36,6 +33,7 @@ llm:
 
 search:
   top_k: 20
+  min_similarity: 0.3
 
 answer:
   max_retries: 3

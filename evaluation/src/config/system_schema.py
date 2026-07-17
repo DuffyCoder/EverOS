@@ -190,6 +190,10 @@ class MemosSystem(_OnlineSystemBase):
     search: OnlineSearchConfig
 
 
+class MemuSearchConfig(OnlineSearchConfig):
+    min_similarity: Probability = 0.3
+
+
 class MemuSystem(_OnlineSystemBase):
     adapter: Literal["memu"]
     api_key: NonEmptyStr
@@ -201,8 +205,7 @@ class MemuSystem(_OnlineSystemBase):
     task_timeout: PositiveInt
     valid_users: list[NonEmptyStr] | None = None
     mock_mode: bool | None = None
-    min_similarity: Probability | None = None
-    search: OnlineSearchConfig
+    search: MemuSearchConfig
 
 
 class ZepSearchConfig(OnlineSearchConfig):

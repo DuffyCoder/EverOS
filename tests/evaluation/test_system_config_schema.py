@@ -147,8 +147,7 @@ def _valid_configs() -> dict[str, dict[str, Any]]:
             "task_timeout": 4800,
             "valid_users": ["user-1"],
             "mock_mode": False,
-            "min_similarity": 0.3,
-            "search": {"top_k": 20},
+            "search": {"top_k": 20, "min_similarity": 0.3},
             **deepcopy(common_online),
         },
         "zep": {
@@ -830,6 +829,55 @@ def test_memos_rejects_unused_request_interval_at_top_level() -> None:
 
     with pytest.raises(SystemSchemaError, match="request_interval"):
         validate_system_config("memos", config)
+
+
+def test_memu_rejects_legacy_root_similarity() -> None:
+    config = deepcopy(VALID_CONFIGS["memu"])
+    config["min_similarity"] = 0.3
+
+    with pytest.raises(SystemSchemaError, match="min_similarity"):
+        validate_system_config("memu", config)
+
+
+def test_memu_dataset_overrides_reject_legacy_root_similarity() -> None:
+    config = deepcopy(VALID_CONFIGS["memu"])
+    config["dataset_overrides"] = {
+        "future-dataset": {"min_similarity": 0.3}
+    }
+
+    with pytest.raises(
+        SystemSchemaError,
+        match=r"dataset_overrides\.future-dataset\.min_similarity",
+    ):
+        validate_system_config("memu", config)
+
+
+@pytest.mark.parametrize("min_similarity", [0, 0.65, 1])
+def test_memu_search_accepts_probability_similarity(
+    min_similarity: int | float,
+) -> None:
+    config = deepcopy(VALID_CONFIGS["memu"])
+    config["search"]["min_similarity"] = min_similarity
+
+    assert validate_system_config("memu", config) is config
+
+
+@pytest.mark.parametrize("min_similarity", [-0.01, 1.01, "0.65", None])
+def test_memu_search_rejects_invalid_similarity(min_similarity: object) -> None:
+    config = deepcopy(VALID_CONFIGS["memu"])
+    config["search"]["min_similarity"] = min_similarity
+
+    with pytest.raises(SystemSchemaError, match=r"search\.min_similarity"):
+        validate_system_config("memu", config)
+
+
+def test_memu_dataset_override_accepts_nested_search_similarity() -> None:
+    config = deepcopy(VALID_CONFIGS["memu"])
+    config["dataset_overrides"] = {
+        "future-dataset": {"search": {"min_similarity": 0.8}}
+    }
+
+    assert validate_system_config("memu", config) is config
 
 
 def test_memos_dataset_overrides_reject_unused_request_interval() -> None:

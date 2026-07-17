@@ -56,6 +56,9 @@ class MemuAdapter(OnlineAPIAdapter):
         self.task_check_interval = config.get("task_check_interval", 3)
         self.task_timeout = config.get("task_timeout", 90)
         self.max_retries = config.get("max_retries", 5)
+        self.min_similarity = float(
+            (config.get("search") or {}).get("min_similarity", 0.3)
+        )
 
         # Get valid_users list for filtering (used for retrying failed tasks)
         self.valid_users = config.get("valid_users", None)
@@ -463,7 +466,7 @@ class MemuAdapter(OnlineAPIAdapter):
         """
         import asyncio
 
-        min_similarity = kwargs.get("min_similarity", 0.3)
+        min_similarity = kwargs.get("min_similarity", self.min_similarity)
 
         try:
             url = f"{self.base_url}/api/v1/memory/retrieve/related-memory-items"
@@ -536,7 +539,7 @@ class MemuAdapter(OnlineAPIAdapter):
         Returns:
             SearchResult with custom formatted_context
         """
-        min_similarity = kwargs.get("min_similarity", 0.3)
+        min_similarity = kwargs.get("min_similarity", self.min_similarity)
 
         # Extract categories_summary from first result's metadata
         categories_summary = (
@@ -601,7 +604,7 @@ class MemuAdapter(OnlineAPIAdapter):
         Returns:
             SearchResult with custom formatted_context
         """
-        min_similarity = kwargs.get("min_similarity", 0.3)
+        min_similarity = kwargs.get("min_similarity", self.min_similarity)
 
         # Extract categories summaries from results' metadata
         categories_summary_a = (

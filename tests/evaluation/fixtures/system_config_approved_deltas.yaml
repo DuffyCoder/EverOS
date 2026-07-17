@@ -12,6 +12,19 @@ deltas:
       classification: behavior-fix
       surface: effective
       rationale: The effective config now exposes the adapter-consumed ten-requests-per-second limit without changing runtime behavior.
+  memu:
+    - pointer: /min_similarity
+      classification: behavior-fix
+      surface: raw
+      rationale: Removed the legacy root field that the MemU adapter never consumed.
+    - pointer: /search/min_similarity
+      classification: behavior-fix
+      surface: raw
+      rationale: Moved the threshold into the search block consumed by the MemU adapter.
+    - pointer: /search/min_similarity
+      classification: behavior-fix
+      surface: effective
+      rationale: The effective config now exposes the configured threshold used by MemU retrieval.
   hermes:
     - pointer: /answer/max_retries
       classification: structure-only

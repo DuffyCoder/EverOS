@@ -616,6 +616,16 @@ def test_public_online_system_migration_preserves_immutable_baseline(
             expected["effective_config"], effective
         ) == {"/requests_per_second"}
         assert effective["requests_per_second"] == 10
+    elif system_id == "memu":
+        assert legacy.json_pointer_differences(
+            expected["raw_config"], resolved.raw_config
+        ) == {"/min_similarity", "/search/min_similarity"}
+        assert "min_similarity" not in resolved.raw_config
+        assert resolved.raw_config["search"]["min_similarity"] == 0.3
+        assert legacy.json_pointer_differences(
+            expected["effective_config"], effective
+        ) == {"/search/min_similarity"}
+        assert effective["search"]["min_similarity"] == 0.3
     else:
         assert resolved.raw_config == expected["raw_config"]
         assert legacy.semantic_sha256(resolved.raw_config) == expected["raw_sha256"]
@@ -633,6 +643,12 @@ def test_public_online_approved_deltas_are_exact() -> None:
                 ("/request_interval", "behavior-fix", "raw"),
                 ("/requests_per_second", "behavior-fix", "raw"),
                 ("/requests_per_second", "behavior-fix", "effective"),
+            }
+        elif system_id == "memu":
+            expected = {
+                ("/min_similarity", "behavior-fix", "raw"),
+                ("/search/min_similarity", "behavior-fix", "raw"),
+                ("/search/min_similarity", "behavior-fix", "effective"),
             }
         actual = {
             (entry["pointer"], entry["classification"], entry.get("surface", "raw"))
